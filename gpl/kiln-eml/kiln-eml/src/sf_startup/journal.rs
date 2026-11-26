@@ -58,10 +58,16 @@ use super::resource_values::WriteOwner;
 pub const PACKAGE_ENTRIES: usize = 4096;
 /// The most entries a journal keeps in all.
 pub const TOTAL_ENTRIES: usize = 32768;
-/// Format 2: the most member paths one changed resource lists; over that it is the whole resource (`[""]`).
-pub const RESOURCE_PATHS: usize = 64;
+/// Format 2: the most member paths one changed resource lists; over that it is the whole resource (`[""]`). Room for a
+/// path per element of the game's largest shared resource (2,542 recipes in one `RecipeRegistryResource`) several times
+/// over: below it a recipe or loot mod is named on the elements and fields it wrote, not on every one.
+pub const RESOURCE_PATHS: usize = 16384;
 /// Format 2: the longest member path (bytes); a longer one is cut back to the member that holds it.
 pub const PATH_BYTES: usize = 256;
+/// Format 2: the most bytes the member paths of one journal take as written (each path with its quotes and comma); a
+/// changed resource whose paths would go past it is listed whole (`[""]`). With the entry bounds this keeps a journal
+/// well below the 16 MiB a reader takes (`StartupJournal::read`, Kiln's reader): past that it would name nobody.
+pub const JOURNAL_PATH_BYTES: usize = 8 << 20;
 
 /// A resource a package created, the `ordinal`-th (1-based) of its creations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -430,6 +436,7 @@ impl Journal {
         let unnamed: Vec<&str> = record.packages.iter().filter_map(|p| p.id.as_deref()).filter(|id| !is_sf_id(id)).collect();
         let mut entries = 0usize;
         let mut truncated = false;
+        let mut path_bytes = 0usize;
         let mut bound = |w: &mod_loader::lua::PackageWrites| -> Changes {
             let mut c = Changes { id: w.id.clone(), ..Changes::default() };
             let mut room = |c: &mut Changes| {
@@ -461,7 +468,13 @@ impl Journal {
                     break;
                 }
                 let created_by = x.created_by.clone().filter(|(by, _)| !unnamed.contains(&by.as_str()));
-                c.changed.push(Changed { id: x.id, created_by, paths: Some(bounded_paths(&x.paths)) });
+                let mut paths = bounded_paths(&x.paths);
+                let cost: usize = paths.iter().map(|p| p.len() + 3).sum();
+                if path_bytes + cost > JOURNAL_PATH_BYTES {
+                    paths = vec![String::new()]; // past the journal's path budget: the whole resource
+                }
+                path_bytes += paths.iter().map(|p| p.len() + 3).sum::<usize>();
+                c.changed.push(Changed { id: x.id, created_by, paths: Some(paths) });
             }
             c
         };
@@ -671,6 +684,49 @@ mod tests {
         };
         let b = Journal::from_eml(&big);
         assert!(b.truncated && b.packages[0].truncated && b.packages[0].changed.len() == PACKAGE_ENTRIES);
+    }
+
+    // Review (the path bounds): a mod that writes one field of a hundred recipes, elements of one shared resource, keeps
+    // a path per recipe (64 made it the whole resource: named on every field of every recipe); and a record whose paths
+    // would make the file larger than a reader takes (16 MiB) stays below it, the resources past its path budget listed
+    // whole.
+    #[test]
+    fn the_eml_record_keeps_a_path_per_element_and_stays_readable() {
+        use mod_loader::lua::{PackageWrites, WriteRecord, WrittenResource};
+        let recipes: Vec<String> = (0..100).map(|i| format!("recipes[{i}].craftingDuration")).collect();
+        let one = WriteRecord {
+            packages: vec![PackageWrites {
+                id: Some("faster".into()),
+                changed: vec![WrittenResource { id: id(1), created_by: None, paths: recipes.clone() }],
+                ..PackageWrites::default()
+            }],
+            unattributed: PackageWrites::default(),
+        };
+        let mut sorted = recipes.clone();
+        sorted.sort();
+        assert_eq!(Journal::from_eml(&one).packages[0].changed[0].paths.as_deref(), Some(&sorted[..]), "a path per recipe");
+        let long = |r: u32, i: u32| format!("m{r:05}.{}.f{i:02}", "x".repeat(230));
+        let big = WriteRecord {
+            packages: (0..2u32)
+                .map(|p| PackageWrites {
+                    id: Some(format!("big{p}")),
+                    changed: (0..1800u32)
+                        .map(|r| WrittenResource { id: id(p * 10_000 + r), created_by: None, paths: (0..20).map(|i| long(r, i)).collect() })
+                        .collect(),
+                    ..PackageWrites::default()
+                })
+                .collect(),
+            unattributed: PackageWrites::default(),
+        };
+        let j = Journal::from_eml(&big);
+        let header = Header { stem: "enshrouded", generation: [1; 32], receipt_sha256: [1; 32], dialect: "eml", attempt: "first" };
+        let text = j.json(&header, &|_| None);
+        assert!(text.len() < 16 << 20, "the record is {} bytes: more than a reader takes", text.len());
+        let first = &j.packages[0].changed[0];
+        assert_eq!(first.paths.as_ref().map(Vec::len), Some(20), "the first resources keep their paths");
+        let last = j.packages[1].changed.last().unwrap();
+        assert_eq!(last.paths.as_deref(), Some(&[String::new()][..]), "past the budget: the whole resource");
+        assert_eq!(j.packages.iter().map(|p| p.changed.len()).sum::<usize>(), 3600, "every resource is still listed");
     }
 
     // Over the bounds: a package keeps its first PACKAGE_ENTRIES entries and is truncated, ordinals keep counting, the
