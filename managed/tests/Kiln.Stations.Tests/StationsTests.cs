@@ -127,7 +127,7 @@ public sealed unsafe class StationsTests : IDisposable
         public uint[] LastChests = [];
         public bool HasChests { get; set; } = true;
         public bool HasLinkedFills { get; set; } = true;  // GitHub #132
-        public bool HasItemFills { get; set; } = true;    // GitHub #132, 0.2.0-dev.31.17: the per-ingredient transfer
+        public bool HasItemFills { get; set; } = true;    // GitHub #132, 0.2.0-dev.31.16: the per-ingredient transfer
         // base_stock_with_stations (0.2.0-dev.29.17): off unless a test sets it
         public bool HasStockWithStations { get; set; }
         public StationsNative.Stack[] StockWithStations = [];
@@ -308,7 +308,7 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(64, (int)Marshal.OffsetOf<StationsNative.Request>("Keep"));
         Assert.Equal(88, (int)Marshal.OffsetOf<StationsNative.Request>("ChestCount"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Request>("Chests"));
-        Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Request>("Item"));      // 0.2.0-dev.31.17: reserved[0] before
+        Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Request>("Item"));      // 0.2.0-dev.31.16: reserved[0] before
         Assert.Equal(76, (int)Marshal.OffsetOf<StationsNative.Request>("Reserved"));
         Assert.Equal(8 + 39 * sizeof(nint), sizeof(StationsNative.Table));          // fill_flags after set_build_stock
         Assert.Equal(StationsNative.TableBuild + sizeof(nint), StationsNative.TableItemFills);
@@ -1134,7 +1134,7 @@ public sealed unsafe class StationsTests : IDisposable
     [Fact]
     public void TheIngredientRowsTransferTakesFromAPlayersFillOptedLinks()
     {
-        // GitHub #132 (0.2.0-dev.31.17): the per-ingredient "+1" / "+n" of a production station's screen
+        // GitHub #132 (0.2.0-dev.31.16): the per-ingredient "+1" / "+n" of a production station's screen
         using var kiln = Kiln();
         AddStation(5, 0, x: 3);    // the player, in the forge's base
         var player = new EntityId(5);
@@ -1223,7 +1223,7 @@ public sealed unsafe class StationsTests : IDisposable
     [Fact]
     public void AnIngredientPressKilnCannotQueueIsLeftToTheGame()
     {
-        // GitHub #132 (0.2.0-dev.31.17): RunItemPress false = the press is not canceled (the game's own transfer runs and
+        // GitHub #132 (0.2.0-dev.31.16): RunItemPress false = the press is not canceled (the game's own transfer runs and
         // refuses as before); never a canceled press with nothing queued
         using var kiln = Kiln();
         var press = new ItemPress(new EntityId(3300), 0x10, 7, new EntityId(5));

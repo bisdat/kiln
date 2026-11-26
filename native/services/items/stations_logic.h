@@ -50,7 +50,7 @@ inline bool fill_chests_ok(const KilnStationRequest& r) {
     return true;
 }
 
-// GitHub #132 (0.2.0-dev.31.17): the most one item fill moves (the game's AutoTransferItem takes a u16 amount)
+// GitHub #132 (0.2.0-dev.31.16): the most one item fill moves (the game's AutoTransferItem takes a u16 amount)
 constexpr uint32_t kMaxItemFill = 0xFFFF;
 
 // A FILL with KILN_STATION_FILL_ITEM (the station screen's per-ingredient transfer): one item, an amount in items, no
@@ -73,7 +73,7 @@ inline bool request_valid(const KilnStationRequest& r) {
                              KILN_STATION_AFTER_CRAFT | KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED |
                              KILN_STATION_FILL_NO_OUTPUTS | KILN_STATION_FILL_LINKED | KILN_STATION_FILL_ITEM;
     if (r.flags & ~all) return false;
-    // `item` (reserved[0] before 0.2.0-dev.31.17) is read only by an item fill: anything else names none
+    // `item` (reserved[0] before 0.2.0-dev.31.16) is read only by an item fill: anything else names none
     const bool item_fill = r.action == KILN_STATION_FILL && (r.flags & KILN_STATION_FILL_ITEM);
     if (r.item != 0 && !item_fill) return false;
     switch (r.action) {
@@ -879,7 +879,7 @@ int craft_pay(std::vector<CraftCost>* lines, const std::vector<uint32_t>& order,
     return kCraftPaid;
 }
 
-// ---- GitHub #132 (0.2.0-dev.31.17): the station screen's per-ingredient transfer (docs/re/stations.md section 10.9) ----
+// ---- GitHub #132 (0.2.0-dev.31.16): the station screen's per-ingredient transfer (docs/re/stations.md section 10.9) ----
 // The game's AutoTransferItem moves exactly `amount` of one item: the player's bag first, then the base's Magic chests,
 // all or nothing. Kiln's item fill is that as a one-input fill of count 1 in ADD and EXACT: `loaded` is the station's
 // pile, so game_need is exactly the amount, and pay_shares splits it as a recipe fill splits an input: the bag and the

@@ -343,7 +343,7 @@ public sealed class CraftStockTests : IDisposable
     [Fact]
     public void A_production_station_screen_counts_the_fill_opted_links_its_transfer_buttons_move()
     {
-        // GitHub #132 (0.2.0-dev.31.17): the per-ingredient "+1" / "+n" take from the player's fill-opted links now
+        // GitHub #132 (0.2.0-dev.31.16): the per-ingredient "+1" / "+n" take from the player's fill-opted links now
         // (Kiln's item fill), so the server names what those rows may count: the bag, the Magic chests and those links
         var applied = new List<CraftStockRows>();
         CraftStock.HelloHook = _ => { };
@@ -397,7 +397,7 @@ public sealed class CraftStockTests : IDisposable
     [Fact]
     public void Every_message_of_the_craftstock_channel_has_an_id_of_its_own()
     {
-        // review of 0.2.0-dev.31.17 (GitHub #132): the station rows took message id 5, which DyeStock's rows hold on the same
+        // review of 0.2.0-dev.31.16 (GitHub #132): the station rows took message id 5, which DyeStock's rows hold on the same
         // channel. NetChannel.Register threw in DyeStock.Attach, so CraftStock.Start gave the channel up (no dye, lock or
         // build stock) and, on a client, never watched the screen (no crafting stock at all, the station rows included).
         // The real registration on a fresh channel, with the shared stocks' attach flags cleared for it and put back after.

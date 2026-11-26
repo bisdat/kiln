@@ -128,7 +128,7 @@ internal static partial class StationsCore
         if (e.Canceled || !e.CanCancel || !string.Equals(e.Name, CraftingActionName, StringComparison.Ordinal)) return;
         if (e.Payload.Length >= 0x41 && BinaryPrimitives.ReadUInt32LittleEndian(e.Payload[8..]) != 0)
         {
-            OnItemPress(e);  // GitHub #132 (0.2.0-dev.31.17): a row's per-ingredient "+1" / "+n"
+            OnItemPress(e);  // GitHub #132 (0.2.0-dev.31.16): a row's per-ingredient "+1" / "+n"
             return;
         }
         var options = SourceFill(e.Player.Entity, e.Payload, CanAccessInventories(e.Player), out var station, out var why);
@@ -231,7 +231,7 @@ internal static partial class StationsCore
         return plan.Status is StationActionStatus.Done or StationActionStatus.Partial && plan.CraftsPlanned > 0 ? (uint)plan.CraftsPlanned : 0;
     }
 
-    // ---- GitHub #132 (0.2.0-dev.31.17): the station screen's per-ingredient "+1" / "+n" (docs/re/stations.md §10.9) ----
+    // ---- GitHub #132 (0.2.0-dev.31.16): the station screen's per-ingredient "+1" / "+n" (docs/re/stations.md §10.9) ----
     // The row's transfer is AutomaticTransfer with an item (UI command 0x39): on the server the game's AutoTransferItem
     // from the bag and the player's base list A. When those cannot cover it and the player's fill-opted links can, Kiln
     // cancels the held press and runs it as its own item fill (KILN_STATION_FILL_ITEM | FILL_LINKED): the same item and
@@ -336,7 +336,7 @@ internal static partial class StationsCore
     }
 }
 
-/// <summary>A row's per-ingredient press Kiln runs as its own item fill (GitHub #132, 0.2.0-dev.31.17).</summary>
+/// <summary>A row's per-ingredient press Kiln runs as its own item fill (GitHub #132, 0.2.0-dev.31.16).</summary>
 internal sealed record ItemPress(EntityId Station, uint Item, int Amount, EntityId Player);
 
 /// <summary>The opt-ins beside the save: kiln.saves' entity attachments under the scope <c>kiln:stations</c> (template and

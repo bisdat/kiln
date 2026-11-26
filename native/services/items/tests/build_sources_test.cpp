@@ -259,7 +259,7 @@ int main() {
         CHECK(look(0,10,5,40)==45);
         in_base = true; player_placed = false; g_build_dirty.store(true); build_cache_refresh(7);
         CHECK(look(0,10,5,40)==45);                                                     // no position: nothing left out
-        // GitHub #132 (0.2.0-dev.31.17): the FILLS rows leave the base's Magic chests out as well (the station screen's
+        // GitHub #132 (0.2.0-dev.31.16): the FILLS rows leave the base's Magic chests out as well (the station screen's
         // rows add the bag and those chests themselves, and the item fill pays them first): a fill link to BUILD counts once
         {
             const uint64_t f1 = add(BUILD, KILN_CRAFT_SOURCE_FILLS), f2 = add(BUILD2, KILN_CRAFT_SOURCE_FILLS);

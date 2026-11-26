@@ -238,7 +238,7 @@ enum {
                                             revalidated in the transaction (the player's CanAccessInventories and login, an
                                             initialized container that is no person and no production station, its item
                                             filter); a container is taken from once per item */
-    KILN_STATION_FILL_ITEM = 0x0200u,    /* FILL (since 0.2.0-dev.31.17, GitHub #132; only where fill_flags() names it): the
+    KILN_STATION_FILL_ITEM = 0x0200u,    /* FILL (since 0.2.0-dev.31.16, GitHub #132; only where fill_flags() names it): the
                                             station screen's per-ingredient "+1" / "+n", the game's AutoTransferItem
                                             (docs/re/stations.md section 10.9): exactly `crafts` (1..65535) of `item` into
                                             the station, all or nothing, in one transaction: the player's bag and the
@@ -263,7 +263,7 @@ typedef struct KilnStationRequest {
                                entity, 1..1023); 0 = never */
     uint32_t keep_count;    /* FILL: entries in keep (0..64) */
     const KilnStationStack* keep; /* FILL: leave at least this many of each item in the base's stock (copied by submit) */
-    KilnItemId item;        /* FILL with KILN_STATION_FILL_ITEM: the item to move (since 0.2.0-dev.31.17; reserved[0]
+    KilnItemId item;        /* FILL with KILN_STATION_FILL_ITEM: the item to move (since 0.2.0-dev.31.16; reserved[0]
                                before, so 0 everywhere else) */
     uint32_t reserved[3];   /* 0 */
     /* since ordinary chests (a request of KILN_STATION_REQUEST_V1 bytes has none of these; submit copies the list): */
@@ -437,7 +437,7 @@ enum { KILN_CRAFT_SOURCE_LOCKS = 1u };
  * from it (capability crafting.build_sources). Both default off: a link serves crafting only. */
 enum { KILN_CRAFT_SOURCE_FILLS = 2u, KILN_CRAFT_SOURCE_BUILDING = 4u };
 /* source_stock: only the FILLS / BUILDING links, as KILN_CRAFT_SOURCE_STOCK_LOCKS does for locks (since 0.2.0-dev.31.12).
- * Both leave out the Magic chests of the base the player stands in (FILLS since 0.2.0-dev.31.17): the bag and those chests
+ * Both leave out the Magic chests of the base the player stands in (FILLS since 0.2.0-dev.31.16): the bag and those chests
  * pay first and are counted apart, so a link to one of them never counts twice. */
 enum { KILN_CRAFT_SOURCE_STOCK_FILLS = 4u, KILN_CRAFT_SOURCE_STOCK_BUILDING = 8u };
 /* The request's size before flags: an older caller's request (no flags, no lock use). */
@@ -598,7 +598,7 @@ typedef struct KilnStationsApi {
      * all or nothing. Any thread. KILN_ERR_INVALID_ARGUMENT: on over 1, count over the limit, rows null with count set, an
      * item 0. */
     KilnResult(KILN_CALL* set_build_stock)(uint32_t on, const KilnStationStack* rows, uint32_t count);
-    /* ---- since 0.2.0-dev.31.17 (GitHub #132; header.size tells whether this is here) ---- */
+    /* ---- since 0.2.0-dev.31.16 (GitHub #132; header.size tells whether this is here) ---- */
     /* The KILN_STATION_FILL_* request flags plan and submit take for a FILL on this build: KILN_STATION_FILL_ITEM only
      * where the game's item transfer resolved (feature stations.fill_items) and stations.fill is on. Any thread. */
     uint32_t(KILN_CALL* fill_flags)(void);

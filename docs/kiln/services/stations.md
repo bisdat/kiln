@@ -27,8 +27,8 @@ Capabilities (sigdb features, `server.d/stations.json`, the client's hosted worl
 | `stations.output_sources` | `Stations.SetOutputSource`, and fills taking from opted-in stations' finished items ([Station outputs as crafting stock](#station-outputs-as-crafting-stock), since 0.2.0-dev.29.17) |
 | `stations.craft_sources` | the same opt-in, as the last source of a player's craft ([Station outputs in a craft](#station-outputs-in-a-craft)); lowered at the first world when kiln.rules' payment hook is not in (Creative Mode runs, kiln-rules.dll missing) |
 | `stations.craft_ui` | a Kiln client's crafting menu can offer a craft those outputs complete: since 0.2.0-dev.31 through the game's own dry run, when its payment is short only of materials the server's snapshot covers ([What each client shows](#what-each-client-shows), `client.d/stations-craft-ui.json`); lowered when kiln.rules' payment hook is not in. A vanilla client has neither |
-| `stations.stock_ui` | a Kiln client's crafting menus' ingredient rows ("available") count those outputs ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); since 0.2.0-dev.30.8 a production station's screen keeps the game's counts in its rows, and since 0.2.0-dev.31.17 counts there what their transfer buttons move with the player's fill-opted links ([Fills from linked sources](#fills-from-linked-sources)). Hooked only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
-| `stations.fill_items` | the server runs a production station row's per-ingredient "+1" / "+n" (the game's item transfer) as Kiln's item fill when only the player's fill-opted links cover it ([Fills from linked sources](#fills-from-linked-sources), `server.d/stations.json`, since 0.2.0-dev.31.17); off with `stations.fill` |
+| `stations.stock_ui` | a Kiln client's crafting menus' ingredient rows ("available") count those outputs ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); since 0.2.0-dev.30.8 a production station's screen keeps the game's counts in its rows, and since 0.2.0-dev.31.16 counts there what their transfer buttons move with the player's fill-opted links ([Fills from linked sources](#fills-from-linked-sources)). Hooked only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
+| `stations.fill_items` | the server runs a production station row's per-ingredient "+1" / "+n" (the game's item transfer) as Kiln's item fill when only the player's fill-opted links cover it ([Fills from linked sources](#fills-from-linked-sources), `server.d/stations.json`, since 0.2.0-dev.31.16); off with `stations.fill` |
 | `stations.fill_ui` | a Kiln client's station screen offers its "+1" / "+10" fill when only those outputs can cover it ([The station screen's fill button](#the-station-screens-fill-button), `client.d/stations-fill-ui.json`, since 0.2.0-dev.29.19); its hook goes in only once a Kiln server's craft-stock snapshot is on. A vanilla client has none |
 | `stations.client_view` | `ClientStations` (since 0.2.0-dev.31.13, mod API 0.2.22): a game client's own station cache, read-only, also on a joined client ([On a joined client: the client's own station view](#on-a-joined-client-the-clients-own-station-view), `client.d/stations-client-view.json`). Off on a dedicated server, on a build sigdb does not qualify, after a fault |
 
@@ -366,7 +366,7 @@ through `Stations.SetOutputSource`, under its existing per-item safety rules. A 
 0.2.0-dev.31.12 it can also serve production-station fills (`Fills`, [below](#fills-from-linked-sources)), block
 placements (`Building`, [below](#building-from-linked-sources)) and locks (`Locks`); each is off by default. The
 transfer buttons of a production station's ingredient rows (the game's own item transfer) move from the bag and the Magic
-chests and, since 0.2.0-dev.31.17, from the player's fill-opted links; those rows count the same (see below).
+chests and, since 0.2.0-dev.31.16, from the player's fill-opted links; those rows count the same (see below).
 
 `CraftSourceOptions.Filter` is `Deny` by default: `Items = null` or an empty collection allows every item. `Allow` offers
 only the set (an empty set offers nothing). The item ids are copied eagerly on registration: changing the original
@@ -403,7 +403,7 @@ keeps the game's menu counts. A missing input snapshot is never truncated: over 
 A **production station's screen** (a mill, a kiln, a smelter: `GameScreen.Crafting.IsFactory`) counts in its ingredient
 rows only what their transfer buttons move. Those buttons are the game's own item transfer, from the bag and the Magic
 chests, so since 0.2.0-dev.30.8 a Kiln client shows the game's own counts there: no opted-in station outputs and no
-crafting-only links. Since 0.2.0-dev.31.17 the buttons also take from the player's `Fills` links
+crafting-only links. Since 0.2.0-dev.31.16 the buttons also take from the player's `Fills` links
 ([Fills from linked sources](#fills-from-linked-sources)), and the rows count them: the server sends per item those links
 hold the bag, the Magic chests and the links together (`kiln:craftstock` message 10); a server without that sends nothing and
 the rows keep the game's counts. Through 0.2.0-dev.30.7 the rows counted outputs and every link (9999+ of an ingredient
@@ -514,7 +514,7 @@ stations (a forge, a smelter, a charcoal kiln...) for its player:
   Magic chests cannot cover the fill but the fill-opted links can, Kiln.Blocks runs the press as Kiln's fill (the game's
   is canceled). A Kiln client's "+1" / "+10" light up from the server's answer; a vanilla client's stay greyed when the bag
   and the Magic chests alone fall short (its game never sends that press).
-- **The ingredient rows' own "+1" / "+n"** (since 0.2.0-dev.31.17, capability `stations.fill_items`; the game's item
+- **The ingredient rows' own "+1" / "+n"** (since 0.2.0-dev.31.16, capability `stations.fill_items`; the game's item
   transfer of one ingredient): when the bag and the Magic chests of the player's base cannot cover the amount and the
   fill-opted links can, the server runs the press as Kiln's item fill: exactly that amount of that item, the bag and the
   Magic chests first, then `BeforeStationOutputs` links, then `AfterStationOutputs` links, in one transaction that a short
@@ -1079,7 +1079,7 @@ native slot for them.
 
 ## Changelog
 
-- **0.2.0-dev.31.17 (GitHub #132):** a production station row's per-ingredient "+1" / "+n" take from the player's
+- **0.2.0-dev.31.16 (GitHub #132):** a production station row's per-ingredient "+1" / "+n" take from the player's
   fill-opted links when the bag and the Magic chests fall short (Kiln's item fill, `stations.fill_items`), and a Kiln
   client's rows count those links. Thanks Fuzen777.
 - **0.2.0-dev.31.13:** `ClientStations`, a read-only view of the game client's own station cache for a joined client:

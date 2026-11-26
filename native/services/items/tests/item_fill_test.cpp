@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// GitHub #132 (0.2.0-dev.31.17, review): Kiln's item fill (KILN_STATION_FILL_ITEM, the station screen's per-ingredient
+// GitHub #132 (0.2.0-dev.31.16, review): Kiln's item fill (KILN_STATION_FILL_ITEM, the station screen's per-ingredient
 // "+1" / "+n") on the real kiln-items glue: run_item_fill inside kiln_items_stations' program, t_plan's item plan and
 // t_fill_flags, against fakes of the program's component reads, the base's list A, the player's fill-opted links and the
 // game's AutoTransferItem (S 0x198bf0, as docs/re/stations.md section 10.9 reads it: the player, then the list in order,

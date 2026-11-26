@@ -19,7 +19,7 @@
 //  - A production station's screen (0.2.0-dev.30.8, GitHub #132): its ingredient rows count only what their transfer
 //    buttons move (the game's item transfer: the bag and the Magic chests), so the client names every item with none
 //    there (View): the rows keep the game's counts and the snapshot stays on for the fill buttons above.
-//  - Since 0.2.0-dev.31.17 those transfer buttons also take from the player's fill-opted links (Kiln's item fill,
+//  - Since 0.2.0-dev.31.16 those transfer buttons also take from the player's fill-opted links (Kiln's item fill,
 //    StationsCore.SourceItemFill): message 10 names, per item those links hold, the bag, the Magic chests and the links
 //    together, and the station screen counts that (View); every other item keeps the game's count. A server without it
 //    never sends message 10, and the rows stay the game's.
@@ -53,7 +53,7 @@ internal sealed record CraftStockRows(CraftStockRow[] Rows)
 
 internal readonly record struct CraftStockRow(uint Item, uint Count);
 
-/// <summary>Server to client (GitHub #132, 0.2.0-dev.31.17): what a production station screen's ingredient rows may count,
+/// <summary>Server to client (GitHub #132, 0.2.0-dev.31.16): what a production station screen's ingredient rows may count,
 /// per item the player's fill-opted links hold: the bag, the Magic chests of the player's base and those links together
 /// (what the rows' transfer buttons move through Kiln's item fill). Empty: none (the game's counts). An older client has
 /// no message 10 and drops it. Id 10: 5 to 9 are DyeStock's, LockStock's and BuildStock's on this channel.</summary>
@@ -278,7 +278,7 @@ internal static class CraftStock
             .Register<CraftStockFillAnswers>(CraftStockFillAnswers.Id, static (m, w) => CraftStockFillAnswers.Encode(m, w),
                 static (ref NetReader r) => CraftStockFillAnswers.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientFill(m); },
                 NetDirection.ToClient)
-            // 0.2.0-dev.31.17 (GitHub #132): the station screen's per-ingredient rows. An older peer drops the id.
+            // 0.2.0-dev.31.16 (GitHub #132): the station screen's per-ingredient rows. An older peer drops the id.
             .Register<CraftStockStationRows>(CraftStockStationRows.Id, static (m, w) => CraftStockStationRows.Encode(m, w),
                 static (ref NetReader r) => CraftStockStationRows.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientStationRows(m); },
                 NetDirection.ToClient);
@@ -438,7 +438,7 @@ internal static class CraftStock
         RefreshStation(player, s);
     }
 
-    // The station screen's per-ingredient rows (GitHub #132, 0.2.0-dev.31.17): again when they changed, and at the session's
+    // The station screen's per-ingredient rows (GitHub #132, 0.2.0-dev.31.16): again when they changed, and at the session's
     // first pass; an empty list once when they go. A send that did not go out is tried again at the next pass.
     private static void RefreshStation(EntityId player, Session s)
     {
@@ -682,7 +682,7 @@ internal static class CraftStock
     /// answers (the fill takes the outputs; those buttons do not read the rows).</summary>
     internal static CraftStockRows View(CraftStockRows rows, bool factory) => View(rows, factory, Off);
 
-    /// <summary>The same with the server's station rows (GitHub #132, 0.2.0-dev.31.17): a production station's screen
+    /// <summary>The same with the server's station rows (GitHub #132, 0.2.0-dev.31.16): a production station's screen
     /// counts, per item they name, what its transfer buttons now move through Kiln's item fill (the bag, the Magic chests
     /// and the player's fill-opted links); every other item of the snapshot is named with none (the game's count).</summary>
     internal static CraftStockRows View(CraftStockRows rows, bool factory, CraftStockRows station)

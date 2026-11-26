@@ -85,7 +85,7 @@ add_executable(items-build-sources-test tests/build_sources_test.cpp)
 target_include_directories(items-build-sources-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
 set_target_properties(items-build-sources-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
 
-# GitHub #132 (0.2.0-dev.31.17 review): the station screen's per-ingredient transfer as Kiln's item fill (run_item_fill)
+# GitHub #132 (0.2.0-dev.31.16 review): the station screen's per-ingredient transfer as Kiln's item fill (run_item_fill)
 add_executable(items-item-fill-test tests/item_fill_test.cpp)
 target_include_directories(items-item-fill-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
 set_target_properties(items-item-fill-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")

@@ -825,7 +825,7 @@ snapshot kiln-items holds names, it returns the greater of the game's count and 
 0.2.0-dev.30.8 Kiln.Blocks hands kiln-items, while a production station's screen is open (HUD FactoryCrafting), every
 item of the server's snapshot with count 0 (`set_craft_stock` keeps such a row: the snapshot stays on for the fill query
 above, and no count is raised): that screen's rows, the list's style-4 rows included, keep the game's counts, since their
-transfer control moves only what the bag and list A hold (§10.7); since 0.2.0-dev.31.17 those rows count the server's
+transfer control moves only what the bag and list A hold (§10.7); since 0.2.0-dev.31.16 those rows count the server's
 station rows instead (`kiln:craftstock` message 10: the bag, the Magic chests and the player's fill-opted links, per item the
 links hold), because the transfer then takes from those links too (§10.9). The list adds the fixed
 slots after the call, and the snapshot already holds those stacks (the server reads every link of the player, equipment
@@ -932,7 +932,7 @@ out (`exclude`). `craft_payment_test.cpp` covers a station's craft context. What
 ingredient counts (§10.3).
 
 **A production station's screen** counts in its rows only what the row transfer moves (0.2.0-dev.30.8; since
-0.2.0-dev.31.17 that includes the player's fill-opted links, §10.9): the row
+0.2.0-dev.31.16 that includes the player's fill-opted links, §10.9): the row
 transfer (UI command `0x39`; on the server most likely `AutoTransferAction`'s item branch, `AutoTransferItem` from the
 player and base list A [inf]) is an item fill, which Kiln.Blocks leaves to the game (`SourceFill` passes `item != 0`), so
 it takes neither registered sources nor opted-in outputs. A Kiln client names every item with none there (§10.3) and the
@@ -990,7 +990,7 @@ cannot and the linked one can; the fill query's answers (§10.3) use the same pl
 game's own queue fill reads, `player_crafting`'s AutomaticTransfer); Kiln keeps the game's list and adds a source list of
 its own, so a link's filter and opt-in hold. Not run in a lab or a game.
 
-### 10.9 The per-ingredient "+1" / "+n" (GitHub #132, 0.2.0-dev.31.17)
+### 10.9 The per-ingredient "+1" / "+n" (GitHub #132, 0.2.0-dev.31.16)
 
 Static disassembly (objdump) of client 26430625 (`5d9ef2f1`) and dedicated 26430253 (`f0d824be`); no game was run. Report:
 Fuzen777, 31.13, hosted, Streamlined Logistics linking 48 chests with `fills True`: the recipe's "+1" / "+10" filled from linked
@@ -1024,7 +1024,7 @@ what it did not pay; then each u32 entity of the list in order (`mov r15,[r14]`;
 `InventoryAddItems` into the station for the whole amount (S `0x1b1f60`, C `0x412460`): an error or a leftover is **2**.
 So the move is exact and all or nothing, and the server decides it: a press the client counted wrong moves nothing.
 
-**What Kiln does (0.2.0-dev.31.17, feature `stations.fill_items`).** sigdb `stations/AutoTransferItem` (its prologue) and
+**What Kiln does (0.2.0-dev.31.16, feature `stations.fill_items`).** sigdb `stations/AutoTransferItem` (its prologue) and
 `@stations/AutoTransferAction.item` (the item branch's call, which pins the argument order; `item_fill_sigdb_test.py`).
 - Server, the press: Kiln.Blocks follows the held `PlayerCraftingAction` as it follows the recipe fill (§10.8). For an item
   press of a player with a fill-opted link, after the recipe fill's own checks (`SourceFillAllowed`: CanAccessInventories,
@@ -1040,7 +1040,7 @@ So the move is exact and all or nothing, and the server decides it: a press the 
   any code rolls the whole transaction back. One rate-limited `stations:` line per outcome.
 - Client, the count: the server sends `kiln:craftstock` message 10 per item the player's fill-opted links hold: bag +
   Magic chests of the player's base + those links (`source_stock(STOCK_FILLS)` leaves the base's Magic chests out since
-  31.17, so a linked Magic chest is not counted twice). While a production station's screen is open the Kiln client hands
+  31.16, so a linked Magic chest is not counted twice). While a production station's screen is open the Kiln client hands
   those counts to the `stations.stock_ui` hook (`UiAvailableCount` at `AvailableRowRet1/2` answers the greater of the game's
   count and this); every other row keeps the game's count. A vanilla client never says hello and keeps the game's count; its
   press of an amount the bag and chests cannot cover never comes (the buttons stay grey), and if one does, the server's rule

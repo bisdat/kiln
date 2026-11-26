@@ -93,7 +93,7 @@ int main() {
     static_assert(offsetof(KilnStationsApi, set_lock_stock) == 288 && offsetof(KilnStationsApi, lock_asks) == 296 &&
                   KILN_CRAFT_SOURCE_REQUEST_V1 == 32 && KILN_STATIONS_MAX_LOCK_STOCK == 256 && KILN_STATIONS_MAX_LOCK_ASKS == 16);
     static_assert(offsetof(KilnStationsApi, set_build_stock) == 304);  // after #147's members
-    // GitHub #132 (0.2.0-dev.31.17): fill_flags after set_build_stock; the request's item where reserved[0] was
+    // GitHub #132 (0.2.0-dev.31.16): fill_flags after set_build_stock; the request's item where reserved[0] was
     static_assert(offsetof(KilnStationsApi, fill_flags) == 312 && sizeof(KilnStationsApi) == 320);
     static_assert(offsetof(KilnStationRequest, item) == 72 && offsetof(KilnStationRequest, reserved) == 76 && KILN_STATION_FILL_ITEM == 0x200);
     static_assert(KILN_CRAFT_SOURCE_FILLS == 2 && KILN_CRAFT_SOURCE_BUILDING == 4 && KILN_CRAFT_SOURCE_STOCK_FILLS == 4 &&
@@ -157,7 +157,7 @@ int main() {
         r.flags = KILN_STATION_FILL_LINKED;
         CHECK(!request_valid(r));
     }
-    // GitHub #132 (0.2.0-dev.31.17): the station screen's per-ingredient transfer: one item, an amount in items, no recipe
+    // GitHub #132 (0.2.0-dev.31.16): the station screen's per-ingredient transfer: one item, an amount in items, no recipe
     r = req(KILN_STATION_FILL);
     r.flags = KILN_STATION_FILL_ITEM;
     r.item = 0x2b0cf1d5;
@@ -1169,7 +1169,7 @@ int main() {
         CHECK(!craft_trace_text(t, 1, 0x77, 3000, 0).empty());
     }
 
-    // ---- GitHub #132 (0.2.0-dev.31.17): the per-ingredient transfer as a one-input fill of count 1 ----
+    // ---- GitHub #132 (0.2.0-dev.31.16): the per-ingredient transfer as a one-input fill of count 1 ----
     {
         // 7 in the station; the bag and the Magic chests hold 3, the BeforeStationOutputs links 10, the After links 4
         const InputNow x = item_fill_input(0x2b0cf1d5, 7, 3, 10, 4);
