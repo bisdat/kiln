@@ -377,6 +377,18 @@ At each start Kiln runs three stages, each across **all** mods (in the load orde
   loader wrote into the game's archive before Kiln, and are reported with them. Old mods are never refused because of a
   registry edit. Conflicts inside the registry and with Kiln's older paths are found for certain; other loaders' DLL
   patches and hooks are best-effort and labelled so.
+- `Content.*` changes made by code (`Content.Apply`, `ContentEntry.Set`, another loader's change through Kiln's content
+  service) sit **above** registry edits and win, as they win over data packs. A relative op such code gives (`mul`, `add`,
+  `min`, `max`, `raiseOnly`, `lowerOnly`) is computed by kiln.content on the **game's original value**, as for any data pack
+  ([services/content.md](../../services/content.md#data-packs)), never on what a registry edit made of it: BigStacks'
+  `{"mul": 4, "max": 9999, "raiseOnly": true}` gives wood logs 250 x 4 = 1000 even where a registry pack made them 2000
+  (`raiseOnly` means "never below the game's value", not "never below the value under the layer"). That has been so since
+  registry edits exist and stays so, since changing it would change what existing mod sets get. registry.json says so
+  (next release): the code writer is the field's winner and one certain `overridden` line names it, the registry edit it
+  replaced and both values ("... (a Content change made by code) sets 1000 over registry-mixed-test's 2000 (code wins over
+  registry edits; a relative change made through Content is computed on the game's value, 250, not on the registry's)").
+  A mod that wants its change to stack on the registry's value makes it a registry edit (a relative op there composes on
+  the value below it).
 
 ### Who else wrote a field
 

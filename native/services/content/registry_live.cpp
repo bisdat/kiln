@@ -1196,11 +1196,34 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
         }
     }
     if (skipped) fo.winner = pack && below && *result == *below ? pack->who : "";
+    // the registry's value, before any code layer above it (registry-followups 3)
+    std::optional<Value> reg_value;
+    std::string reg_mod;
+    if (first_reg && !skipped && !chain.empty()) {
+        reg_value = chain.back().after;
+        for (auto it = chain.rbegin(); it != chain.rend() && reg_mod.empty(); ++it)
+            if (it->kind == registry::WriterKind::Registry) reg_mod = it->mod;
+    }
+    const ChainRow* code_top = nullptr;
     for (; next != writers.end(); ++next) {
         if (record(next->second)) {
             fo.winner = next->second.row.who;
             chain.push_back(std::move(next->second.row));
+            code_top = &chain.back();
         }
+    }
+    // registry-followups 3: a Content.* change made by code sits above registry edits and wins (D1; services/registry.md), and
+    // kiln.content computes a data-pack op it was given (mul, add, raiseOnly, ...) on the game's original value, never on what
+    // the registry made of it (services/content.md). That is how BigStacks' x4 raiseOnly gave wood logs 1000 over a registry
+    // pack's 2000; it stays so (what older mod sets get must not change). The report says it: one certain line.
+    if (code_top && reg_value && !(*result == *reg_value)) {
+        registry::Line line;
+        line.field = ref, line.winner = code_top->who, line.loser = reg_mod, line.kind = registry::LineKind::Overridden;
+        line.text = ref.text() + ": " + code_top->who + " (a Content change made by code) sets " + registry::report_value_text(*result) +
+                    " over " + reg_mod + "'s " + registry::report_value_text(*reg_value) +
+                    " (code wins over registry edits; a relative change made through Content is computed on the game's value, " +
+                    registry::report_value_text(fo.base) + ", not on the registry's)";
+        r.lines.push_back(std::move(line));
     }
     // a slot another writer changed after Kiln's layer (the store's compare-before-write skipped Kiln's write): the same
     // best-effort row, last, with the value the game holds

@@ -983,6 +983,51 @@ void code_writers_are_named_in_kiln_words() {
     for (const Conflict& c : store_conflicts()) kept = kept || c.loser == "owner 44: items Material_T1_Wood_Logs.maxStackSize";
     check(kept, "the store's conflicts keep their text");
 }
+// registry-followups 3 (the compat rehearsal's mixed set: BigStacks' Content.Apply {"mul": 4, "max": 9999, "raiseOnly": true}
+// gave wood logs 1000 over the registry's 2000). Content.* changes made by code sit above registry edits (D1, services/
+// registry.md), and a data-pack op made by code is computed on the game's original value (services/content.md "an op relative
+// to the game's original value"; raiseOnly: "never below the game's value"), never on what the registry made of it. That is
+// 31.15's behaviour and stays (a later code layer wins, at the value it computed); registry.json now says so: one certain
+// "overridden" line naming the code writer, the registry edit it replaced and both values. No line when code sets the
+// registry's own value.
+void code_over_a_registry_value_is_reported() {
+    world();
+    g_files = {{"m/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 200}}]}})"}};
+    const auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files);
+    registry_live_world_begin();
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 2000, "the registry's x200 over the game's 10");
+    // BigStacks: Content.Apply's x4 raiseOnly, computed by kiln.content on the game's 10, a code layer of 40
+    set_owner_label(45, "mod bigstacks");
+    uint8_t b[4] = {40, 0, 0, 0};
+    store_put(45, next_code_seq(), KILN_CONTENT_ITEMS, WOOD, 0, -1, A(WOOD_AT), 4, b, "bigstacks x4 max 9999: items *");
+    store_flush(nullptr);
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 40, "the code layer above the registry wins, at the value it computed (31.15's behaviour, kept)");
+    const registry::FieldRef logs{"items", "game:material_t1_wood_logs", "maxStack"};
+    const auto row = json_field(logs);
+    check(row["result"] == 40 && row["winner"] == "bigstacks x4 max 9999: items *", "the report's result and winner: " + row.dump());
+    const registry::Line* line = nullptr;
+    for (const registry::Line& l : g_last_report.lines)
+        if (l.field == logs && l.loser == "m") line = &l;
+    check(line && line->kind == registry::LineKind::Overridden && line->certainty == registry::Certainty::Certain &&
+              line->winner == "bigstacks x4 max 9999: items *" && line->text.find("sets 40 over m's 2000") != std::string::npos &&
+              line->text.find("game's value, 10") != std::string::npos,
+          "one overridden line names the code writer and the registry edit it replaced: " + (line ? line->text : std::string("none")));
+    check(g_last_report.refused.empty(), "never a refusal");
+    // code that sets the registry's own value: no line
+    uint8_t same[4];
+    const uint32_t v = 2000;
+    std::memcpy(same, &v, 4);
+    store_put(45, next_code_seq(), KILN_CONTENT_ITEMS, WOOD, 0, -1, A(WOOD_AT), 4, same, "bigstacks x4 max 9999: items *");
+    store_flush(nullptr);
+    apply_registry_files(files);
+    bool any = false;
+    for (const registry::Line& l : g_last_report.lines) any = any || (l.field == logs && l.loser == "m");
+    check(!any && at<uint32_t>(WOOD_AT) == 2000, "code that keeps the registry's value: no line");
+}
 // Review (registry-writers): an entry an old boot document wrote (boot_bridge.cpp's entry mark: a path no Kiln field's row
 // covers, such as a formula's input or "[*]" over a registry's elements) holds Kiln's own patch where the stage read the
 // value before it: the drift probe never calls that change another loader's. An entry no document wrote is still checked.
@@ -1251,6 +1296,7 @@ int main() {
         {"drift_probe_kiln_boot_patch", drift_probe_kiln_boot_patch},
         {"later_writes_reach_the_report", later_writes_reach_the_report},
         {"code_writers_are_named_in_kiln_words", code_writers_are_named_in_kiln_words},
+        {"code_over_a_registry_value_is_reported", code_over_a_registry_value_is_reported},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},
