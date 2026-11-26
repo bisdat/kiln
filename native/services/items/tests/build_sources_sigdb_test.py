@@ -5,6 +5,7 @@ import argparse
 import copy
 import hashlib
 from pathlib import Path
+import re
 import struct
 import sys
 sys.dont_write_bytecode = True
@@ -13,6 +14,7 @@ sys.path.insert(0, str(ROOT / 'tools/sigport'))
 from peimg import Image
 from sides import compose
 from sigdb_check import Resolver
+from capstone import Cs, CS_ARCH_X86, CS_MODE_64
 
 checks = 0
 
@@ -97,12 +99,12 @@ def main():
     for _, part, _ in compose('client'):
         symbols.update(part.get('symbols', {}))
     ui_names = ['build/client.MaterialRows', 'build/client.MaterialRowsBody', 'build/client.MaterialRowsDone', 'build/client.StockRowsRet',
-                'build/client.MaterialRowAdd', 'build/client.MaterialRowStock']
+                'build/client.MaterialRowAdd', 'build/client.MaterialRowStock', 'build/client.NoContainerKey']
     doc = {'symbols': symbols, 'features': {'ui': {'symbols': ui_names}}}
     image = Image(client)
     found, _, features = Resolver(image, doc).run()
     check(features['ui'], 'client crafting.build_ui resolves')
-    for name, rva in zip(ui_names, [0x40e5d0, 0x40e5f3, 0x40f05a, 0x40ee4b, 0x40c010, 0x40c0f4]):
+    for name, rva in zip(ui_names, [0x40e5d0, 0x40e5f3, 0x40f05a, 0x40ee4b, 0x40c010, 0x40c0f4, 0x152d040]):
         check(found[name]['rva'] == rva, f'client {name} = {rva:#x}')
     raw = image.img
     # the gatherer's two halves are inside it, clear of what Building Tools 0.34.0 reads (src/main.cpp SIG_STOCKS: the first
@@ -110,9 +112,57 @@ def main():
     # presentation_sigdb_test.py checks the two sites' registers and branches
     fn = found['build/client.MaterialRows']['rva']
     read = [(0, 35), (0x194, 3), (0x705, 5), (0x721, 5), (0x78F, 7), (0x867, 7), (0x876, 5), (0x89D, 5), (0xA76, 5)]
-    for name in ('build/client.MaterialRowsBody', 'build/client.MaterialRowsDone'):
+    for name, size in (('build/client.MaterialRowsBody', 7), ('build/client.MaterialRowsDone', 8), ('build/client.StockRowsRet', 7)):
         at = found[name]['rva'] - fn
-        check(all(at + 5 <= o or at >= o + n for o, n in read), f'client {name} (+ {at:#x}) is off the bytes Building Tools reads')
+        check(all(at + size <= o or at >= o + n for o, n in read), f'client {name} (+ {at:#x}) is off the bytes Building Tools reads')
+    # GitHub #148: kiln-items' mid hook on build/client.StockRowsRet, the stock loop's step to the next pool material
+    code = list(Cs(CS_ARCH_X86, CS_MODE_64).disasm(bytes(raw[fn:fn + 0xAC6]), fn))
+    text = lambda i: f'{i.mnemonic} {i.op_str}'
+    at = {i.address: i for i in code}
+    step = found['build/client.StockRowsRet']['rva']
+    check([text(at[a]) for a in (step, step + 4, step + 7)] == ['mov eax, dword ptr [r15 + 0xc]', 'inc r14', 'cmp r14, rax'],
+          'client the step: mov eax,[r15+0xc] (the pool\'s material count); inc r14; cmp r14,rax')
+    loop = int(at[step + 10].op_str, 16)
+    check(at[step + 10].mnemonic == 'jb' and text(at[loop]) == 'movsxd rax, dword ptr [r15 + 8]',
+          'client ... jb back to the material read (movsxd rax,[r15+8]: the materials\' offset from +8)')
+    stock = [i for i in code if 0x40ecc5 <= i.address < 0x40ee86]  # from the stock map's lookup to the loop's end
+    w15 = [text(i) for i in stock if i.op_str.split(',')[0].strip() == 'r15' and i.mnemonic != 'cmp']
+    check(w15 == ['mov r15, rax', 'mov r15, qword ptr [rax + rbx*8]', 'mov r15, qword ptr [rsp + 0x40]'],
+          'client r15 is the pool in the material loop (mov r15,[rax+rbx*8]; the registry around it)')
+    w14 = [text(i) for i in stock if i.op_str.split(',')[0].strip() in ('r14', 'r14d') and i.mnemonic not in ('cmp', 'test')]
+    check(w14 == ['xor r14d, r14d', 'inc r14'], 'client r14 is the material index (zeroed per pool, stepped here only)')
+    w12 = sorted({text(i) for i in stock if i.op_str.split(',')[0].strip() in ('r12', 'r12d', 'r12b')})
+    check(w12 == ['mov r12b, 1', 'mov r12b, 2', 'mov r12b, 3', 'mov r12b, 4', 'mov r12b, 5', 'mov r12b, 6', 'mov r12b, 7', 'xor r12b, r12b'],
+          'client r12b is the pool kind\'s group (0 to 6, 7 for none: kiln-items skips 7)')
+    adds = [i.address for i in stock if i.mnemonic == 'call' and i.op_str == hex(found['build/client.MaterialRowAdd']['rva'])]
+    check(adds == [step - 5], 'client the loop adds through build/client.MaterialRowAdd once, right before the step')
+    targets = {int(i.op_str, 16) for i in code if i.mnemonic.startswith('j') and i.op_str.startswith('0x')}
+    tables = [int(m, 16) for i in code for m in re.findall(r'\+ (0x[0-9a-f]+)\]', i.op_str)
+              if fn < int(m, 16) < fn + 0xC00 and i.mnemonic == 'mov' and '*4' in i.op_str]
+    for t in tables:
+        for k in range(64):
+            v = struct.unpack_from('<I', raw, t + 4 * k)[0]
+            if not fn <= v < fn + 0xAC6:
+                break
+            targets.add(v)
+    check(len(tables) == 4 and not [t for t in targets if step < t < step + 7], 'client no branch lands inside the step\'s moved bytes')
+    into = sorted(i.address for i in stock if i.mnemonic.startswith('j') and i.op_str == hex(step))
+    check(into == [0x40eda0, 0x40edc7, 0x40edfd, 0x40ee02, 0x40ee0f], 'client every path of the lookup reaches the step (not found: jumps to it)')
+    zero = found['build/client.NoContainerKey']['rva']
+    check(raw[fn + 0x194:fn + 0x197] == bytes.fromhex('448B05') and fn + 0x19b + struct.unpack_from('<i', raw, fn + 0x197)[0] == zero,
+          'client the listed materials\' zero rows pass build/client.NoContainerKey as their container key')
+    # build/client.MaterialRowAdd: a found row is added to, a missing one appended unless the group's mode is 1 or 4
+    # (Last Used, Favorites) and the call is not a zero row; the growth calls the group's +0x18 callback
+    row_add = found['build/client.MaterialRowAdd']['rva']
+    add = {i.address: text(i) for i in Cs(CS_ARCH_X86, CS_MODE_64).disasm(bytes(raw[row_add:row_add + 0x134]), row_add)}
+    check(add.get(row_add + 0x3b) == 'movzx eax, byte ptr [rdi + 0x638]' and add.get(row_add + 0x42) == 'cmp al, 1' and
+          add.get(row_add + 0x46) == 'cmp al, 4', 'client the add never appends in modes 1 and 4 (Last Used, Favorites)')
+    check(add.get(row_add + 0x95) == 'mov rax, qword ptr [rdi + 0x18]' and add.get(row_add + 0x90) == 'cmp rdx, qword ptr [r8]',
+          'client it grows a full group through its callback at +0x18 (capacity +0x10)')
+    # only modes 1 and 4 get a zero row per listed material before the bag and the base (so a material only the links
+    # hold has no row in the other tabs: #148)
+    check(text(at[0x40e6b1]) == 'sub ecx, 1' and text(at[0x40e6b6]) == 'cmp ecx, 3' and at[0x40e6b9].mnemonic == 'jne',
+          'client the zero rows are added in modes 1 and 4 only')
     check(bytes.fromhex('4869C848060000') in raw[0x40ee11:0x40ee4b], 'a group is 0x648 bytes (imul rcx,rax,0x648)')
     check(raw[0x40e694:0x40e69b] == bytes.fromhex('4989AFD0F9FFFF'), 'a rebuilt group is zeroed first (mov [r15-0x630],rbp: its count)')
     check(raw[0x40c0f9:0x40c105] == bytes.fromhex('488D0C40488B0748016CC810'), 'a row is 24 bytes, its stock a u64 at +0x10')
