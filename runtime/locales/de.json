@@ -288,6 +288,8 @@
       "inactive": "ShroudForge führt sie gerade nicht aus; eine Änderung ihres Schalters dauert ein, zwei Sekunden, oder sie startet beim nächsten Spielstart.",
       "effect": "ShroudForge-Lua ist aktiv; gemeldete Wirkung: {effect}. {detail}",
       "effect_failed_help": "Die Mod meldet, dass ihre Änderung nicht angewendet wurde. ShroudForges Protokoll enthält die Details.",
+      "effect_last_failed": "ShroudForge führt das Lua aus; die Mod meldet, dass ihre letzte Änderung nicht angewendet wurde: {detail}",
+      "effect_last_failed_help": "Die Mod ist weiter geladen und reagiert auf ihre Tasten. kiln.log (die [sf]-Zeilen) sagt, warum die Änderung nicht angewendet wurde.",
       "active": "ShroudForge führt ihr Lua aus; die Mod meldet kein Ergebnis zur Wirkung."
     },
     "enshwick": {
