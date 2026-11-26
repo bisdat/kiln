@@ -139,7 +139,7 @@ application after the reload applies it, kiln.content sets the mod apart (servic
 partway"): the reply adds `; data packs: <mod>'s <mod folder>/content/<file> threw while it applied (<what>) and was set
 apart: what it did came off and the packs it had before apply again` (or `... and none of its packs apply`) before the
 registry part, and `data` gets `packs`: `{known, setApart: [{mod, file, reason, previous}]}` (`previous`: its packs from
-before apply again, whole; `known: false`: no pack report was read, for example without kiln.content). The reload itself
+before apply again, whole; `known: false`: no report of an application after the reload was read, for example without kiln.content, off its world's thread, or when no application followed the reload yet: before a world loads, or past the reply's 5 s). The reload itself
 still succeeded (`ok` true): the mod is loaded; what applies of its packs is what the reply says. Both parts are
 additive: the message starts as before, and `data.affected` and `data.registry` are unchanged. The same rows are the
 `setApart` list of kiln.content's pack report (`Content.PackReport()`'s source, `kiln_content.h` `report`).
