@@ -3670,13 +3670,33 @@
     {
       "version": "0.2.0-dev.31.16",
       "status": "next",
-      "title": "Typing in Kiln's search fixed",
-      "summary": "Typing T in Kiln's search no longer adds a \"b\" when another mod sends keys.",
+      "title": "NPC speech, docked windows, linked-chest building",
+      "summary": "Mods can make NPCs speak and dock their windows together; building and station fills use linked chests; typing in Kiln's search is fixed.",
       "patch": true,
       "features": [
         {
+          "title": "NPCs say what mods want",
+          "text": "Mods can show their own lines in villagers' and craftspeople's speech bubbles, or quiet them.",
+          "area": "api"
+        },
+        {
+          "title": "Docked mod windows",
+          "text": "Mod windows that dock to each other move together in the same frame.",
+          "area": "api"
+        },
+        {
+          "title": "Building from linked chests",
+          "text": "The hammer lists and pays blocks from linked chests, also with Building Tools.",
+          "area": "core"
+        },
+        {
+          "title": "Station +1 / +n from links",
+          "text": "A station's ingredient buttons count and take from linked chests.",
+          "area": "core"
+        },
+        {
           "title": "Typing in Kiln's search fixed",
-          "text": "Key presses another mod sends while you type in a Kiln text field no longer end up in it (ShroudLink's Assistants key on T made every t a \"tb\").",
+          "text": "Keys another mod sends no longer end up in Kiln's text fields.",
           "area": "core"
         }
       ]

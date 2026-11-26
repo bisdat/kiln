@@ -70,7 +70,7 @@ The project file:
 | `KilnModId` | lower-case `AssemblyName` | `id` |
 | `KilnModName`, `Version` | `AssemblyName`, 1.0.0 | `name`, `version` |
 | `Authors`, `Description`, `PackageLicenseExpression`, `PackageProjectUrl` | | `authors`, `description`, `license`, `url` |
-| `KilnApiVersion` | the SDK's (0.2.22 for dev.31.16) | `apiVersion` |
+| `KilnApiVersion` | the SDK's (0.2.23 for dev.31.16) | `apiVersion` |
 | `KilnSide` | server | `side` |
 | `KilnClients` | from the side: server none, else mod | `clients` |
 | `KilnEntryType` | the only public `Mod` subclass | `entryType` |
