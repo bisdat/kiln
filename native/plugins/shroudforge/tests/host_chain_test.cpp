@@ -404,6 +404,8 @@ uint32_t g_write_flags = 0;
 int g_build_writes = 0;
 int g_outside = 0;      // cells kiln.build was asked to write outside the grid
 bool g_corrupt = false; // kiln.build's writer commits other cells than asked (no read-back), the put-back too
+bool g_corrupt_first = false;  // only the first write of each pair is wrong, its put-back exact (outcome 2)
+int g_pair = 0;
 bool g_tick_ok = true;  // kiln.build's members answer only on the "server world's thread"
 bool inside(int64_t x, int64_t y, int64_t z) { return x >= 0 && x < 16 && y >= 0 && y < 16 && z >= 0 && z < 16; }
 size_t cell_at(int x, int y, int z) { return (static_cast<size_t>(z) * 16 + y) * 16 + x; }
@@ -438,15 +440,16 @@ KilnResult KILN_CALL fb_write(const KilnBuildWrite* w, KilnBuildResult* r) {
     if (!t_world_thread) return g_tick_ok = false, KILN_ERR_WRONG_THREAD;
     ++g_build_writes;
     g_write_flags = w->flags;
+    const bool bad = g_corrupt || (g_corrupt_first && g_pair++ % 2 == 0);
     size_t j = 0;
     for (uint32_t z = 0; z < w->dims[2]; ++z)
         for (uint32_t y = 0; y < w->dims[1]; ++y)
             for (uint32_t x = 0; x < w->dims[0]; ++x, ++j) {
                 const int64_t cx = int64_t{w->origin[0]} + x, cy = int64_t{w->origin[1]} + y, cz = int64_t{w->origin[2]} + z;
-                if (inside(cx, cy, cz)) g_cells[cell_at(int(cx), int(cy), int(cz))] = w->cells[j] ^ (g_corrupt ? 0x0101 : 0);
+                if (inside(cx, cy, cz)) g_cells[cell_at(int(cx), int(cy), int(cz))] = w->cells[j] ^ (bad ? 0x0101 : 0);
                 else ++g_outside;
             }
-    r->flags = KILN_BUILD_R_CHANGED | (g_corrupt ? 0 : KILN_BUILD_R_VERIFIED);
+    r->flags = KILN_BUILD_R_CHANGED | (bad ? 0 : KILN_BUILD_R_VERIFIED);
     r->blocks_written = 1;
     return KILN_OK;
 }
@@ -719,6 +722,24 @@ int main() {
         check(g_host->voxel_write(at, box, again, 4, &outcome) && outcome == 0 && g_cells[cell_at(2, 3, 4)] == 9,
               "the next write, asked in the new world, is written");
     }
+    // outcome 2 (written, did not read back, put back) again and again, as a mod that retries every update would get it:
+    // kiln.log has the first ten, not one line a write
+    {
+        const uint16_t want[4] = {3, 3, 3, 3};
+        g_corrupt_first = true, g_pair = 0;
+        bool all = true;
+        for (int i = 0; i < 12; ++i) {
+            run_posts(5);
+            outcome = 9;
+            all &= !g_host->voxel_write(at, box, want, 4, &outcome) && outcome == 2;
+        }
+        g_corrupt_first = false;
+        check(all, "a write that does not read back and is put back: outcome 2, each time");
+        std::lock_guard lock(g_log_mutex);
+        size_t lines = 0;
+        for (const auto& l : g_lines) lines += l.find("the earlier cells were put back") != std::string::npos;
+        check(lines == 10, "kiln.log has the first ten of them", std::to_string(lines) + " lines");
+    }
     // outcome 3 (the write did not read back and neither did the put-back): as ShroudForge's own writer (it marks the
     // session's writes uncertain), no further voxel write in that world; the next world writes again
     {
@@ -766,7 +787,8 @@ int main() {
         std::lock_guard lock(g_log_mutex);
         size_t errors = 0;
         for (const auto& l : g_lines)
-            if (l[0] == 'E' && l.find("faulted") == std::string::npos && l.find("the outcome is uncertain") == std::string::npos)
+            if (l[0] == 'E' && l.find("faulted") == std::string::npos && l.find("the outcome is uncertain") == std::string::npos &&
+                l.find("the earlier cells were put back") == std::string::npos)
                 ++errors, std::printf("  unexpected log: %s\n", l.c_str());
         if (errors) ++g_fail;
     }

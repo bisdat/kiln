@@ -169,15 +169,16 @@ void KILN_CALL run_job(void* user) {
     job.cv.notify_all();
 }
 
-// kiln.log: every refusal or failure says why. A write that changed the world and then failed (outcome 2 or 3) is always
-// logged. Refusals are counted by reason (the text before its first " (" or ": "): the first 10 of each reason, then
-// every 100th (a mod that retries every update), so a new reason is never hidden behind an old one.
+// kiln.log: every refusal or failure says why. An uncertain outcome (3) is always logged (that world takes no further
+// write). Refusals and put-back writes (2) are counted by outcome and reason (the text before its first " (" or ": "):
+// the first 10 of each, then every 100th (a mod that retries every update), so a new reason is never hidden behind an
+// old one.
 std::atomic<uint64_t> v_writes{0};
 std::mutex v_reasons_mu;
 std::vector<std::pair<std::string, uint64_t>> v_reasons;  // reason, refusals so far (at most kMaxReasons kinds)
 constexpr size_t kMaxReasons = 64;
-uint64_t count_reason(const std::string& why) {
-    std::string key = why.substr(0, std::min(why.find(" ("), why.find(": ")));
+uint64_t count_reason(uint32_t outcome, const std::string& why) {
+    std::string key = std::to_string(outcome) + " " + why.substr(0, std::min(why.find(" ("), why.find(": ")));
     std::lock_guard lock(v_reasons_mu);
     for (auto& [k, n] : v_reasons)
         if (k == key) return ++n;
@@ -194,7 +195,7 @@ void report(const int32_t o[3], const uint32_t d[3], uint32_t outcome, const std
                  d[0], d[1], d[2], o[0], o[1], o[2]);
         return;
     }
-    const uint64_t n = outcome == voxels::kRefused ? count_reason(why) : 1;
+    const uint64_t n = outcome == voxels::kUncertain ? 1 : count_reason(outcome, why);
     if (n > 10 && n % 100) return;
     const char* what = outcome == voxels::kRefused ? "refused before changing the world"
                        : outcome == voxels::kRestored ? "failed; the earlier cells were put back"
