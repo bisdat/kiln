@@ -49,12 +49,14 @@ internal static class LastServer
         return serving && string.Equals(id, NetAdvertise.ServerId(NetEngine.Config), StringComparison.Ordinal);
     }
 
-    /// <summary>The entry for an answer. <c>missing</c>: on a refusal the mods the server named; from the hosted world
-    /// none; else the required mods this game lacks (<see cref="Lacking"/>).</summary>
+    /// <summary>The entry for an answer. <c>missing</c>: on a refusal the mods the server named (a refusal without
+    /// details: the required mods this game lacks); from the hosted world none; else the required mods this game lacks
+    /// (<see cref="Lacking"/>, which hashes them: only when its answer is used).</summary>
     internal static JsonObject Answer(string outcome, string? reason, NetServerAdvert advert, string? serverKiln,
         IReadOnlyList<string>? refusedFor, bool hosted, List<Local> local, string game, DateTime now)
     {
-        IReadOnlyList<string> missing = refusedFor is not null ? NetRefusal.Missing(refusedFor, Lacking(advert.Required, local, game))
+        IReadOnlyList<string> missing = refusedFor is not null
+            ? NetRefusal.Missing(refusedFor, refusedFor.Count == 0 ? Lacking(advert.Required, local, game) : [])
             : hosted ? [] : Lacking(advert.Required, local, game);
         var entry = Build(outcome, reason, advert, serverKiln, missing, now);
         entry["hosted"] = hosted;
