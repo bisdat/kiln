@@ -71,6 +71,9 @@ struct RegistryLive {
     // Checked under store_mutex against the token/kind that gates all live accesses; false/missing fails closed.
     std::function<bool(uint32_t kind)> on_world_thread;
     std::function<bool(registry::stage::LiveData*, std::string*)> prepare; // optional copied-base preparation on first use
+    // The drift probe's suspects (registry/drift.h): asked once per world at registry_live_world_begin, with no lock of
+    // kiln.content's held. Unset: none are named.
+    std::function<std::vector<std::string>()> suspects;
 };
 
 // One pack file's "registry" section, lowered (packs.cpp registry_sections).

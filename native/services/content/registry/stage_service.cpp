@@ -24,6 +24,7 @@
 #include "../../../core/src/owners_internal.h"
 #include "kiln_boot_collector.hpp"
 #include "pristine.h"
+#include "drift.h"
 #include "entry_compat.h"
 #include "visibility.h"
 #include "services/kiln_assets.h"
@@ -177,6 +178,32 @@ std::optional<std::string> archive_journal(std::string* generation, std::string*
     auto text = read_whole(file);
     if (!text) *why = "kiln-eml's change journal could not be read";
     return text;
+}
+
+// The drift probe's suspects (drift.h): the hook map's foreign modules and hosted ShroudForge. Once per world, no lock held.
+std::vector<std::string> drift_suspects_now() {
+    bool hosted = false;
+    if (const auto* t = g_api ? static_cast<const KilnLaunchApi*>(g_api->service(KilnStr{KILN_LAUNCH_SERVICE, sizeof(KILN_LAUNCH_SERVICE) - 1}, KILN_LAUNCH_VERSION)) : nullptr;
+        t && t->header.size >= offsetof(KilnLaunchApi, status) + sizeof(void*) && t->status) {
+        KilnLaunchStatus st{};
+        st.size = sizeof st;
+        hosted = t->status(&st) == KILN_OK && (st.backend == KILN_LAUNCH_BACKEND_HOSTED || st.backend == KILN_LAUNCH_BACKEND_INSTALLED);
+    }
+    json map;
+    const auto* hooks = g_api ? static_cast<const KilnHooksApi*>(g_api->service(KilnStr{KILN_HOOKS_SERVICE, sizeof(KILN_HOOKS_SERVICE) - 1}, 1)) : nullptr;
+    if (hooks && hooks->header.size >= offsetof(KilnHooksApi, map_json) + sizeof(void*) && hooks->map_json) {
+        size_t len = 0;
+        hooks->map_json(nullptr, 0, &len);
+        if (len > 0 && len < (size_t{64} << 20)) {
+            std::string text(len + 1, '\0');
+            size_t got = 0;
+            if (hooks->map_json(text.data(), text.size(), &got) == KILN_OK) {
+                text.resize(std::min(got, len));
+                map = json::parse(text, nullptr, false);
+            }
+        }
+    }
+    return drift_suspects(map, hosted);
 }
 
 Env make_env() {
@@ -619,6 +646,7 @@ void bind_service() {
         in.changed = h.changed;
         in.prepare = h.prepare;
         in.on_world_thread = [](uint32_t kind) { return g_api && g_api->on_world_thread && g_api->on_world_thread(kind); };
+        in.suspects = &drift_suspects_now;
         if (!in.result.definitions.empty()) registry_entries_prepare(&in);
         const Result reconciled = in.result;
         registry_live_install(std::move(in));

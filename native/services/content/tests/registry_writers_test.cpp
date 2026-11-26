@@ -11,6 +11,7 @@
 #include <string>
 
 #include "../registry/archive_journal.h"
+#include "../registry/drift.h"
 #include "../registry/report.h"
 
 using namespace kc::registry;
@@ -200,6 +201,23 @@ int main(int argc, char** argv) {
     CHECK(doc2["base"]["journal"]["state"] == "none" && doc2["base"]["journal"]["text"] == "hosted ShroudForge keeps no change journal",
           "without a journal base.journal says so: " + doc2["base"].dump());
     if (argc > 2) std::ofstream(argv[2]) << doc.dump(2);
+
+    // ---- the drift probe's suspects (drift.h) ----
+    const json map = json::parse(R"({"foreign": [{"symbol": "a", "rva": "0x10", "module": "xhl-core.dll", "offset": "0x1", "own": false},
+                                                 {"symbol": "b", "rva": "0x20", "module": "kiln-content.dll", "offset": "0x2", "own": true},
+                                                 {"symbol": "c", "rva": "0x30", "module": "xhl-core.dll", "offset": "0x3", "own": false},
+                                                 {"symbol": "d", "rva": "0x40", "module": "", "offset": "0x4", "own": false}]})");
+    CHECK(drift_suspects(map, false) == std::vector<std::string>({"xhl-core.dll", "code outside any module"}),
+          "suspects: other modules that patched game code, each once, never Kiln's own");
+    CHECK(drift_suspects(map, true).front() == "ShroudForge (hosted)", "hosted ShroudForge is a suspect when it runs");
+    CHECK(drift_suspects(json(), false).empty() && drift_suspects(json::parse("{\"foreign\": 3}"), false).empty(), "no hook map: no suspect");
+    json many = {{"foreign", json::array()}};
+    for (int i = 0; i < 12; ++i) many["foreign"].push_back({{"module", "m" + std::to_string(i) + ".dll"}, {"own", false}});
+    const auto capped = drift_suspects(many, false);
+    CHECK(capped.size() == 9 && capped.back() == "+4 more", "at most 8 suspects, then how many more");
+    CHECK(drift_who({}) == "outside Kiln (best effort; no other loader's hook seen)" &&
+              drift_who({"xhl-core.dll", "emf.dll"}) == "outside Kiln (best effort; suspects: xhl-core.dll, emf.dll)",
+          "a drift row's writer says best effort and names the suspects");
 
     std::printf("registry writers: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

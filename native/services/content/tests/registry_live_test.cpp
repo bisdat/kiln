@@ -714,6 +714,45 @@ void another_writer_in_the_report() {
     check(at<uint32_t>(WOOD_AT) == 777, "the other writer's value stays");
     check(reported("was written by another writer after Kiln's layer: Kiln's edit not applied"), "and registry.json says so");
     check(json_field({"items", "game:material_t1_wood_logs", "maxStack"})["result"] == 777, "the report shows the other writer's effective value");
+    // the drift probe: the slot another writer changed after Kiln's layer gets a best-effort writer row, last
+    const auto row = json_field({"items", "game:material_t1_wood_logs", "maxStack"});
+    check(!row["writers"].empty(), "the field row has writers: " + row.dump());
+    const auto& last = row["writers"].back();
+    check(last["kind"] == "drift" && last["certainty"] == "bestEffort" && last["value"] == 777 && !last.contains("mod") &&
+              last["who"].get<std::string>().rfind("outside Kiln (best effort", 0) == 0,
+          "the foreign write is a best-effort drift row: " + row["writers"].dump());
+}
+
+// The drift probe (commitment 7): a value that changed outside Kiln between the stage's read (10) and Kiln's first write at
+// world load (12) is a best-effort writer row with a line, never a refusal; Kiln's relative edit composes on what the game
+// holds. Without drift no such row; an entry the stage read the same as the game has none.
+void drift_probe() {
+    world();
+    g_files = {{"bigstacks/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}},
+                                           {"registry": "items", "select": {"id": "game:material_stone"}, "field": "maxStack", "op": {"mul": 2}}]}})"}};
+    const auto files = files_of({{"bigstacks", "bigstacks/content/a.json"}});
+    stage(files);
+    mem<uint32_t>(WOOD_AT, 12);  // another DLL engine wrote the logs' stack size after resources-ready
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 48, "Kiln's x4 composes on the value the game holds");
+    check(g_last_report.refused.empty(), "drift is never a refusal");
+    const auto row = json_field({"items", "game:material_t1_wood_logs", "maxStack"});
+    check(row["writers"].size() == 2 && row["writers"][0]["kind"] == "drift" && row["writers"][0]["certainty"] == "bestEffort" &&
+              row["writers"][0]["value"] == 12 && row["writers"][1]["kind"] == "registry" && row["result"] == 48,
+          "a drift row below the registry edit: " + row.dump());
+    check(row["base"]["value"] == 10, "the base stays what the stage read");
+    const registry::Line* line = nullptr;
+    for (const registry::Line& l : g_last_report.lines)
+        if (l.field.id == "game:material_t1_wood_logs") line = &l;
+    check(line && line->certainty == registry::Certainty::BestEffort && line->kind == registry::LineKind::ComposedOn && line->winner == "bigstacks" &&
+              line->text.find("changed outside Kiln") != std::string::npos && line->text.find("best effort") != std::string::npos,
+          "one best-effort line: " + (line ? line->text : std::string("none")));
+    const auto stone = json_field({"items", "game:material_stone", "maxStack"});
+    check(stone["writers"].size() == 1 && stone["writers"][0]["kind"] == "registry", "no drift where the game holds what the stage read");
+    // a reload checks again: the drift row stays (the slot's original is the value before Kiln's first write)
+    apply_registry_files(files);
+    check(json_field({"items", "game:material_t1_wood_logs", "maxStack"})["writers"][0]["kind"] == "drift", "a reload reports it again");
 }
 // P2: an explicit retained live change, reverted by handle, must compose over packs and never overtake code.
 void live_transactions() {
@@ -783,6 +822,7 @@ int main() {
         {"refusals_and_restart_fields", refusals_and_restart_fields},
         {"hot_reload", hot_reload},
         {"another_writer_in_the_report", another_writer_in_the_report},
+        {"drift_probe", drift_probe},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},

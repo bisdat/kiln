@@ -13,6 +13,7 @@
 #include <tuple>
 #include <unordered_map>
 
+#include "registry/drift.h"
 #include "registry/formulas.h"
 #include "registry/stage.h"
 #include "registry/unmapped.h"
@@ -68,6 +69,7 @@ struct LiveState {
     bool pending_application = false;
     bool pending_change = false;
     size_t skipped_logged = 0;  // store_skipped rows already in kiln.log
+    std::vector<std::string> suspects;  // the drift probe's suspects in this world (drift.h), read at world begin
     registry::Result reported;
     bool have_report = false;
     uint32_t ordinal = 0;
@@ -876,6 +878,27 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
     std::vector<ChainRow> chain;
     for (const ChainRow& c : fo.chain)
         if (c.kind != registry::WriterKind::Registry && c.kind != registry::WriterKind::Check && c.kind != registry::WriterKind::OldPack && c.kind != registry::WriterKind::Code) chain.push_back(c);
+    // The drift probe (drift.h): the game's value just before Kiln's first write in this world (the slots' originals, before
+    // any pack) against what the stage read and the writers Kiln knows below the packs (archive packages, old boot patches).
+    // A difference no known writer explains is a best-effort row, never a refusal. An entry a mod added is Kiln's own clone.
+    bool drift = false;
+    std::string drift_was, drift_now;
+    const bool added = std::find(r.added.begin(), r.added.end(), registry::EntryRef{ref.registry, ref.id}) != r.added.end();
+    if (!added && fo.base.kind != Value::None) {
+        const Value& expected = chain.empty() ? fo.base : chain.back().after;
+        if (auto observed = field.decode(bytes, nullptr); observed && !(*observed == expected)) {
+            ChainRow row;
+            row.kind = registry::WriterKind::Drift;
+            row.who = registry::drift_who(g.suspects);
+            if (observed->kind == Value::List) row.list = registry::ListOp::Replace, row.list_values = observed->list;
+            else row.op.set = true, row.op.value = *observed;
+            row.after = std::move(*observed);
+            drift_was = registry::report_value_text(expected);
+            drift_now = registry::report_value_text(row.after);
+            drift = true;
+            chain.push_back(std::move(row));
+        }
+    }
     auto next = writers.begin();
     const ChainRow* pack = nullptr;
     for (; next != writers.end() && next->second.row.kind == registry::WriterKind::OldPack; ++next) {
@@ -912,6 +935,17 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
                 }
                 r.lines.push_back(std::move(line));
             }
+            if (drift) {
+                const std::string place = ref.text(), now = registry::report_value_text(chain.back().after);
+                registry::Line line;
+                line.field = ref, line.winner = first_reg->mod, line.loser = registry::drift_who(g.suspects);
+                line.certainty = registry::Certainty::BestEffort;
+                line.kind = absolute_row(*first_reg) ? registry::LineKind::Overridden : registry::LineKind::ComposedOn;
+                line.text = place + ": the game's value changed outside Kiln after the stage read it (" + drift_was + " -> " + drift_now +
+                            " before Kiln's first write in this world) and no writer Kiln knows explains it; " + line.loser + ". " +
+                            first_reg->mod + "'s edit applies over the game's value: " + now;
+                r.lines.push_back(std::move(line));
+            }
         }
     }
     if (skipped) fo.winner = pack && below && *result == *below ? pack->who : "";
@@ -920,6 +954,18 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
             fo.winner = next->second.row.who;
             chain.push_back(std::move(next->second.row));
         }
+    }
+    // a slot another writer changed after Kiln's layer (the store's compare-before-write skipped Kiln's write): the same
+    // best-effort row, last, with the value the game holds
+    if (blocked) {
+        ChainRow row;
+        row.kind = registry::WriterKind::Drift;
+        row.who = registry::drift_who(g.suspects);
+        if (result->kind == Value::List) row.list = registry::ListOp::Replace, row.list_values = result->list;
+        else row.op.set = true, row.op.value = *result;
+        row.after = *result;
+        if (fo.winner.empty() || skipped) fo.winner = row.who;
+        chain.push_back(std::move(row));
     }
     fo.chain = std::move(chain);
     fo.result = std::move(*result);
@@ -1990,7 +2036,17 @@ void registry_live_owner_gone(KilnOwner owner) {
     std::lock_guard lock(g_retiring_mu); g_retiring.insert(owner);
 }
 void registry_live_world_begin(uint32_t kind) {
+    // the drift probe's suspects, once per world: read outside the store's lock (the hook map is another service's)
+    std::function<std::vector<std::string>()> suspects;
+    {
+        std::lock_guard lock(store_mutex());
+        if (g.in) suspects = g.in->suspects;
+    }
+    // never call out under the store's lock (it is recursive: a caller holding it keeps the last world's suspects)
+    const bool ask = suspects && !store_locked_here();
+    std::vector<std::string> named = ask ? suspects() : std::vector<std::string>{};
     std::lock_guard lock(store_mutex()); g.world = ++g_next_world; g.world_kind = kind;
+    if (ask) g.suspects = std::move(named);
     if (g.in && (!g.entry_failures.empty() || !g.removal_failures.empty())) {
         g.entry_failures.clear(); g.removal_failures.clear(); rebuild_entry_stage();
     }

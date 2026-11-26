@@ -26,6 +26,7 @@ std::string report_value_text(const Value& v) {
 const char* writer_kind_name(WriterKind k) {
     switch (k) {
         case WriterKind::ArchiveWriter: return "archiveWriter";
+        case WriterKind::Drift: return "drift";
         case WriterKind::OldPatch: return "oldPatch";
         case WriterKind::OldPack: return "oldPack";
         case WriterKind::Code: return "code";
@@ -519,7 +520,9 @@ struct Target {
 
 bool absolute(const Target& t) { return t.elem() ? false : t.list == ListOp::None ? t.op().set : (t.list == ListOp::Clear || t.list == ListOp::Replace); }
 bool absolute(const ChainRow& r) { return r.element.on ? false : r.list == ListOp::None ? r.op.set : (r.list == ListOp::Clear || r.list == ListOp::Replace); }
-Certainty certainty_of(WriterKind k) { return k == WriterKind::ArchiveWriter ? Certainty::Named : Certainty::Certain; }
+Certainty certainty_of(WriterKind k) {
+    return k == WriterKind::ArchiveWriter ? Certainty::Named : k == WriterKind::Drift ? Certainty::BestEffort : Certainty::Certain;
+}
 
 // The place a target names, for messages: "items[game:x].maxStack", "items[game:x].damageSetup.dmgMod (raw)".
 std::string place_text(const Target& t) {

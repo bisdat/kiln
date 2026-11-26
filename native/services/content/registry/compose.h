@@ -77,8 +77,9 @@ struct BaseModel {
 };
 
 // Check: the stage's reference check itself (a list element naming an entry the stage removed, taken out of an entry of a
-// registry whose entries are not removed).
-enum class WriterKind : uint8_t { ArchiveWriter, OldPatch, OldPack, Code, Registry, Check };
+// registry whose entries are not removed). Drift: the live back-end's best-effort drift probe (drift.h): the game's value
+// changed outside Kiln and no writer Kiln knows explains it (never composed; a report row only).
+enum class WriterKind : uint8_t { ArchiveWriter, OldPatch, OldPack, Code, Registry, Check, Drift };
 const char* writer_kind_name(WriterKind k);
 
 // A write below the registry: an old Kiln path, or an archive-writer package the journal names (D1).

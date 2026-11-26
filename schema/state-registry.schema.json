@@ -504,9 +504,10 @@
             "oldPack",
             "code",
             "registry",
-            "check"
+            "check",
+            "drift"
           ],
-          "description": "archiveWriter: a ShroudForge or EML package that wrote the entry's resource in the archive before Kiln (named from kiln-eml's change journal; its value is the base); oldPatch: an older Kiln boot resource patch; oldPack: an older Kiln data pack; code: a Content.* change made by code; registry: a registry edit. check: the stage's reference check (list elements naming an entry the stage removed, taken out of an entry of a registry whose entries are not removed)."
+          "description": "archiveWriter: a ShroudForge or EML package that wrote the entry's resource in the archive before Kiln (named from kiln-eml's change journal; its value is the base); oldPatch: an older Kiln boot resource patch; oldPack: an older Kiln data pack; code: a Content.* change made by code; registry: a registry edit. check: the stage's reference check (list elements naming an entry the stage removed, taken out of an entry of a registry whose entries are not removed). drift (since 0.2.0-dev.31.14): the best-effort drift probe found the game's value changed outside Kiln (between the stage's read and Kiln's first write in the world, or after Kiln's layer) with no writer Kiln knows to explain it; who names the suspects Kiln can see, certainty bestEffort."
         },
         "mod": {
           "type": "string",
@@ -514,7 +515,7 @@
         },
         "who": {
           "type": "string",
-          "description": "What the writer is called when that is not just the mod: \"<mod>: content/<file>\", \"<mod>/<key>\", \"shroudforge:<package>\", \"eml:<package>\" (an EML package of the kiln-mode startup pass), \"kiln-eml:unattributed\" (a startup write no package made)."
+          "description": "What the writer is called when that is not just the mod: \"<mod>: content/<file>\", \"<mod>/<key>\", \"shroudforge:<package>\", \"eml:<package>\" (an EML package of the kiln-mode startup pass), \"kiln-eml:unattributed\" (a startup write no package made), \"outside Kiln (best effort; suspects: ...)\" (a drift row)."
         },
         "stage": {
           "enum": [
