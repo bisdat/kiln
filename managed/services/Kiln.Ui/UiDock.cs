@@ -34,7 +34,7 @@ public enum DockSide
 /// (<see cref="Ui.FindWindow"/>): what <see cref="UiWindow.DockTo"/> takes. The handle is a name, looked up each time it is
 /// used: it keeps nothing of the other mod alive, and when that mod reloads and makes its window again (the same id, still
 /// accepting docks), the same handle answers it, and a window docked to it goes back beside it. Two handles of the same mod
-/// and id are equal. Any thread. Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).
+/// and id are equal (<see cref="Equals(UiWindowHandle?)"/> and <c>==</c>). Any thread. Since 0.2.0-dev.31.16, mod API 0.2.23 (GitHub issue 149).
 /// </summary>
 public sealed class UiWindowHandle : IEquatable<UiWindowHandle>
 {
@@ -70,6 +70,13 @@ public sealed class UiWindowHandle : IEquatable<UiWindowHandle>
 
     /// <summary>The same mod and placement id.</summary>
     public override bool Equals(object? obj) => Equals(obj as UiWindowHandle);
+
+    /// <summary>The same mod and placement id (both null: true), like <see cref="Equals(UiWindowHandle?)"/>: each
+    /// <see cref="Ui.FindWindow"/> makes a new handle, so <c>window.DockedTo == Ui.FindWindow(...)</c> compares the names.</summary>
+    public static bool operator ==(UiWindowHandle? left, UiWindowHandle? right) => left is null ? right is null : left.Equals(right);
+
+    /// <summary>Not the same mod and placement id.</summary>
+    public static bool operator !=(UiWindowHandle? left, UiWindowHandle? right) => !(left == right);
 
     /// <summary>Of the mod and placement id.</summary>
     public override int GetHashCode() => HashCode.Combine(ModId, PlacementId);

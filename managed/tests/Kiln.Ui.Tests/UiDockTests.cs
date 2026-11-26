@@ -236,6 +236,10 @@ public sealed unsafe class UiDockTests : IDisposable
         Assert.True(h.Open);
         Assert.Null(h.Placement);  // not drawn yet
         Assert.Equal(h, Ui.FindWindow("betterspells", "spells"));
+        Assert.True(h == Ui.FindWindow("betterspells", "spells"));  // a name: == too, not the same object
+        Assert.False(h != Ui.FindWindow("betterspells", "spells"));
+        Assert.True(h != null && null != h);
+        Assert.False(h == Ui.FindWindow("grimoire", "spells"));
         Assert.Null(Ui.FindWindow("betterspells", "book"));  // no AcceptDock: not found, not dockable, not readable
         Assert.Null(Ui.FindWindow("betterspells", "nothing"));
         Assert.Null(Ui.FindWindow("someone", "spells"));

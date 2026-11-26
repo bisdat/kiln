@@ -29,3 +29,5 @@ override Kiln.UiWindowHandle.Equals(object? obj) -> bool
 override Kiln.UiWindowHandle.GetHashCode() -> int
 override Kiln.UiWindowHandle.ToString() -> string!
 static Kiln.Ui.FindWindow(string! modId, string! placementId) -> Kiln.UiWindowHandle?
+static Kiln.UiWindowHandle.operator !=(Kiln.UiWindowHandle? left, Kiln.UiWindowHandle? right) -> bool
+static Kiln.UiWindowHandle.operator ==(Kiln.UiWindowHandle? left, Kiln.UiWindowHandle? right) -> bool
