@@ -52,6 +52,25 @@ internal static class BootFingerprint
         return d;
     }
 
+    // Set by the registry dispatcher, read through the same reflection seam as Current(). No state-file reads:
+    // a previous process's registry.json must never become this process's join fingerprint.
+    internal static Func<string?>? RegistrySource;
+
+    internal static string? RegistryCurrent()
+    {
+        try
+        {
+            if (RegistrySource?.Invoke() is not { } text) return null;
+            using var doc = JsonDocument.Parse(text);
+            if (!doc.RootElement.TryGetProperty("bootSync", out var sync) || sync.ValueKind != JsonValueKind.Object ||
+                !sync.TryGetProperty("values", out var values) || !sync.TryGetProperty("order", out var order)) return null;
+            static bool Hash(string? s) => s is { Length: 64 } && s.AsSpan().IndexOfAnyExcept("0123456789abcdef") < 0;
+            var v = values.GetString(); var o = order.GetString();
+            return Hash(v) && Hash(o) ? $"1:{v}:{o}" : null;
+        }
+        catch (Exception) { return null; } // an older/unavailable native service supplies no additive part
+    }
+
     /// <summary>The fingerprint of mod <paramref name="modId"/> (folder <paramref name="directory"/>) over the envelope's
     /// <paramref name="collectors"/> (collector -> [{owner, key, document}]) and its blocks files' resource patches: lower-case SHA-256 hex.</summary>
     internal static string Of(string modId, string directory, JsonObject collectors)

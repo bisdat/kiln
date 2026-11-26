@@ -83,6 +83,9 @@ public sealed class RegistryFieldAttribute : Attribute
 
     /// <summary>When an edit of the field takes effect.</summary>
     public RegistryApplies Applies { get; }
+
+    /// <summary>Multiplayer visibility: now, worldLoad, rejoin, restart, serverOnly, localOnly, or unknown. Separate from local Applies.</summary>
+    public string JoinedClient { get; set; } = "unknown";
 }
 
 /// <summary>The type of a registry field.</summary>
@@ -168,7 +171,9 @@ public sealed class RegistryFieldSpec
     public RegistryFieldType? Element { get; }
     /// <summary>When an edit takes effect.</summary>
     public RegistryApplies Applies { get; }
-    /// <summary>What edits it takes.</summary>
+    /// <summary>When a joined Kiln client consumes a server edit: now, worldLoad, rejoin, restart, serverOnly, localOnly, or unknown. See the registry guide.</summary>
+    public string JoinedClient { get; internal init; } = "unknown";
+    /// <summary>What edits the field takes.</summary>
     public RegistryOps Ops { get; }
     /// <summary>The lowest value (a list of numbers: of its elements).</summary>
     public double? Min { get; }

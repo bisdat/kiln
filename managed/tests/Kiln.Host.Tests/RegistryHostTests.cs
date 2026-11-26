@@ -24,6 +24,16 @@ public sealed class RegistryHostTests
         var json = RegistryHost.OrderJson([("late", "1.0.0"), ("author", "2.0.0")], new HashSet<string>(StringComparer.Ordinal) { "author" });
         Assert.Equal("""[{"mod":"late","version":"1.0.0"},{"mod":"author","version":"2.0.0","registry":true}]""", json);
     }
+    // The join's registry fingerprint leaves out the fields a one-side mod writes: the stage learns the side from the order.
+    [Fact]
+    public void OneSideModsCarryTheirSideInTheOrder()
+    {
+        var sides = new Dictionary<string, ManifestSide>(StringComparer.Ordinal)
+            { ["shared"] = ManifestSide.Both, ["admin"] = ManifestSide.Server, ["hud"] = ManifestSide.Client };
+        var json = RegistryHost.OrderJson([("shared", "1.0.0"), ("admin", "1.0.0"), ("hud", "1.0.0")], null, sides);
+        Assert.Equal("""[{"mod":"shared","version":"1.0.0"},{"mod":"admin","version":"1.0.0","side":"server"},{"mod":"hud","version":"1.0.0","side":"client"}]""", json);
+    }
+
     [Fact]
     public void ADifferentOnBootOrderIsNamed()
     {

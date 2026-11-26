@@ -37,6 +37,7 @@ SECTION = "schema/registry-section.schema.json"
 DOCS = "docs/kiln/modding/registries"
 
 APPLIES = ("now", "worldLoad", "restart")
+JOINED_CLIENT = ("now", "worldLoad", "rejoin", "restart", "serverOnly", "localOnly", "unknown")
 TYPES = ("int", "float", "bool", "enum", "flags", "ref", "time", "struct", "list")
 NUMBERS = ("int", "float", "time")
 RESERVED_MODS = ("game", "kiln")
@@ -302,7 +303,7 @@ def check_registry(d, name):
 
 
 FIELD_KEYS = {"type", "doc", "applies", "ops", "readOnly", "min", "max", "unit", "values", "registry", "fields", "of",
-              "maxItems", "formula", "side", "since", "typeName", "optional", "fixedLength", "lengthField", "lengthOffset"}
+              "maxItems", "formula", "side", "since", "typeName", "optional", "fixedLength", "lengthField", "lengthOffset", "joinedClient"}
 
 
 def walk(reg, fields, prefix, applies, list_path, read_only, errors, known):
@@ -333,6 +334,8 @@ def walk(reg, fields, prefix, applies, list_path, read_only, errors, known):
             errors.append(f"{q}: applies {a!r} is not one of now, worldLoad, restart")
         if spec.get("side", "both") not in ("both", "server", "client"):
             errors.append(f"{q}: side is one of both, server, client")
+        if "joinedClient" in spec and spec["joinedClient"] not in JOINED_CLIENT:
+            errors.append(f"{q}: joinedClient is one of {', '.join(JOINED_CLIENT)}")
         ro = bool(spec.get("readOnly", read_only))
         if spec.get("optional") is not None and (t != "ref" or not isinstance(spec.get("optional"), bool)):
             errors.append(f"{q}: optional (true or false) is for ref fields only")
@@ -822,6 +825,7 @@ def render_native(model, lock):
            "    const char* length_field;  // a list as long as this field's value + length_offset (\"\": none)",
            "    int32_t length_offset;",
            "    Side side = Side::Both;  // which game process reads the field",
+           '    const char* joined_client = "unknown";  // additive schema metadata, not local applies',
            "};",
            "",
            "struct Registry {",
@@ -854,7 +858,7 @@ def render_native(model, lock):
         values = "|".join(el.get("values", [])) if el.get("type") in ("enum", "flags") else ""
         ref = el.get("registry", "") if el.get("type") == "ref" else ""
         side = s.get("side", "both")
-        side_init = f", Side::{pascal(side)}" if side != "both" else ""
+        side_init = f", Side::{pascal(side)}, {cstr(s.get('joinedClient', 'unknown'))}"
         out.append(f"    {{0x{field_id(lock, r):08x}u, {cstr(r.registry)}, {cstr(r.path)}, Kind::{NATIVE_KIND[r.kind]}, "
                    f"Kind::{NATIVE_KIND[r.element or r.kind]}, "
                    f"{'true' if el.get('min') is not None else 'false'}, {'true' if el.get('max') is not None else 'false'}, "
@@ -924,7 +928,8 @@ class CsWriter:
         return f"{self.fields_class}.{pascal(row.path.replace('[]', ' ').replace('.', ' '))}"
 
     def prop(self, row, name, indent):
-        attr = f'{indent}[RegistryField("{row.qualified}", RegistryApplies.{pascal(row.applies)})]'
+        marker = f', JoinedClient = "{row.spec["joinedClient"]}"' if "joinedClient" in row.spec else ""
+        attr = f'{indent}[RegistryField("{row.qualified}", RegistryApplies.{pascal(row.applies)}{marker})]'
         doc = summary(row.spec.get("doc"), indent)
         fid = self.fid(row)
         if row.kind == "list":
@@ -1095,7 +1100,7 @@ def render_cs_catalog(model, lock):
                          f"{int(s.get('maxItems') or 0)}, {vals}, {ref}, {unit}, {json.dumps(formula) if formula else 'null'}, "
                          f"{'true' if r.read_only else 'false'}, {'true' if s.get('optional') else 'false'}, {int(s.get('fixedLength') or 0)}, "
                          f"{json.dumps(s['lengthField']) if s.get('lengthField') else 'null'}, {int(s.get('lengthOffset') or 0)}, "
-                         f"\"{lock['registries'][reg.name]['fields'][r.path]['since']}\"),")
+                         f"\"{lock['registries'][reg.name]['fields'][r.path]['since']}\") {{ JoinedClient = \"{s.get('joinedClient', 'unknown')}\" }},")
     lines += ["    };", "",
               "    private static readonly global::System.Collections.Generic.Dictionary<string, string> s_versions = new()",
               "    {"] + vers + ["    };", "}"]
@@ -1256,13 +1261,13 @@ def render_doc(model, lock, reg):
            "value or a number operation. A field of a list's elements is named with [] in this table and with the element's "
            f"index in an edit ({code('entries[3].chance')}, or [*] for every element). Mapping: whether this Kiln maps the "
            "field onto the game; an unproven or unmapped field is refused per entry, with the reason, until a Kiln update "
-           "maps it.",
+           "maps it. Joined client: when a joined Kiln client consumes a server edit; see [README](README.md#what-a-joined-client-sees).",
            ""]
     groups = struct_docs(d.get("fields") or {}, "")
     if groups:
         out += ["Groups of fields:", ""] + [f"- {code(p)}: {doc}" for p, doc in groups] + [""]
-    out += ["| Field | Type | Applies | Ops | Since | Mapping | About |",
-            "|---|---|---|---|---|---|---|"]
+    out += ["| Field | Type | Applies | Ops | Since | Mapping | Joined client | About |",
+            "|---|---|---|---|---|---|---|---|"]
     rows_map = regmap_rows(model.root, reg.name)
     for r in reg.rows:
         about = r.spec.get("doc") or ""
@@ -1274,7 +1279,7 @@ def render_doc(model, lock, reg):
         ops = "read-only" if r.read_only else r.ops
         about = about.replace("|", "/")
         out.append(f"| {code(r.path)} | {type_text(r)} | {r.applies} | {ops} | {lr['fields'][r.path]['since']} | "
-                   f"{mapping_text(rows_map, r.path)} | {about} |")
+                   f"{mapping_text(rows_map, r.path)} | {r.spec.get('joinedClient', 'unknown')} | {about} |")
     out.append("")
     traits = d.get("traits") or {}
     if traits:

@@ -477,7 +477,10 @@ internal static class NetEngine
                 bootDiffers[detail] = (m.Id, m.Version, ModName(m.Id));
             }
         }
+        var registryDifference = BootGate.RegistryDifference(hello.Properties, LocalMods(client: false), hello.Mods, out var registryNote);
+        if (registryDifference is not null) missing.Add(registryDifference);
         var bootNotes = BootGate.LeftOut(serverBoot, clientBoot);
+        if (registryNote is not null) bootNotes.Add(registryNote);  // the log only: same values, nothing to refuse or warn about
         var bootNote = bootNotes.Count > 0 ? " (boot: " + string.Join("; ", bootNotes.Take(4)) + ")" : "";
         var serverIds = LocalMods(client: false).Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var cm in hello.Mods)
@@ -503,7 +506,7 @@ internal static class NetEngine
                 refusedFor = missing.Where(m => lacking.Any(id => m.StartsWith(id + " ", StringComparison.Ordinal))).ToList();
             }
         }
-        var reason = refuse ? RefusalReason(refusedFor, bootDiffers) : "";
+        var reason = refuse ? RefusalReason(refusedFor, bootDiffers, registryDifference) : "";
         // Different material ids show the wrong walls whatever the mod lists say. modSync off is the operator's own call.
         if (_config.ModSync != ModSyncPolicy.Off && WorldTablesGate.Difference(hello.Properties) is { } tables)
         {
@@ -560,7 +563,7 @@ internal static class NetEngine
         var warnings = new List<string>();
         if (_config.ModSync != ModSyncPolicy.Off)
         {
-            warnings.AddRange(missing.Select(m => bootDiffers.TryGetValue(m, out var b) ? BootGate.Warning(b.Name, b.Id, b.Version) : "server mod not on this client: " + m));
+            warnings.AddRange(missing.Select(m => m == registryDifference ? m : bootDiffers.TryGetValue(m, out var b) ? BootGate.Warning(b.Name, b.Id, b.Version) : "server mod not on this client: " + m));
             warnings.AddRange(extra.Select(m => "client mod not on the server: " + m));
         }
         p.Warnings = warnings;
@@ -588,8 +591,13 @@ internal static class NetEngine
 
     /// <summary>A refused hello's reason: the mods it lacks as before, then, for a mod whose boot content differs, what to do about it
     /// (BootGate.Reason). Without such a mod the text is the one it always was.</summary>
-    private static string RefusalReason(IReadOnlyList<string> refusedFor, IReadOnlyDictionary<string, (string Id, string Version, string Name)> boot)
+    private static string RefusalReason(IReadOnlyList<string> refusedFor, IReadOnlyDictionary<string, (string Id, string Version, string Name)> boot, string? registry = null)
     {
+        if (registry is not null && refusedFor.Contains(registry))
+        {
+            var rest = refusedFor.Where(d => d != registry).ToList();
+            return (rest.Count > 0 ? RefusalReason(rest, boot) + ". " : "") + registry;
+        }
         if (!refusedFor.Any(boot.ContainsKey)) return "This server requires mods you do not have: " + string.Join(", ", refusedFor.Take(8));
         var lacking = refusedFor.Where(d => !boot.ContainsKey(d)).ToList();
         var text = BootGate.Reason(refusedFor.Where(boot.ContainsKey).Select(d => boot[d].Name).ToList());

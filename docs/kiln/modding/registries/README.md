@@ -275,6 +275,54 @@ A field whose read time Kiln has not traced yet ships with the more cautious val
 unproven mapping (refused per entry, with a reason, until a Kiln update proves it): items.block, items.fuel.burnTime and
 items.comfort in this release. Each page's Mapping column says which fields this Kiln maps, which are unproven and why.
 
+### What a joined client sees
+
+`applies` describes when the **local game** consumes a value. The separate, per-field `joinedClient` marker in the
+schema, `RegistrySchema.Find(...).JoinedClient`, the generated property's `RegistryFieldAttribute.JoinedClient` and
+each generated page's **Joined client** column describe the multiplayer path. Keeping it separate is additive:
+`RegistryApplies` and its three existing values keep their meaning, and no existing property constructor changes.
+
+| Joined client | Server edit on an already joined Kiln client |
+|---|---|
+| `now` | ContentSync transfers the effective item/recipe layer; the client uses it at the next use after receipt. Not instantaneous: generation/changed-count updates are checked periodically, and value-only changes are exported at least every 10 seconds while sync is enabled. |
+| `worldLoad` | ContentSync transfers the layer, but a consumer that read it at world load (notably stack clamping) is not replayed. The next client world load consumes it. |
+| `restart` | Not transferred by ContentSync. Both sides need the same boot values at process start; the join compares the resolved values when both peers send them ([network.md](../../network.md#registry-boot-values-and-order)). A rejoin alone is not enough. |
+| `serverOnly` | The client needs no copy for this field; server outcomes apply. There is no client-held value to refresh. |
+| `localOnly` | The server does not author/sync this field (for example client-side recipe unlock rules). The client's own mod authors it locally. |
+| `rejoin` | A client-held field would refresh only at the next join, not during the current connection. No shipped registry field currently uses this marker. |
+| `unknown` | Read timing/mapping is unproven or missing; the edit is refused, not promised to become visible on rejoin. |
+
+These are field contracts, not proof of a specific UI refreshing or an equipped/save-backed instance being rebuilt.
+ContentSync must be enabled on both sides; vanilla clients keep their own UI/prediction numbers. Skills node costs are
+**not** registry fields; their independently built client tree can retain an old cost until rejoining with matching
+files ([data-pack caveat](../../services/content.md#multiplayer-registry-and-skills-edits)).
+
+### Registry-only packs: choosing `clients`
+
+`clients: "kiln"` always bars vanilla clients by the normal join policy, even if every edit is server-only. For a
+**data-only pack with only a `registry` section**, choose the strictest requirement of the fields it edits:
+
+| Fields / operation | `clients` | Why |
+|---|---|---|
+| `loot`, `drops`; any `serverOnly` field (including the read-only balance gear constants, which cannot be edited) | `none` | Only the server needs the values. |
+| Synced `items` / `recipes` fields (`now` or `worldLoad`) | `kiln` for matching UI/prediction; `none` deliberately permits vanilla UI/prediction | Kiln clients get server layers; vanilla clients do not. |
+| Client-needed `balance` fields (`restart`) | `mod`, with `side: "both"` | Each process must bake its own matching value/settings and load order; `kiln` alone cannot transfer it. |
+| Client-only fields (`localOnly`, currently `recipes.unlock`) | `mod`, with `side: "both"` | The client's own mod supplies them; a dedicated server refuses client-only edits. |
+| Item/recipe entry add/remove | At least `kiln`; `mod` for custom assets or other client-local content | Definitions and visibility are not just scalar server rules. Existing content/look-alike rules still apply. Loot removal alone remains server-only (`none`). |
+| Unproven/unknown or raw fields | Inspect the field/refusal first | No automatic safety claim; lint does not guess. |
+
+For `items`, `rolled`, `socket` and the read-only `hasDamage` / `hasArmor` are `serverOnly` under the current
+mapping (`staminaCost` follows ContentSync like `manaCost`: the server charges it, but a client's tooltip and prediction
+read their own copy); `block`, `comfort` and `fuel.burnTime` are `unknown` until their read timing is proven. Other item
+fields follow ContentSync. `recipes.station` is read-only/server-only; the remaining recipe fields sync except
+`unlock`. `loot`/`drops` never require a client copy. The generated pages are the per-field reference.
+
+`kiln lint` / `kiln-manage lint` reports `KL213` for a registry-only pack whose effective `clients` requirement differs
+from those fields, with a suggested value. It does not silently change admission, lower a mixed/code mod's policy, or
+infer that raw/unknown fields are safe. A mixed pack follows the requirements of **all** its content, not just registry
+edits. A server operator may intentionally admit vanilla clients for synced existing-item/recipe tweaks; retain that
+choice knowingly rather than assuming vanilla clients acquire the server's numbers.
+
 **Lists.** A list of plain values (`items.perks`) takes clear, append, remove (by value) and replace; a list of entries
 with fields (`recipes.inputs`) takes clear, append (a new entry, then its fields) and remove (the entries a condition
 picks, named by their values), so two mods' appends and removals stack. A list of fixed length (`balance.xpPerLevel`,

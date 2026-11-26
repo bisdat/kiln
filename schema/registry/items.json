@@ -24,7 +24,8 @@
       "max": 65535,
       "applies": "worldLoad",
       "ops": "number",
-      "doc": "The largest stack. In place before the world's save is read: a lower value cuts stacks in that save."
+      "doc": "The largest stack. In place before the world's save is read: a lower value cuts stacks in that save.",
+      "joinedClient": "worldLoad"
     },
     "rarity": {
       "type": "enum",
@@ -38,13 +39,15 @@
       "applies": "now",
       "ops": "set",
       "doc": "The rarity a new copy gets when it does not roll one. Copies that exist keep theirs.",
-      "typeName": "RegistryRarity"
+      "typeName": "RegistryRarity",
+      "joinedClient": "now"
     },
     "rolled": {
       "type": "bool",
       "applies": "now",
       "ops": "set",
-      "doc": "New copies roll their rarity (and perks) instead of taking rarity. Copies that exist keep theirs."
+      "doc": "New copies roll their rarity (and perks) instead of taking rarity. Copies that exist keep theirs.",
+      "joinedClient": "serverOnly"
     },
     "levels": {
       "type": "struct",
@@ -56,14 +59,16 @@
           "min": 1,
           "max": 105,
           "ops": "number",
-          "doc": "The lowest level (also the level power and armour are shown at)."
+          "doc": "The lowest level (also the level power and armour are shown at).",
+          "joinedClient": "now"
         },
         "max": {
           "type": "int",
           "min": 1,
           "max": 105,
           "ops": "number",
-          "doc": "The highest level."
+          "doc": "The highest level.",
+          "joinedClient": "now"
         }
       },
       "typeName": "ItemLevels"
@@ -72,7 +77,8 @@
       "type": "bool",
       "applies": "now",
       "ops": "set",
-      "doc": "New copies get a gem socket."
+      "doc": "New copies get a gem socket.",
+      "joinedClient": "serverOnly"
     },
     "perks": {
       "type": "list",
@@ -83,7 +89,8 @@
       "maxItems": 5,
       "applies": "now",
       "ops": "list",
-      "doc": "The perk of each rarity slot, common first. A copy fills rarity + 1 slots. New copies only."
+      "doc": "The perk of each rarity slot, common first. A copy fills rarity + 1 slots. New copies only.",
+      "joinedClient": "now"
     },
     "power": {
       "type": "int",
@@ -92,7 +99,8 @@
       "applies": "now",
       "ops": "number",
       "formula": "gear.power",
-      "doc": "The damage the tooltip shows at levels.min. Kiln solves the game's damage factor for it with the balance table's constants."
+      "doc": "The damage the tooltip shows at levels.min. Kiln solves the game's damage factor for it with the balance table's constants.",
+      "joinedClient": "now"
     },
     "speed": {
       "type": "float",
@@ -100,13 +108,15 @@
       "max": 100,
       "applies": "now",
       "ops": "number",
-      "doc": "The speed factor of the weapon's damage (multiplies power)."
+      "doc": "The speed factor of the weapon's damage (multiplies power).",
+      "joinedClient": "now"
     },
     "hasDamage": {
       "type": "bool",
       "readOnly": true,
       "applies": "now",
-      "doc": "The item deals damage (power, speed and damage apply)."
+      "doc": "The item deals damage (power, speed and damage apply).",
+      "joinedClient": "serverOnly"
     },
     "damage": {
       "type": "struct",
@@ -118,91 +128,104 @@
           "min": 0,
           "max": 10,
           "ops": "number",
-          "doc": "The share of a hit dealt as cut damage."
+          "doc": "The share of a hit dealt as cut damage.",
+          "joinedClient": "now"
         },
         "pierce": {
           "type": "float",
           "min": 0,
           "max": 10,
           "ops": "number",
-          "doc": "The share of a hit dealt as pierce damage."
+          "doc": "The share of a hit dealt as pierce damage.",
+          "joinedClient": "now"
         },
         "blunt": {
           "type": "float",
           "min": 0,
           "max": 10,
           "ops": "number",
-          "doc": "The share of a hit dealt as blunt damage."
+          "doc": "The share of a hit dealt as blunt damage.",
+          "joinedClient": "now"
         },
         "fire": {
           "type": "float",
           "min": 0,
           "max": 10,
           "ops": "number",
-          "doc": "The share of a hit dealt as fire damage."
+          "doc": "The share of a hit dealt as fire damage.",
+          "joinedClient": "now"
         },
         "ice": {
           "type": "float",
           "min": 0,
           "max": 10,
           "ops": "number",
-          "doc": "The share of a hit dealt as ice damage."
+          "doc": "The share of a hit dealt as ice damage.",
+          "joinedClient": "now"
         },
         "shroud": {
           "type": "float",
           "min": 0,
           "max": 10,
           "ops": "number",
-          "doc": "The share of a hit dealt as shroud damage."
+          "doc": "The share of a hit dealt as shroud damage.",
+          "joinedClient": "now"
         },
         "lightning": {
           "type": "float",
           "min": 0,
           "max": 10,
           "ops": "number",
-          "doc": "The share of a hit dealt as lightning damage."
+          "doc": "The share of a hit dealt as lightning damage.",
+          "joinedClient": "now"
         },
         "poison": {
           "type": "float",
           "min": 0,
           "max": 10,
           "ops": "number",
-          "doc": "The share of a hit dealt as poison damage."
+          "doc": "The share of a hit dealt as poison damage.",
+          "joinedClient": "now"
         },
         "healing": {
           "type": "float",
           "min": 0,
           "max": 10,
           "ops": "number",
-          "doc": "The share of a hit that heals instead of hurting; not counted in the hit shares."
+          "doc": "The share of a hit that heals instead of hurting; not counted in the hit shares.",
+          "joinedClient": "now"
         },
         "wood": {
           "type": "int",
           "min": 0,
           "max": 1000000,
           "ops": "number",
-          "doc": "The damage a hit deals to wood, a whole number."
+          "doc": "The damage a hit deals to wood, a whole number.",
+          "joinedClient": "now"
         },
         "stone": {
           "type": "int",
           "min": 0,
           "max": 1000000,
           "ops": "number",
-          "doc": "The damage a hit deals to stone, a whole number."
+          "doc": "The damage a hit deals to stone, a whole number.",
+          "joinedClient": "now"
         },
         "metal": {
           "type": "int",
           "min": 0,
           "max": 1000000,
           "ops": "number",
-          "doc": "The damage a hit deals to metal, a whole number."
+          "doc": "The damage a hit deals to metal, a whole number.",
+          "joinedClient": "now"
         },
         "explosion": {
           "type": "int",
           "min": 0,
           "max": 1000000,
           "ops": "number",
-          "doc": "The explosion damage a hit deals, a whole number."
+          "doc": "The explosion damage a hit deals, a whole number.",
+          "joinedClient": "now"
         }
       },
       "typeName": "ItemDamage"
@@ -211,7 +234,8 @@
       "type": "bool",
       "readOnly": true,
       "applies": "now",
-      "doc": "The item gives armour (armor applies)."
+      "doc": "The item gives armour (armor applies).",
+      "joinedClient": "serverOnly"
     },
     "armor": {
       "type": "struct",
@@ -224,63 +248,72 @@
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The physical armour the tooltip shows at levels.min."
+          "doc": "The physical armour the tooltip shows at levels.min.",
+          "joinedClient": "now"
         },
         "magical": {
           "type": "int",
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The magical armour the tooltip shows at levels.min."
+          "doc": "The magical armour the tooltip shows at levels.min.",
+          "joinedClient": "now"
         },
         "cut": {
           "type": "int",
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The cut armour the tooltip shows at levels.min."
+          "doc": "The cut armour the tooltip shows at levels.min.",
+          "joinedClient": "now"
         },
         "pierce": {
           "type": "int",
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The pierce armour the tooltip shows at levels.min."
+          "doc": "The pierce armour the tooltip shows at levels.min.",
+          "joinedClient": "now"
         },
         "blunt": {
           "type": "int",
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The blunt armour the tooltip shows at levels.min."
+          "doc": "The blunt armour the tooltip shows at levels.min.",
+          "joinedClient": "now"
         },
         "fire": {
           "type": "int",
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The fire armour the tooltip shows at levels.min."
+          "doc": "The fire armour the tooltip shows at levels.min.",
+          "joinedClient": "now"
         },
         "ice": {
           "type": "int",
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The ice armour the tooltip shows at levels.min."
+          "doc": "The ice armour the tooltip shows at levels.min.",
+          "joinedClient": "now"
         },
         "shroud": {
           "type": "int",
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The shroud armour the tooltip shows at levels.min."
+          "doc": "The shroud armour the tooltip shows at levels.min.",
+          "joinedClient": "now"
         },
         "lightning": {
           "type": "int",
           "min": 0,
           "max": 100000,
           "ops": "number",
-          "doc": "The lightning armour the tooltip shows at levels.min."
+          "doc": "The lightning armour the tooltip shows at levels.min.",
+          "joinedClient": "now"
         }
       },
       "typeName": "ItemArmor"
@@ -291,7 +324,8 @@
       "max": 1,
       "applies": "worldLoad",
       "ops": "number",
-      "doc": "How well the item blocks (0 to 1). When the game reads it is not traced yet: unproven until a Kiln update maps it."
+      "doc": "How well the item blocks (0 to 1). When the game reads it is not traced yet: unproven until a Kiln update maps it.",
+      "joinedClient": "unknown"
     },
     "staminaCost": {
       "type": "float",
@@ -299,7 +333,8 @@
       "max": 100000,
       "applies": "now",
       "ops": "number",
-      "doc": "The stamina a use costs, at the next payment."
+      "doc": "The stamina a use costs, at the next payment.",
+      "joinedClient": "now"
     },
     "manaCost": {
       "type": "float",
@@ -307,7 +342,8 @@
       "max": 100000,
       "applies": "now",
       "ops": "number",
-      "doc": "The mana a use costs, at the next cast."
+      "doc": "The mana a use costs, at the next cast.",
+      "joinedClient": "now"
     },
     "fuel": {
       "type": "struct",
@@ -320,7 +356,8 @@
           "min": 0,
           "max": 86400,
           "ops": "number",
-          "doc": "How long one item burns."
+          "doc": "How long one item burns.",
+          "joinedClient": "unknown"
         }
       },
       "typeName": "ItemFuel"
@@ -331,7 +368,8 @@
       "max": 1000,
       "applies": "worldLoad",
       "ops": "number",
-      "doc": "The comfort the item gives when placed. When the game reads it is not traced yet: unproven until a Kiln update maps it."
+      "doc": "The comfort the item gives when placed. When the game reads it is not traced yet: unproven until a Kiln update maps it.",
+      "joinedClient": "unknown"
     }
   },
   "entry": {

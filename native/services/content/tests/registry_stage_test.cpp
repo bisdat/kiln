@@ -236,6 +236,105 @@ std::vector<boothook::OldDoc> old_patch() {
     return {d};
 }
 
+void boot_sync(const std::string& dir) {
+    // One start of mods a (levelCap) and b (b_field, "" = no mod b) with the join's registry part it publishes; null: none.
+    // b_side: "" = both; "order:<side>" = Kiln.Host's set_order names it; "file:<side>" = only its kiln.mod.json (the data file) does.
+    struct Opt {
+        int cap = 60, points = 3;
+        bool reverse = false, needs = true;
+        std::string b_side, b_field = "skillPointsPerLevel";
+        std::string refused;          // the boot write this game refuses: "levelCap", "skillPointsPerLevel", "*" (both)
+        bool cap_unmapped = false;    // this game build's record does not map balance.levelCap
+        bool code_fault = false;      // a side-both mod's native stage callback faults
+        bool no_base = false;         // the stage cannot read the game's base
+        std::string unwritten;        // a boot field no write outcome reaches (the bridge never saw it)
+    };
+    auto run = [&](const Opt& o) -> json {
+        TreeView view = world();
+        Files files;
+        auto e = env_of(&view, &files, dir, nullptr);
+        e.data = [=](const Schema& schema) {
+            auto a = stage::read_sections("a", "1", {{"content/a.json", json{{"registry", {{"alter", json::array({
+                {{"registry", "balance"}, {"select", "game:balance"}, {"field", "levelCap"}, {"op", o.cap}}
+            })}}}}.dump()}}, schema);
+            if (o.b_field.empty()) return a;
+            auto b = stage::read_sections("b", "1", {{"content/b.json", json{{"registry", {{"alter", json::array({
+                {{"registry", "balance"}, {"select", "game:balance"}, {"field", o.b_field}, {"op", o.points}}
+            })}}}}.dump()}}, schema);
+            if (o.b_side.rfind("file:", 0) == 0)
+                for (auto& f : b) f.side = o.b_side.substr(5);
+            a.insert(a.end(), b.begin(), b.end());
+            return a;
+        };
+        auto mapping = e.regmap;
+        e.regmap = [=](map::RegMap* rm, std::vector<std::string>* errors) {
+            bool ok = mapping(rm, errors);
+            rm->registries.at("balance").rows.at("skillPointsPerLevel").client_needs = o.needs;
+            if (o.cap_unmapped) rm->build.rows["balance.levelCap"] = map::BuildRow::Changed;
+            return ok;
+        };
+        if (o.no_base) e.source = [](std::string* why) -> std::unique_ptr<model::Source> { *why = "test: no base"; return nullptr; };
+        stage::Runner r(std::move(e));
+        const std::string bj = o.b_side.rfind("order:", 0) == 0 ? R"({"mod":"b","side":")" + o.b_side.substr(6) + R"("})" : R"({"mod":"b"})";
+        if (o.b_field.empty()) r.set_order(R"([{"mod":"a"}])");
+        else r.set_order(o.reverse ? "[" + bj + R"(,{"mod":"a"}])" : R"([{"mod":"a"},)" + bj + "]");
+        uint64_t h = 0;
+        if (o.code_fault) r.subscribe_stage(9, "c", [](Stage s, const View&) { return s != Stage::Alter; }, &h);
+        auto boot = r.run({});
+        std::vector<stage::BootOutcome> outcomes;
+        const bool b_last = !o.reverse;  // the later writer of levelCap when both write it
+        for (const auto& resource : boot)
+            for (const auto& f : resource.fields) {
+                const bool cap = f.field.field == "levelCap";
+                const int value = cap && o.b_field == "levelCap" ? (b_last ? o.points : o.cap) : cap ? o.cap : o.points;
+                const bool refused = o.refused == "*" || o.refused == f.field.field;
+                if (o.unwritten == f.field.field) continue;
+                outcomes.push_back({f.field, !refused, Value::integer(value), "test refusal"});
+            }
+        r.finish(outcomes);
+        auto report = json::parse(files.report);
+        return report.contains("bootSync") ? report["bootSync"] : json();
+    };
+    auto with = [](std::function<void(Opt&)> f) { Opt o; f(o); return o; };
+    const auto base = run({});
+    check(base.is_object() && base["values"].is_string() && base["values"].get<std::string>().size() == 64, "full resolved values hash in registry.json");
+    check(base == run({}), "deterministic across starts");
+    check(base["values"] != run(with([](Opt& o) { o.cap = 61; }))["values"], "resolved boot value changes hash");
+    auto reverse = run(with([](Opt& o) { o.reverse = true; }));
+    check(base["values"] == reverse["values"] && base["order"] != reverse["order"], "same values, other registry order detected");
+    check(run(with([](Opt& o) { o.needs = false; })) == run(with([](Opt& o) { o.needs = false; o.points = 9; })), "server-only values and writers excluded");
+    // a side server/client mod runs on one side only (kiln.boot leaves such mods out too): the fields it writes take no part
+    check(base["values"] != run(with([](Opt& o) { o.points = 9; }))["values"], "a side-both mod's client-needed value takes part");
+    for (const char* side : {"order:server", "order:client", "file:server"})
+        check(run(with([&](Opt& o) { o.b_side = side; })) == run(with([&](Opt& o) { o.b_side = side; o.points = 9; })),
+              std::string("a one-side mod's own field takes no part (") + side + ")");
+    check(run(with([](Opt& o) { o.b_side = "order:both"; })) == base, "side both in the order is the default");
+    // The part is one hash over both sides' fields, so a field only one side leaves out makes every join differ. A server whose side
+    // server mod b writes nothing a shared mod edits equals a client that never runs b...
+    const auto shared_only = run(with([](Opt& o) { o.b_field = ""; }));
+    check(shared_only.is_object() && run(with([](Opt& o) { o.b_side = "order:server"; })) == shared_only,
+          "a server with a one-side mod on its own field sends what a client without that mod sends");
+    // ...but one whose one-side mod also writes a field a shared mod edits has no fair counterpart: no part, never a difference
+    for (const char* side : {"order:server", "order:client", "file:server"})
+        check(run(with([&](Opt& o) { o.b_side = side; o.b_field = "levelCap"; o.points = 70; })).is_null(),
+              std::string("a one-side mod on a shared mod's client-held field: no registry part (") + side + ")");
+    check(run(with([](Opt& o) { o.b_side = "order:server"; o.b_field = "levelCap"; o.points = 70; o.reverse = true; })).is_null(),
+          "the same with the one-side mod first");
+    // a shared mod's client-held edit this side could not apply (the other side may have): no part either
+    check(run(with([](Opt& o) { o.refused = "levelCap"; })).is_null(), "a client-held boot write this game refused: no registry part");
+    check(run(with([](Opt& o) { o.refused = "*"; })).is_null(), "every boot write refused: no registry part");
+    check(run(with([](Opt& o) { o.cap_unmapped = true; })).is_null(), "a client-held edit this build's mapping refused: no registry part");
+    check(run(with([](Opt& o) { o.code_fault = true; })).is_null(), "a shared mod's stage callback faulted (its edits unknown): no registry part");
+    check(run(with([](Opt& o) { o.no_base = true; })).is_null(), "a stage that could not read the base: no registry part");
+    check(run(with([](Opt& o) { o.unwritten = "levelCap"; })).is_null(), "a shared mod's client-held boot field no write reached: no registry part");
+    check(run(with([](Opt& o) { o.needs = false; o.unwritten = "skillPointsPerLevel"; })) == run(with([](Opt& o) { o.needs = false; })),
+          "a server-only boot field no write reached does not stop the part");
+    check(run(with([](Opt& o) { o.needs = false; o.refused = "skillPointsPerLevel"; })) == run(with([](Opt& o) { o.needs = false; })),
+          "a refused server-only write does not stop the part");
+    check(run(with([](Opt& o) { o.b_side = "order:server"; o.refused = "skillPointsPerLevel"; })) == shared_only,
+          "a one-side mod's refused write does not stop the part");
+}
+
 void one_start(const std::string& dir) {
     TreeView view = world();
     Files files;
@@ -252,6 +351,8 @@ void one_start(const std::string& dir) {
     r.finish({{boot[0].fields[0].field, true, Value::integer(60), ""}});
     check(r.phase() == stage::Phase::Start && r.generation() == 1, "phase start, generation 1");
     const json rep = json::parse(files.report);
+    check(json::parse(r.schema_json())["bootSync"] == rep["bootSync"], "small native schema query carries the fingerprint without report-size limits");
+    check(json::parse(r.schema_json())["registries"]["items"]["fields"]["maxStack"]["joinedClient"] == "worldLoad", "native schema exposes the joined-client marker");
     check(rep["phase"] == "start" && rep["orderSource"] == "folders" && rep["regmap"]["verified"] == true, "registry.json: phase, order source, the verified record");
     check(rep["order"].size() == 2 && rep["order"][0]["mod"] == "bigmod" && rep["order"][1]["mod"] == "late", "the order: the mod folders' (late after bigmod)");
     const std::string text = rep.dump();  // compact: the file itself is indented
@@ -291,6 +392,7 @@ void one_start(const std::string& dir) {
     check(live_report != nullptr, "the live back-end got its handoff with a report callback");
     const std::string start_report = files.report;
     live_report(*live_result, true);
+    check(json::parse(files.report)["bootSync"] == rep["bootSync"], "runtime report preserves the immutable boot fingerprint");
     check(r.phase() == stage::Phase::WorldLoad && r.generation() == 2 && json::parse(files.report)["phase"] == "worldLoad",
           "the live back-end's report: phase worldLoad, generation 2");
 
@@ -988,7 +1090,7 @@ int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
     const std::pair<const char*, std::function<void()>> groups[] = {
-        {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }},
+        {"boot_sync", [&] { boot_sync(dir); }}, {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }},
         {"registry_caps", [&] { registry_caps(dir); }}, {"other_mapping_report", [&] { other_mapping_report(dir); }},
         {"plans_link_the_last_good_plan", [&] { plans_link_the_last_good_plan(dir); }},
         {"rollback_starts_on_the_previous_plan", [&] { rollback_starts_on_the_previous_plan(dir); }},

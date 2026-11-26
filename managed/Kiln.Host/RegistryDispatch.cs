@@ -55,6 +55,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     internal void Prepare(ulong hostOwner)
     {
         RegistryRuntime.Host = this;
+        BootFingerprint.RegistrySource = _native.Fingerprint;
         RegistryRuntime.Available = () => _native.LiveAvailable;
         RegistryRuntime.Manual = Manual;
         RegistryRuntime.Revert = (mod, handle) =>
@@ -451,6 +452,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         _retirements.Clear(); _runtime.Clear(); _changes.Clear(); _scopedChanges.Clear();
         if (ReferenceEquals(RegistryRuntime.Host, this))
         {
+            BootFingerprint.RegistrySource = null;
             RegistryRuntime.Host = null; RegistryRuntime.Available = null; RegistryRuntime.Manual = null;
             RegistryRuntime.Revert = null; RegistryRuntime.Read = null; RegistryRuntime.WorldChanged = null;
             RegistryRuntime.LastReady = null;

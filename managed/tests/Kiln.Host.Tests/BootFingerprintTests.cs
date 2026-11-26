@@ -79,6 +79,23 @@ public sealed class BootFingerprintTests : ModsFixture
         base.Dispose();
     }
 
+    [Fact]
+    public void Registry_fingerprint_uses_the_native_resolved_snapshot_not_the_legacy_boot_hash()
+    {
+        try
+        {
+            var values = new string('a', 64); var order = new string('b', 64);
+            BootFingerprint.RegistrySource = () => $"{{\"bootSync\":{{\"values\":\"{values}\",\"order\":\"{order}\"}}}}";
+            Assert.Equal($"1:{values}:{order}", BootFingerprint.RegistryCurrent());
+            Assert.Empty(BootFingerprint.Current()); // old peers' fingerprint stays unchanged
+            BootFingerprint.RegistrySource = () => "{}";
+            Assert.Null(BootFingerprint.RegistryCurrent()); // an older native service has no extension
+            BootFingerprint.RegistrySource = () => throw new IOException("no native report");
+            Assert.Null(BootFingerprint.RegistryCurrent());
+        }
+        finally { BootFingerprint.RegistrySource = null; }
+    }
+
     private string Mod(string folder, params (string File, string Text)[] files)
     {
         var dir = Directory.CreateDirectory(Path.Combine(ModsDir, folder)).FullName;

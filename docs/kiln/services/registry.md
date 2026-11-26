@@ -10,6 +10,14 @@ owner-bound staged IR, stage callbacks, ready notifications and the current repo
 then alter, then final, in Host load order. Successful callback turns are retained for later live recomposition; no
 native callback or mod assembly is invoked again by a pack reload.
 
+The existing `schema_json` member also exposes each field's additive `joinedClient` marker, separate from `applies`
+([visibility values](../modding/registries/README.md#what-a-joined-client-sees)). After start it includes `bootSync` with
+full SHA-256 `values` and `order` hashes of client-needed boot registry edits (left out when this start could not apply
+them as asked: [join compatibility](../network.md#registry-boot-values-and-order)). The same immutable snapshot is in the
+registry report; it is not affected by report caps or later live layers. The Host reads the small schema snapshot for
+join fingerprints rather than loading the entire writer report. These are additive JSON members; the table and
+field-info ABI layouts are unchanged. [Join compatibility](../network.md#registry-boot-values-and-order)
+
 Owner revocation removes queued work and callbacks. Already-taken start-time edits remain until the next start.
 Callbacks already in flight are not waited for; their function and user state must remain valid until they return.
 A faulted stage turn is dropped; a fault in either callback kind removes its subscription.

@@ -110,6 +110,13 @@ internal sealed unsafe class RegistryNative(IHostServices host)
         }
         throw new KilnUnavailableException("kiln.registry", "the registry response kept changing");
     }
+    // The small schema snapshot includes bootSync too. Do not fetch the potentially multi-MiB writer report at a join.
+    internal string? Fingerprint()
+    {
+        if (!Available || Stage->Schema == 0) return null;
+        var schema = (delegate* unmanaged[Cdecl]<byte*, nuint, nuint*, int>)Stage->Schema;
+        return Text((buffer, cap, length) => schema(buffer, cap, length));
+    }
     internal RegistryStageStatus StageStatus()
     {
         if (!Available) throw new KilnUnavailableException("kiln.registry");

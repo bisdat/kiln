@@ -1,0 +1,10 @@
+{
+  "id": "registry-mp-test",
+  "name": "Registry multiplayer lab",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "RegistryMpTest.dll",
+  "side": "both",
+  "clients": "mod",
+  "description": "Lab-only WorldLoad and HotReload registry layers with a protocol-only Kiln client."
+}

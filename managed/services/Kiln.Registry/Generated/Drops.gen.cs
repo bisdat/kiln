@@ -18,7 +18,7 @@ public sealed partial class DropTableEntry : IRegistryEntry
     public string Registry => "drops";
 
     /// <summary>The table's stacks in walk order (root group first, then its groups). Index i in a field path (entries[3].chance) is that order.</summary>
-    [RegistryField("drops.entries", RegistryApplies.Now)]
+    [RegistryField("drops.entries", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public RegistryEntryList<DropEntry> Entries => new(_c, DropTableFields.Entries, static (c, i) => new DropEntry(c, i), static (c, i) => RegistryCells.Snapshot(c, i, DropTableFields.EntriesElement));
 }
 
@@ -31,11 +31,11 @@ public sealed partial class DropEntryCount
     internal DropEntryCount(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
     /// <summary>The fewest the entry gives.</summary>
-    [RegistryField("drops.entries[].count.min", RegistryApplies.Now)]
+    [RegistryField("drops.entries[].count.min", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public int Min { get => RegistryCells.Int(_c, DropTableFields.EntriesCountMin, _i); set => RegistryCells.Set(_c, DropTableFields.EntriesCountMin, _i, value); }
 
     /// <summary>The most the entry gives.</summary>
-    [RegistryField("drops.entries[].count.max", RegistryApplies.Now)]
+    [RegistryField("drops.entries[].count.max", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public int Max { get => RegistryCells.Int(_c, DropTableFields.EntriesCountMax, _i); set => RegistryCells.Set(_c, DropTableFields.EntriesCountMax, _i, value); }
 }
 
@@ -51,18 +51,18 @@ public sealed partial class DropEntry
     public int Index => _i;
 
     /// <summary>The item. Given when an entry is appended; read-only afterwards.</summary>
-    [RegistryField("drops.entries[].item", RegistryApplies.Now)]
+    [RegistryField("drops.entries[].item", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public RegistryId Item => RegistryCells.Id(_c, DropTableFields.EntriesItem, _i);
 
     /// <summary>How many of the item the entry gives: a number from min to max.</summary>
     public DropEntryCount Count => new(_c, _i);
 
     /// <summary>The chance the entry drops.</summary>
-    [RegistryField("drops.entries[].chance", RegistryApplies.Now)]
+    [RegistryField("drops.entries[].chance", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public double Chance { get => RegistryCells.Double(_c, DropTableFields.EntriesChance, _i); set => RegistryCells.Set(_c, DropTableFields.EntriesChance, _i, value); }
 
     /// <summary>The weight of the entry in a group that picks one.</summary>
-    [RegistryField("drops.entries[].weight", RegistryApplies.Now)]
+    [RegistryField("drops.entries[].weight", RegistryApplies.Now, JoinedClient = "serverOnly")]
     public double Weight { get => RegistryCells.Double(_c, DropTableFields.EntriesWeight, _i); set => RegistryCells.Set(_c, DropTableFields.EntriesWeight, _i, value); }
 }
 

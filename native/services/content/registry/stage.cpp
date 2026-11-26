@@ -328,6 +328,9 @@ struct Runner::Impl {
     std::vector<std::string> rm_errs;
     bool rm_loaded = false;
     std::vector<std::pair<std::string, std::string>> order;  // Kiln.Host's (set_order)
+    // mod -> kiln.mod.json side ("server", "client"; absent or "both": both), from set_order or the mod's data files. The join
+    // fingerprint (bootSync) leaves out fields a one-side mod writes: the other side never runs it (kiln.boot skips such mods too).
+    std::map<std::string, std::string> sides;
     bool registry_users = false;  // set_order named a mod whose code uses the registry API (review4 NS1)
     bool order_set = false;
     struct Sub {
@@ -567,6 +570,7 @@ KilnResult Runner::set_order(const std::string& order_json) {
     const json j = json::parse(order_json, nullptr, false);
     if (!j.is_array()) return KILN_ERR_INVALID_ARGUMENT;
     std::vector<std::pair<std::string, std::string>> order;
+    std::map<std::string, std::string> sides;
     std::set<std::string> seen;
     bool users = false;
     for (const auto& row : j) {
@@ -574,11 +578,13 @@ KilnResult Runner::set_order(const std::string& order_json) {
         const std::string mod = row["mod"].get<std::string>();
         if (!seen.insert(mod).second) return KILN_ERR_INVALID_ARGUMENT;
         order.emplace_back(mod, row.contains("version") && row["version"].is_string() ? row["version"].get<std::string>() : std::string());
+        if (row.contains("side") && row["side"].is_string()) sides[mod] = row["side"].get<std::string>();
         users |= row.contains("registry") && row["registry"].is_boolean() && row["registry"].get<bool>();
     }
     std::lock_guard lk(d_->mu);
     if (phase_.load() != Phase::None) return KILN_ERR_UNAVAILABLE;
     d_->order = std::move(order);
+    d_->sides = std::move(sides);
     d_->order_set = true;
     d_->registry_users = users;
     return KILN_OK;
@@ -792,6 +798,11 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     std::set<std::string> loaded;
     for (const auto& [m, v] : order) versions[m] = v, loaded.insert(m);
     std::vector<Refusal> skipped;
+    {
+        std::lock_guard lk(d.mu);
+        for (const Env::DataFile& f : files)
+            if (!f.side.empty()) d.sides.emplace(f.mod, f.side);  // Kiln.Host's set_order side wins
+    }
     for (Env::DataFile& f : files) {
         // review finding 3 (ruling 2026-11-21): only mods Kiln.Host loaded on this side, in its order; the others are skipped
         // and named. With Kiln.Host's order, membership decides alone: on a client it holds side "server" mods when hosted
@@ -1443,7 +1454,8 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             for (const ChainRow& c : fo->second.chain)
                 if (c.kind == WriterKind::Registry)
                 {
-                    const Refusal x{c.mod, c.source, c.stage, c.n, o.field.registry + " " + o.field.id + ": " + o.field.field + ": " + o.why + "; this edit was not applied", ""};
+                    const Refusal x{c.mod, c.source, c.stage, c.n, o.field.registry + " " + o.field.id + ": " + o.field.field + ": " + o.why + "; this edit was not applied", "",
+                                    o.field.registry, o.field.id, o.field.field};
                     d.result.refused.push_back(x);
                     d.outside.push_back(x);
                 }
@@ -1456,6 +1468,88 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             const FieldSpec* f = rs && !is_raw_field(ref.field) ? rs->field(ref.field) : nullptr;
             if (f && f->applies == Applies::Restart) d.boot_fields[ref] = fo;
         }
+        // A separate additive fingerprint: never change kiln.boot for old peers. Use only successful boot writes,
+        // after their actual resource values are known, and only mappings whose client needs its own copy. Compute
+        // before report caps; preserve it across runtime reports (live changes cannot rebuild these boot values).
+        std::set<FieldRef> written;
+        for (const auto& o : outcomes) if (o.ok) written.insert(o.field);
+        json values = json::array(), order = json::array();
+        std::map<std::string, json> contributions;
+        auto one_side = [&](const std::string& mod) {
+            auto it = d.sides.find(mod);
+            return it != d.sides.end() && !it->second.empty() && it->second != "both";
+        };
+        auto client_held = [&](const std::string& registry, const std::string& field) {
+            auto reg = d.rm.registries.find(registry);
+            if (reg == d.rm.registries.end()) return false;
+            std::string g = generic_path(field);
+            auto row = reg->second.rows.find(g);
+            if (row == reg->second.rows.end() && g.size() > 2 && g.ends_with("[]")) row = reg->second.rows.find(g.substr(0, g.size() - 2));
+            return row != reg->second.rows.end() && row->second.backend == map::Backend::Boot && row->second.client_needs;
+        };
+        // Both sides hash their own fields, so a field one side leaves out and the other keeps would make every join differ, with
+        // nothing the player can change. The part is published only when this start applied each client-held boot edit of the mods
+        // both sides run (side both) as asked: none refused (by this build's mapping, by composition or by the write, or a refusal
+        // Kiln cannot place: a faulted callback, an unreadable file), the base read, and no side server/client mod writing the same
+        // field. Otherwise nothing is sent and nothing is compared with this process (kiln.log says why).
+        std::set<std::string> ran;
+        for (const auto& o : d.meta.order) ran.insert(o.mod);
+        std::string not_compared;
+        if (d.counts.failed) not_compared = "the stage could not read the game's base";
+        for (const Refusal& x : d.result.refused) {
+            if (!not_compared.empty()) break;
+            if (x.mod.empty() || one_side(x.mod) || !ran.count(x.mod)) continue;
+            if (x.registry.empty()) not_compared = "mod " + x.mod + " has a registry refusal that names no field (" + x.source + ")";
+            else if (!x.raw && !x.field.empty() && client_held(x.registry, x.field))
+                not_compared = "mod " + x.mod + "'s edit of " + x.registry + " " + x.field + " was refused on this game";
+        }
+        for (const auto& [ref, fo] : d.boot_fields) {
+            if (!written.count(ref)) {
+                // a refused write left d.result (the refusal scan above names it); this one no write reached at all
+                if (not_compared.empty() && client_held(ref.registry, ref.field) &&
+                    std::any_of(fo.chain.begin(), fo.chain.end(),
+                                [&](const ChainRow& c) { return c.kind == WriterKind::Registry && !c.mod.empty() && !one_side(c.mod); }))
+                    not_compared = ref.text() + " has a side-both mod's edit that no boot write reached";
+                continue;
+            }
+            auto reg = d.rm.registries.find(ref.registry);
+            if (reg == d.rm.registries.end()) continue;
+            auto row = reg->second.rows.find(ref.field);
+            if (row == reg->second.rows.end() || row->second.backend != map::Backend::Boot || !row->second.client_needs) continue;
+            // a field a side server/client mod writes (any writer kind) differs by design: the other side never runs that mod. It
+            // stays out on both sides only while no side-both mod edits it too (the other side keeps such a field).
+            const auto foreign = std::find_if(fo.chain.begin(), fo.chain.end(), [&](const ChainRow& c) { return !c.mod.empty() && one_side(c.mod); });
+            if (foreign != fo.chain.end()) {
+                const bool shared = std::any_of(fo.chain.begin(), fo.chain.end(),
+                                                [&](const ChainRow& c) { return c.kind == WriterKind::Registry && !c.mod.empty() && !one_side(c.mod); });
+                if (shared && not_compared.empty())
+                    not_compared = ref.text() + " is written by mod " + foreign->mod + " (side " + d.sides[foreign->mod] + ") and edited by a side-both mod";
+                continue;
+            }
+            bool edited = false;
+            for (const auto& c : fo.chain) {
+                if (c.kind != WriterKind::Registry) continue;
+                edited = true;
+                auto& edits = contributions[c.mod];
+                if (edits.is_null()) edits = json::array();
+                edits.push_back({ref.registry, ref.id, ref.field, stage_name(c.stage), c.after.to_json()});
+            }
+            if (edited) values.push_back({ref.registry, ref.id, ref.field, fo.result.to_json()});
+        }
+        for (const auto& o : d.meta.order) {
+            auto it = contributions.find(o.mod);
+            if (it == contributions.end()) continue;
+            order.push_back({o.mod, sha_hex(it->second.dump())});
+            contributions.erase(it);
+        }
+        for (const auto& [mod, edits] : contributions) order.push_back({mod, sha_hex(edits.dump())});
+        d.meta.boot_sync = nullptr;
+        if (not_compared.empty())
+            d.meta.boot_sync = {{"values", sha_hex("kiln-registry-boot-values 1\n" + values.dump())},
+                                {"order", sha_hex("kiln-registry-boot-order 1\n" + order.dump())}};
+        else
+            d.log(1, "registry: this start's registry boot values are not compared at joins (" + not_compared +
+                         "): players are checked by their mod lists and boot content only (docs/kiln/network.md)");
         d.generation = 1;
         d.meta.generation = 1;
         d.meta.world_load = false;
@@ -1637,6 +1731,8 @@ std::string Runner::schema_json() {
             const map::Mapping mp = d_->rm.mapping(name, fn, &reason);
             json row = {{"applies", applies_word(f.applies)}, {"readOnly", f.read_only},
                         {"mapping", mp == map::Mapping::Mapped ? "mapped" : mp == map::Mapping::Unmapped ? "unmapped" : mp == map::Mapping::Unproven ? "unproven" : "removed"}};
+            for (const auto& generated : gen::kFields)
+                if (name == generated.registry && fn == generated.path) { row["joinedClient"] = generated.joined_client; break; }
             if (!reason.empty()) row["reason"] = reason;
             if (f.min) row["min"] = *f.min;
             if (f.max) row["max"] = *f.max;
@@ -1646,7 +1742,9 @@ std::string Runner::schema_json() {
         }
         regs[name] = {{"version", reg.version}, {"experimental", "KILNX031"}, {"fields", fields}};
     }
-    return json{{"registrySchema", d_->schema.format}, {"registries", regs}}.dump();
+    json doc = {{"registrySchema", d_->schema.format}, {"registries", regs}};
+    if (!d_->meta.boot_sync.is_null()) doc["bootSync"] = d_->meta.boot_sync;
+    return doc.dump();
 }
 
 bool Runner::field_info(const std::string& q, FieldInfo* out) {

@@ -54,6 +54,7 @@ public sealed class BootGateTests : IDisposable
         NetNative.TestTransport = null;
         NetEngine.TestServerRole = null;
         BootGate.TestSource = null;
+        global::Kiln.Host.BootFingerprint.RegistrySource = null;
         ModsBackend.Current = null;
         Backend.Current = _previousBackend;
     }
@@ -97,6 +98,133 @@ public sealed class BootGateTests : IDisposable
         if (boot != null) props[BootGate.Key] = boot;
         var mods = withMod ? new List<Wire.ModEntry> { new(Altars, version, ModSide.Both) } : [];
         NetEngine.OnFrame(P, Wire.EncodeHello(new Wire.Hello(Wire.Protocol, "0.2.0-dev.29", 7, mods, [], props)));
+    }
+
+    [Theory]
+    [InlineData(ModSyncPolicy.Refuse, true, true)]
+    [InlineData(ModSyncPolicy.Warn, false, true)]
+    [InlineData(ModSyncPolicy.Off, false, false)]
+    public void Registry_boot_values_follow_modSync_and_report_the_difference(ModSyncPolicy policy, bool rejected, bool warned)
+    {
+        RegistryHello(policy, "1:" + new string('c', 64) + ":" + new string('b', 64));
+        Assert.Equal(rejected, LastReject() != null);
+        var text = rejected ? LastReject()!.Reason : string.Join(" ", LastWelcome()!.Warnings);
+        Assert.Equal(warned, text.Contains("registry", StringComparison.Ordinal));
+        if (warned) { Assert.Contains("restart", text); Assert.Contains("registry", Log()); }
+    }
+
+    // The values part covers every compared field's resolved value, so equal values mean the client runs what the server runs: another
+    // order or other intermediate contributions (a setting a later mod overrides) change nothing the player could see or fix.
+    [Theory]
+    [InlineData(ModSyncPolicy.Refuse)]
+    [InlineData(ModSyncPolicy.Warn)]
+    [InlineData(null)]
+    public void Registry_order_difference_alone_neither_refuses_nor_warns(ModSyncPolicy? policy)
+    {
+        RegistryHello(policy, "1:" + new string('a', 64) + ":" + new string('d', 64));
+        Assert.Null(LastReject());
+        Assert.Empty(LastWelcome()!.Warnings);
+        Assert.Contains("registry boot edits or load order differ", Log());  // the operator's log still says it
+    }
+
+    [Fact]
+    public void Registry_order_difference_stays_out_of_the_handshake_events_missing_list()
+    {
+        IReadOnlyList<string>? missing = null;
+        using var sub = Events.On<NetClientHandshakeEvent>(e => missing = e.Missing);
+        RegistryHello(ModSyncPolicy.Refuse, "1:" + new string('a', 64) + ":" + new string('d', 64));
+        Assert.NotNull(missing);
+        Assert.DoesNotContain(missing!, m => m.Contains("registry", StringComparison.Ordinal));
+        Assert.Null(LastReject());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("malformed")]
+    [InlineData("2:future")]
+    public void Older_or_unknown_registry_fingerprints_do_not_change_admission(string? remote)
+    {
+        RegistryHello(ModSyncPolicy.Refuse, remote);
+        Assert.Null(LastReject());
+        Assert.Empty(LastWelcome()!.Warnings);
+    }
+
+    [Fact]
+    public void Matching_registry_fingerprints_join_without_warning()
+    {
+        RegistryHello(ModSyncPolicy.Refuse, "1:" + new string('a', 64) + ":" + new string('b', 64));
+        Assert.Null(LastReject());
+        Assert.Empty(LastWelcome()!.Warnings);
+    }
+
+    [Fact]
+    public void A_new_client_keeps_joining_a_server_without_the_extension()
+    {
+        RegistryHello(ModSyncPolicy.Refuse, "1:" + new string('c', 64) + ":" + new string('d', 64), own: false);
+        Assert.Null(LastReject());
+        Assert.Empty(LastWelcome()!.Warnings);
+    }
+
+    // The registry part is one hash over every participating mod, so it cannot honour the mod-list rules per mod. When the
+    // side-both mod lists differ, those rules (missing, versionMatch, optionalMods, extra) decide alone, as they did before.
+    private const string Pack = "balance-pack";
+    private static readonly string OtherValues = "1:" + new string('c', 64) + ":" + new string('b', 64);
+
+    [Fact]
+    public void Registry_part_is_not_compared_when_the_client_lacks_an_optional_server_mod()
+    {
+        ModsBackend.Current = new FakeMods(Loaded(Altars, "1.0.0"), Loaded(Pack, "1.0.0"));
+        RegistryHello(ModSyncPolicy.Refuse, OtherValues, config: c => c with { OptionalMods = [Pack] });
+        Assert.Null(LastReject());
+        Assert.DoesNotContain(LastWelcome()!.Warnings, w => w.Contains("registry", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Registry_part_is_not_compared_for_another_version_versionMatch_accepts()
+    {
+        RegistryHello(ModSyncPolicy.Refuse, OtherValues, [new(Altars, "1.4.0", ModSide.Both)], c => c with { VersionMatch = ModVersionMatch.Major });
+        Assert.Null(LastReject());
+        Assert.DoesNotContain(LastWelcome()!.Warnings, w => w.Contains("registry", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Registry_part_is_not_compared_when_the_client_has_an_extra_shared_mod()
+    {
+        RegistryHello(ModSyncPolicy.Refuse, OtherValues, [new(Altars, "1.0.0", ModSide.Both), new(Pack, "1.0.0", ModSide.Both)]);
+        Assert.Null(LastReject());
+        Assert.Equal([$"client mod not on the server: {Pack} 1.0.0"], LastWelcome()!.Warnings);
+    }
+
+    [Fact]
+    public void A_missing_required_mod_is_named_alone_without_a_registry_line()
+    {
+        RegistryHello(ModSyncPolicy.Refuse, OtherValues, []);
+        Assert.Contains(Altars, LastReject()!.Reason);
+        Assert.DoesNotContain("registry", LastReject()!.Reason);
+    }
+
+    [Fact]
+    public void Client_side_mods_do_not_stop_the_registry_comparison()
+    {
+        RegistryHello(ModSyncPolicy.Refuse, OtherValues, [new(Altars, "1.0.0", ModSide.Both), new("minimap", "2.1.0", ModSide.Client)]);
+        Assert.Contains("registry boot values differ", LastReject()!.Reason);
+    }
+
+    private static ModEntry Loaded(string id, string version) =>
+        new(id, id, version, "/mods/" + id, ModSide.Both, ModState.Loaded, null, [], 0, null);
+
+    private void RegistryHello(ModSyncPolicy? policy, string? remote, List<Wire.ModEntry>? mods = null, Func<NetworkConfig, NetworkConfig>? config = null, bool own = true)
+    {
+        // Resolve the same private Host seam the real handshake reads; no boot mod is required for a data-only pack.
+        global::Kiln.Host.BootFingerprint.RegistrySource = () =>
+            "{\"bootSync\":{\"values\":\"" + new string('a', 64) + "\",\"order\":\"" + new string('b', 64) + "\"}}";
+        if (!own) global::Kiln.Host.BootFingerprint.RegistrySource = null;
+        NetEngine.UseConfigForTests(config is null ? Policy(policy) : config(Policy(policy)));
+        Up();
+        var props = new Dictionary<string, string>();
+        if (remote != null) props["kiln.registry.boot"] = remote;
+        NetEngine.OnFrame(P, Wire.EncodeHello(new Wire.Hello(Wire.Protocol, "test", 7, mods ?? [new(Altars, "1.0.0", ModSide.Both)], [], props)));
+        global::Kiln.Host.BootFingerprint.RegistrySource = null;
     }
 
     private Wire.Reject? LastReject() => _net.Sent.Where(s => s.Peer == P && Wire.TryHeader(s.Frame, out var t) && t == Wire.Type.Reject)
