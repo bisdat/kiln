@@ -48,6 +48,7 @@ internal static class ServiceNames
         "kiln.mod-values",
         "kiln.net",
         "kiln.npcai",
+        "kiln.npcspeech",
         "kiln.pacing",
         "kiln.playeranim",
         "kiln.players",

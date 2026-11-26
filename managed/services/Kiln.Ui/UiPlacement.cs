@@ -169,6 +169,15 @@ internal sealed class UiPlacer
         }
     }
 
+    /// <summary>A <see cref="Move"/> waits for the next frame (any thread; window docking: the window leads its group).</summary>
+    public bool MovePending
+    {
+        get { lock (_lock) return _move != null; }
+    }
+
+    /// <summary>The rect drawn last, in pixels (render thread); null before the first frame.</summary>
+    internal (float X, float Y, float W, float H)? Last => _last;
+
     /// <summary>How many times it opened (the test kit's frames: a reopen is a frame where it appears).</summary>
     internal long Opens { get; private set; }
 
@@ -263,8 +272,10 @@ internal sealed class UiPlacer
 
     /// <summary>After Begin (render thread): where ImGui drew it (pixels, <see cref="UiDraw.WindowRect"/>). A frame whose
     /// window was not visible (collapsed, hidden) or has no rect keeps the last one. A remembering screen or window keeps
-    /// the rect in ui-placement.json when it moved by half a pixel or more.</summary>
-    public void Drawn(in UiViewport vp, float x, float y, float w, float h, bool visible)
+    /// the rect in ui-placement.json when it moved by half a pixel or more. <paramref name="keepPosition"/>: the place came
+    /// from a dock (window docking), not the player or the mod: only the size is remembered, the remembered position stays
+    /// (nothing is written while nothing is remembered yet).</summary>
+    public void Drawn(in UiViewport vp, float x, float y, float w, float h, bool visible, bool keepPosition = false)
     {
         if (!visible || !vp.Valid || !(w > 0 && h > 0) || !float.IsFinite(x + y + w + h)) return;
         _last = (x, y, w, h);
@@ -272,9 +283,15 @@ internal sealed class UiPlacer
         lock (_lock) _placement = p;
         if (Id is not { } id) return;
         var s = vp.SafeScale;
-        if (UiPlacements.Get(Mod, IsWindow, id) is { } old &&
-            MathF.Abs(old.X - p.X) * vp.Width < 0.5f && MathF.Abs(old.Y - p.Y) * vp.Height < 0.5f &&
-            MathF.Abs(old.Width - p.Width) * s < 0.5f && MathF.Abs(old.Height - p.Height) * s < 0.5f) return;
+        var old = UiPlacements.Get(Mod, IsWindow, id);
+        if (keepPosition)
+        {
+            if (old is not { } kept) return;
+            p = p with { X = kept.X, Y = kept.Y };
+        }
+        if (old is { } o &&
+            MathF.Abs(o.X - p.X) * vp.Width < 0.5f && MathF.Abs(o.Y - p.Y) * vp.Height < 0.5f &&
+            MathF.Abs(o.Width - p.Width) * s < 0.5f && MathF.Abs(o.Height - p.Height) * s < 0.5f) return;
         UiPlacements.Put(Mod, IsWindow, id, new UiPlacements.Entry(p.X, p.Y, p.Width, p.Height));
     }
 

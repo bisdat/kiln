@@ -494,3 +494,10 @@ enum: Entity, Item, Destroy, Cleanup
 - `static operator !=(TestKit.FakeVoxelAnswer left, TestKit.FakeVoxelAnswer right) -> bool`
 - `static operator ==(TestKit.FakeVoxelAnswer left, TestKit.FakeVoxelAnswer right) -> bool`
 - `static Refused(string reason) -> TestKit.FakeVoxelAnswer` — Nothing is known, for `reason`: `NotLoaded`, `OutOfGrid`.
+
+## TestKit.FakeVoxelRay `0.2.3` — A voxel ray a mod asked for (`Queries.RaycastVoxels`, `GroundBelow`, `VoxelLineOfSight`, a brain's sight).
+- `FakeVoxelRay()`
+- `FakeVoxelRay(WorldPosition From, WorldPosition To, byte Realm)`
+- `From { get; init; } -> WorldPosition` — Where the ray starts.
+- `Realm { get; init; } -> byte` — The realm the ray was cast in (0: the overworld).
+- `To { get; init; } -> WorldPosition` — Where the ray ends.

@@ -22,7 +22,7 @@ bool image_button(const char*, KilnHandle, float, float) { return false; }
 
 static_assert(offsetof(KilnUiApi, pointer) == offsetof(KilnUiApi, chat_search) + sizeof(void*));
 static_assert(offsetof(KilnUiApi, pointer) == 1056 && offsetof(KilnUiApi, drag_source) == 1064 &&
-              offsetof(KilnUiApi, drop_target) == 1072 && offsetof(KilnUiApi, popups) == 1080 && sizeof(KilnUiApi) == 1088);
+              offsetof(KilnUiApi, drop_target) == 1072 && offsetof(KilnUiApi, popups) == 1080 && sizeof(KilnUiApi) == 1096);
 static_assert(sizeof(KilnUiPointer) == 24 && offsetof(KilnUiPointer, flags) == 4 && offsetof(KilnUiPointer, x) == 8 &&
               offsetof(KilnUiPointer, y) == 12 && offsetof(KilnUiPointer, held) == 16);
 static_assert(KILN_UI_DRAG_KIND_MAX == 32 && KILN_UI_DRAG_PAYLOAD_MAX == 4096);

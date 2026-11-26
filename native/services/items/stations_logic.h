@@ -50,6 +50,18 @@ inline bool fill_chests_ok(const KilnStationRequest& r) {
     return true;
 }
 
+// GitHub #132 (0.2.0-dev.31.16): the most one item fill moves (the game's AutoTransferItem takes a u16 amount)
+constexpr uint32_t kMaxItemFill = 0xFFFF;
+
+// A FILL with KILN_STATION_FILL_ITEM (the station screen's per-ingredient transfer): one item, an amount in items, no
+// recipe, no choices, no reserves, no named chests.
+inline bool item_request_valid(const KilnStationRequest& r) {
+    if (r.item == 0 || r.crafts < 1 || r.crafts > kMaxItemFill || r.recipe != 0 || any_choice(r.choices)) return false;
+    if (r.keep_count != 0 || r.keep != nullptr) return false;
+    if (request_names_chests(r) && (r.chest_count != 0 || r.chests != nullptr || r.chest_reserved != 0)) return false;
+    return player_ok(r.player);
+}
+
 inline bool request_valid(const KilnStationRequest& r) {
     if (r.size < KILN_STATION_REQUEST_V1 || r.size > sizeof(KilnStationRequest) || r.station == 0) return false;
     if (r.size != KILN_STATION_REQUEST_V1 && r.size < sizeof(KilnStationRequest)) return false;
@@ -59,14 +71,18 @@ inline bool request_valid(const KilnStationRequest& r) {
         if (c.reserved[0] || c.reserved[1] || c.reserved[2]) return false;
     constexpr uint32_t all = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
                              KILN_STATION_AFTER_CRAFT | KILN_STATION_KEEP_STOPPED | KILN_STATION_ALLOW_LOCKED |
-                             KILN_STATION_FILL_NO_OUTPUTS | KILN_STATION_FILL_LINKED;
+                             KILN_STATION_FILL_NO_OUTPUTS | KILN_STATION_FILL_LINKED | KILN_STATION_FILL_ITEM;
     if (r.flags & ~all) return false;
+    // `item` (reserved[0] before 0.2.0-dev.31.16) is read only by an item fill: anything else names none
+    const bool item_fill = r.action == KILN_STATION_FILL && (r.flags & KILN_STATION_FILL_ITEM);
+    if (r.item != 0 && !item_fill) return false;
     switch (r.action) {
     case KILN_STATION_FILL: {
         constexpr uint32_t ok = KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT | KILN_STATION_DRY_RUN | KILN_STATION_NO_WATER |
-                                KILN_STATION_FILL_NO_OUTPUTS | KILN_STATION_FILL_LINKED;
+                                KILN_STATION_FILL_NO_OUTPUTS | KILN_STATION_FILL_LINKED | KILN_STATION_FILL_ITEM;
         if (r.flags & ~ok) return false;
         if ((r.flags & KILN_STATION_FILL_LINKED) && r.player == 0) return false;  // linked sources are a player's
+        if (item_fill) return item_request_valid(r);
         if (r.crafts < 1 || r.crafts > kMaxCrafts) return false;
         if (r.keep_count > KILN_STATIONS_MAX_KEEP || (r.keep_count && !r.keep)) return false;
         if (any_choice(r.choices) && r.recipe == 0) return false;  // choices name a recipe's categories
@@ -861,6 +877,64 @@ int craft_pay(std::vector<CraftCost>* lines, const std::vector<uint32_t>& order,
         }
     }
     return kCraftPaid;
+}
+
+// ---- GitHub #132 (0.2.0-dev.31.16): the station screen's per-ingredient transfer (docs/re/stations.md section 10.9) ----
+// The game's AutoTransferItem moves exactly `amount` of one item: the player's bag first, then the base's Magic chests,
+// all or nothing. Kiln's item fill is that as a one-input fill of count 1 in ADD and EXACT: `loaded` is the station's
+// pile, so game_need is exactly the amount, and pay_shares splits it as a recipe fill splits an input: the bag and the
+// Magic chests (`game`, the game's own call) first, then the BeforeStationOutputs links, then the AfterStationOutputs
+// links. No reserves, no named chests, no station outputs, no water.
+inline InputNow item_fill_input(uint32_t item, uint64_t have, uint64_t game_stock, uint64_t linked_before, uint64_t linked_after) {
+    InputNow x{};
+    x.item = item;
+    x.count = 1;
+    x.have = have;
+    x.linked = linked_before;
+    x.linked_after = linked_after;
+    x.stock = game_stock + linked_before + linked_after;
+    return x;
+}
+struct ItemFill {
+    PlanMath math;
+    uint32_t game = 0, linked = 0, linked_after = 0;  // what each layer moves; all 0 unless the whole amount is covered
+};
+// `in` from item_fill_input. Without KILN_STATION_FILL_LINKED the links' counts are left out (never a source).
+inline ItemFill item_fill_plan(uint32_t flags, uint32_t amount, InputNow in) {
+    ItemFill f;
+    if (!(flags & KILN_STATION_FILL_LINKED)) {
+        in.stock -= std::min(in.stock, in.linked + in.linked_after);
+        in.linked = in.linked_after = 0;
+    }
+    const std::vector<InputNow> one{in};
+    f.math = plan_math(KILN_STATION_FILL_ADD | KILN_STATION_FILL_EXACT, std::min(amount, kMaxItemFill), one);
+    if (f.math.status != KILN_STATION_DONE) return f;
+    FillShares sh;
+    if (!pay_shares(one, f.math.planned, f.math.loaded, &sh)) {  // cannot happen after an EXACT plan; never a cut move
+        f.math.status = KILN_STATION_NOT_ENOUGH;
+        f.math.planned = 0;
+        f.math.limit = {in.item, KILN_STATION_LIMIT_STOCK};
+        return f;
+    }
+    f.linked = sh.linked[0];
+    f.linked_after = sh.linked_after[0];
+    f.game = f.math.planned - f.linked - f.linked_after;
+    return f;
+}
+// One kiln.log line for an item fill's decision (the press's own line is Kiln.Blocks').
+inline std::string item_fill_text(const ItemFill& f, uint32_t item, uint32_t amount, uint32_t station, uint32_t player) {
+    char b[320];
+    if (f.math.status == KILN_STATION_DONE)
+        std::snprintf(b, sizeof b,
+                      "stations: player %u's transfer of %u x item 0x%08x into station %u: %u from the bag and the base's Magic "
+                      "chests, %u from linked sources",
+                      player, amount, item, station, f.game, f.linked + f.linked_after);
+    else
+        std::snprintf(b, sizeof b,
+                      "stations: player %u's transfer of %u x item 0x%08x into station %u: short (the bag, the Magic chests and "
+                      "the fill-opted links hold %u): nothing moved",
+                      player, amount, item, station, f.math.affordable);
+    return b;
 }
 
 // Once the shares are in the station: the n the game's own call then needs so that every input ends where a plain fill

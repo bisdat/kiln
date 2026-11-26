@@ -713,9 +713,12 @@ static_assert(offsetof(KilnUiApi, pointer) == 1056 && offsetof(KilnUiApi, drag_s
                   offsetof(KilnUiApi, drop_target) == 1072 &&
                   sizeof(KilnUiPointer) == 24 && offsetof(KilnUiPointer, x) == 8 && offsetof(KilnUiPointer, held) == 16,
               "kiln.ui appends pointer, drag_source and drop_target after chat_search (0.2.0-dev.30.3; UiNative.TableDrag)");
-static_assert(offsetof(KilnUiApi, popups) == 1080 && sizeof(KilnUiApi) == 1088 && sizeof(KilnUiPopups) == 88 &&
+static_assert(offsetof(KilnUiApi, popups) == 1080 && sizeof(KilnUiPopups) == 88 &&
                   offsetof(KilnUiPopups, frame) == 16 && offsetof(KilnUiPopups, rect) == 24 && sizeof(KilnUiPopupRect) == 16,
               "kiln.ui appends popups after drop_target (0.2.0-dev.31.9, issue 117; UiNative.TablePopups)");
+static_assert(offsetof(KilnUiApi, window_state) == 1088 && sizeof(KilnUiApi) == 1096 && sizeof(KilnUiWindowState) == 24 &&
+                  offsetof(KilnUiWindowState, x) == 8 && offsetof(KilnUiWindowState, height) == 20,
+              "kiln.ui appends window_state after popups (issue 149; UiNative.TableWindowState)");
 static_assert(offsetof(KilnUiChatCompletion, text) == 60 &&
               offsetof(KilnUiChatCompletion, replacement) == 317 &&
               sizeof(KilnUiChatCompletion) == 576,
@@ -794,6 +797,7 @@ const KilnUiApi kTable = {
     &t_chat_search,  // issue #44 internal reverse-history search
     &t_pointer, &t_drag_source, &t_drop_target,  // the pointer, held buttons, drag and drop (0.2.0-dev.30.3, issue 113)
     &t_popups,  // the game's popup panels (0.2.0-dev.31.9, issue 117)
+    &t_window_state,  // a window's place, dragged or resized by the player: window docking (issue 149)
 };
 
 // kiln.ui.blocks (kiln_ui_blocks.h, 0.2.0-dev.31): the richer UI blocks' slots, a table of its own while kiln.ui is frozen.

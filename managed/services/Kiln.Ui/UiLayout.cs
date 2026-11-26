@@ -421,7 +421,10 @@ public sealed unsafe partial class UiDraw
         return t != null && t->KeyPressed((uint)key, (repeat ? 1u : 0u) | (claim ? 2u : 0u)) != 0;
     }
 
-    /// <summary>The modifier keys held now.</summary>
+    /// <summary>The modifier keys held now: Ctrl, Shift and Alt as Dear ImGui's io has them this frame (<c>KeyCtrl</c>,
+    /// <c>KeyShift</c>, <c>KeyAlt</c>), from the game window's key messages whether or not Kiln has the input; a focus loss
+    /// (alt-tab) clears them, so a release lost to it never leaves one held. For a Shift+drag or Ctrl+wheel inside your
+    /// window, no <c>KeyInput</c> listener is needed. <see cref="KeyMods.None"/> outside a frame, and on a kiln.ui older than v3.</summary>
     public KeyMods HeldMods
     {
         get

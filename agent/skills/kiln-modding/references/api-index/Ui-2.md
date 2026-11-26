@@ -1,14 +1,5 @@
 # Ui (Kiln.Ui): part 2 of 2
 
-## Ui.World `0.2.13` — The game's world as this player's client draws it: outlines on entities with the game's own highlight (`World.Outline`).
-- `static ClearOutlines() -> void` — Takes every outline of your mod away (their handles end with `OutlineReason.Removed`).
-- `static DefaultOutlineColor { get; } -> Color` — The colour of an outline whose options name none: gold, (255, 196, 64).
-- `static Outline(EntityId entity, OutlineOptions? options = null) -> WorldOutline` — Outlines `entity`'s model with the game's own highlight, in this player's game, until you dispose the handle, your...
-- `const OutlineCapability = "ui.world_outline" -> string` — The capability row of `World.Outline`: a sigdb feature of the game client (kiln.render's palette hooks); kiln.render...
-- `static OutlinesAvailable { get; } -> bool` — Outlines work in this process: the row `World.OutlineCapability` is on and kiln.render has its outline functions (v2).
-- `static ThroughWallsAvailable { get; } -> bool` `0.2.14` — Kiln draws through-walls silhouettes in this process: the row `World.ThroughWallsCapability` is on.
-- `const ThroughWallsCapability = "ui.world_outline.through_walls" -> string` `0.2.14` — The capability row of `OutlineOptions.ThroughWalls`: `World.OutlineCapability` on, kiln.render v3 (the entity's...
-
 ## UiBarEdit `0.2.3` — What a provider changes; a null field keeps the value.
 - `UiBarEdit(float? Fraction = null, uint? Current = null, uint? Max = null, UiLabelEdit? Label = null)`
 - `Current { get; init; } -> uint?` — The current number; null keeps it.
@@ -51,6 +42,12 @@ enum: Text, TextDisabled, WindowBg, ChildBg, Border, FrameBg, FrameBgHovered, Fr
 - `X { get; init; } -> float` — Where the next widget goes, x, window-local (scrolling included).
 - `Y { get; init; } -> float` — Where the next widget goes, y, window-local (scrolling included).
 
+## UiDockChange `0.2.23` — A window's dock changed (`UiWindow.DockChanged`).
+- `ByPlayer { get; } -> bool` — The player did it: dragged it away with Shift held (undocked), or dropped it beside its old target (docked again).
+- `DockedTo { get; } -> UiWindowHandle?` — The window it is docked to now; null: it is no longer docked.
+- `Offset { get; } -> float` — The offset along the shared edge, pixels at UI scale 1 (for an undock: the one it had).
+- `Side { get; } -> DockSide` — The side of the dock (for an undock: the side it had).
+
 ## UiDraw — Immediate-mode drawing inside a Kiln window or a frame handler (a small wrapper over Dear ImGui).
 - `BeginChild(string id, float width = 0, float height = 0) -> bool` — A scrolling region (call `UiDraw.EndChild` always).
 - `BeginChild(string id, float width, float height, UiChildFlags flags, UiWindowFlags windowFlags = UiWindowFlags.None) -> bool` — A child region (call `UiDraw.EndChild` always).
@@ -86,7 +83,7 @@ enum: Text, TextDisabled, WindowBg, ChildBg, Border, FrameBg, FrameBgHovered, Fr
 - `HasBlockWidgets { get; } -> bool` `0.2.17` — Whether this Kiln has the calls below (kiln.ui.blocks); without it they fall back to the plain ones and a tab or...
 - `HasLayout { get; } -> bool` — This kiln.ui has the layout calls in this file (version 3).
 - `Height { get; } -> float` — Screen height in pixels (`UiDraw.Width` is the width).
-- `HeldMods { get; } -> KeyMods` — The modifier keys held now.
+- `HeldMods { get; } -> KeyMods` — The modifier keys held now: Ctrl, Shift and Alt as Dear ImGui's io has them this frame (`KeyCtrl`, `KeyShift`...
 - `Id(string id) -> UiDraw.IdScope` — Scopes widget ids (needed when the same label appears twice).
 - `Image(UiImage image, float width = 0, float height = 0) -> void` — Draws an image (`Ui.LoadImage`, or an item's icon from `Ui.ItemImage`); 0 = its own size (scaled by `UiDraw.Scale`).
 - `ImageButton(string id, UiImage image, float width = 0, float height = 0) -> bool` — An image as a button; true when clicked.
@@ -140,7 +137,9 @@ enum: Text, TextDisabled, WindowBg, ChildBg, Border, FrameBg, FrameBgHovered, Fr
 - `TreeNode(string label) -> bool` — A tree node; call `UiDraw.TreePop` when it returns true.
 - `TreePop() -> void` — Ends a `UiDraw.TreeNode` that returned true.
 - `Width { get; } -> float` — Screen size in pixels.
+- `WindowMovedByUser { get; } -> bool` `0.2.23` — The player holds the current window to drag it this frame (also while the pointer stays still), as Dear ImGui has...
 - `WindowRect { get; } -> (float X, float Y, float Width, float Height)` — Position and size of the current window in pixels.
+- `WindowResizedByUser { get; } -> bool` `0.2.23` — The player holds one of the current window's resize grips or borders this frame.
 
 ## UiDraw.FontChoice — The scope `UiDraw.Font` returns; dispose it to go back to the earlier font.
 - `FontChoice()`
@@ -555,6 +554,9 @@ enum: World, Capability, Registry
 
 ## UiWindow — A Kiln window (Forge: a Screen).
 - `Dispose() -> void` — Removes the window for good (also done when the owning mod unloads).
+- `DockChanged -> Action<UiDockChange>?` `0.2.23` — The window's dock changed: your `UiWindow.DockTo` / `UiWindow.Undock` (on the thread that called it), or the...
+- `DockedTo { get; } -> UiWindowHandle?` `0.2.23` — The window this one is docked to (`UiWindow.DockTo`); null when it is not docked.
+- `DockTo(UiWindowHandle target, DockSide side, float offset = 0) -> void` `0.2.23` — Docks this window to `target` (another window, also another mod's, that accepts docks: `Ui.FindWindow`), on `side`...
 - `Hide() -> void` — Closes the window (`UiWindow.Open` = false).
 - `MoveTo(float x, float y, float pivotX = 0.5, float pivotY = 0.5) -> void` `0.2.20` — Moves the window: the point (`pivotX`, `pivotY`) of the window (0.5, 0.5 = its centre; 0, 0 = its top left corner)...
 - `Open { get; set; } -> bool` — Shown right now.
@@ -564,11 +566,23 @@ enum: World, Capability, Registry
 - `Show() -> void` — Opens the window (`UiWindow.Open` = true).
 - `Title { get; } -> string` — The window's title.
 - `Toggle() -> void` — Opens the window if it is closed, closes it if it is open.
+- `Undock() -> void` `0.2.23` — Takes the window out of its dock (it stays where it is).
 
 ## UiWindowFlags — Window flags for child regions.
 enum: None, NoScrollbar, NoScrollWithMouse, NoBackground, AlwaysVerticalScrollbar
 
+## UiWindowHandle `0.2.23` — A window of some mod that accepts docks (`UiWindowOptions.AcceptDock`), by its mod's id and its placement id (`Ui.FindWindow`): what `UiWindow.DockTo` takes.
+- `Available { get; } -> bool` — Such a window exists now: its mod is loaded, the window was made and not removed, and it accepts docks.
+- `Equals(UiWindowHandle? other) -> bool` — The same mod and placement id.
+- `ModId { get; } -> string` — The id of the mod whose window it is.
+- `Open { get; } -> bool` — That window is open now (false when it is not `UiWindowHandle.Available`).
+- `static operator !=(UiWindowHandle? left, UiWindowHandle? right) -> bool` — Not the same mod and placement id.
+- `static operator ==(UiWindowHandle? left, UiWindowHandle? right) -> bool` — The same mod and placement id (both null: true), like `UiWindowHandle.Equals`: each `Ui.FindWindow` makes a new...
+- `Placement { get; } -> UiPlacement?` — Where that window was drawn last (`UiWindow.Placement`); null when it is not `UiWindowHandle.Available` or before...
+- `PlacementId { get; } -> string` — The window's placement id (`UiWindowOptions.PlacementId`, else its title when it was made).
+
 ## UiWindowOptions — Options of a Kiln window.
+- `AcceptDock { get; init; } -> bool` `0.2.23` — Other windows, also other mods' ones, may dock to this one (`UiWindow.DockTo`): only a window that accepts docks is...
 - `AutoResize { get; init; } -> bool` — The window grows and shrinks with its contents.
 - `BackgroundAlpha { get; init; } -> float?` — Background opacity (0..1), null = the theme's.
 - `Height { get; init; } -> float` — Initial size in pixels at scale 1 (0 = fit the contents).

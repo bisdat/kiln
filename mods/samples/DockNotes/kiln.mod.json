@@ -1,0 +1,9 @@
+{
+  "id": "docknotes",
+  "name": "Docking sample: notes",
+  "version": "1.0.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "DockNotes.dll",
+  "side": "client",
+  "description": "Window docking sample, the window that docks: a notes window (F6, the same key as DockBook's spell book) docked to the right of the book. Drag either window and both move; Shift+drag the notes to move them alone, drop them beside the book to dock again."
+}

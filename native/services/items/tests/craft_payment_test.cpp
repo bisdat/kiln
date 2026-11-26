@@ -7,6 +7,10 @@
 namespace fixture {
 std::map<uint32_t,std::map<uint32_t,uint32_t>> inventory;
 bool server_storage = true, fail_take = false;
+// GitHub #148: kiln.items' access_from_tx needs every accessor of the transaction, Fuel among them; the blueprint program's
+// transaction has no Fuel accessor (its setup leaves +0x70 zero, InventoryTxInit copies that to tx+0x38), so it fails
+// there and only access_from_tx_reads (InventorySetup and Inventory) accepts it
+bool tx_fuel = true;
 uint8_t stock_error = 0x1f;
 std::vector<uint32_t> paid;
 void* bases=nullptr;
@@ -48,7 +52,7 @@ void items_log(int,const char* fmt,...) {
 uint64_t current_step() { return 1; }
 const KilnApi* items_api() { return g_api; }
 KilnOwner items_owner() { return 10; }
-bool access_from_tx(void*,Access* out) { *out = {}; return fixture::server_storage; }
+bool access_from_tx(void*,Access* out) { *out = {}; return fixture::server_storage && fixture::tx_fuel; }
 bool access_from_tx_reads(void*,Access* out) { *out = {}; return fixture::server_storage; }
 bool setup_flags(const Access&,KilnEntity e,uint8_t* flags) { *flags = e <= 1023 ? 1 : 0; return fixture::inventory.count(e) != 0; }
 bool read_pages(const Access&,KilnEntity e,PageSet* out,bool* initialized) {
@@ -196,6 +200,7 @@ int main() {
     {
         auto said=[&](const char* s) { for (const auto& l : logs) if (l.find(s) != std::string::npos) return true; return false; };
         g_build.paid=0x5678;reset();logs.clear();
+        fixture::tx_fuel=false;  // #148: the blueprint program's own transaction, as the game builds it (no Fuel accessor)
         t_build_pay=true;  // only the crafting link (container 2000) exists: a placement never takes from it
         CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
         uint64_t bl=0;KilnCraftSourceRequest b{sizeof b,1,2000,0,0,0,nullptr,KILN_CRAFT_SOURCE_BUILDING,0};
@@ -214,6 +219,33 @@ int main() {
         reset();infos[0x9d]=0;  // no CanAccessInventories: the link is not a source
         CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
         infos[0x9d]=2;
+        // #148: a craft's transaction still needs every accessor (its payment may read Fuel): without one it is the game's
+        reset();CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==0 && fixture::paid.empty());
+        CHECK(said("the server world's craft transaction did not check out (its accessors)"));
+        // #148: a placement whose transaction is not the server world's says so as a placement
+        reset();logs.clear();fixture::server_storage=false;
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+        CHECK(said("the server world's block placement transaction did not check out (its accessors)"));
+        fixture::server_storage=true;
+        // review of #148: another world's placement (a hosting client's own world, Building Tools' redirect followed by the
+        // program's frame there too) says so as a placement, not as a craft
+        reset();logs.clear();wr(tx,0x70,uint64_t{0x55});
+        CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+        CHECK(said("block placement payment left to the game (not the server world's transaction") && !said("craft payment"));
+        wr(tx,0x70,bases);
+        // review of #148: a placement of more than 32 cost lines (a Building Tools area action or blueprint of many
+        // materials) is the game's, bag and base, and kiln.log says why (it said "the cost lines could not be read")
+        {
+            uint8_t many[33*24]={};
+            for (uint32_t i=0;i<33;++i) {wr(many+i*24,0x10,uint32_t{7}+i);wr(many+i*24,0x14,uint32_t{1});}
+            struct {void* ptr;uint64_t n;} long_costs{many,33};
+            reset();logs.clear();
+            CHECK(craft_pay_impl(tx,&long_costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());
+            CHECK(said("block placement payment left to the game (it names more than 32 cost lines") && !said("could not be read"));
+            long_costs.n=0;reset();logs.clear();
+            CHECK(craft_pay_impl(tx,&long_costs,1,1,nullptr,0x5678,&code)==0 && said("the cost lines could not be read"));
+        }
+        fixture::tx_fuel=true;
         reset();CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==1 && code==0);  // a craft still uses it (every link crafts)
         t_build_pay=false;g_build.paid=0;reset();
         CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x5678,&code)==0 && fixture::paid.empty());  // no building symbols: never
