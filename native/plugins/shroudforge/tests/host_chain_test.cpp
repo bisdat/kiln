@@ -403,6 +403,7 @@ KilnVoxel g_cells[16 * 16 * 16]{};  // the fake grid: 16 x 16 x 16 cells (x and 
 uint32_t g_write_flags = 0;
 int g_build_writes = 0;
 int g_outside = 0;      // cells kiln.build was asked to write outside the grid
+bool g_corrupt = false; // kiln.build's writer commits other cells than asked (no read-back), the put-back too
 bool g_tick_ok = true;  // kiln.build's members answer only on the "server world's thread"
 bool inside(int64_t x, int64_t y, int64_t z) { return x >= 0 && x < 16 && y >= 0 && y < 16 && z >= 0 && z < 16; }
 size_t cell_at(int x, int y, int z) { return (static_cast<size_t>(z) * 16 + y) * 16 + x; }
@@ -442,10 +443,10 @@ KilnResult KILN_CALL fb_write(const KilnBuildWrite* w, KilnBuildResult* r) {
         for (uint32_t y = 0; y < w->dims[1]; ++y)
             for (uint32_t x = 0; x < w->dims[0]; ++x, ++j) {
                 const int64_t cx = int64_t{w->origin[0]} + x, cy = int64_t{w->origin[1]} + y, cz = int64_t{w->origin[2]} + z;
-                if (inside(cx, cy, cz)) g_cells[cell_at(int(cx), int(cy), int(cz))] = w->cells[j];
+                if (inside(cx, cy, cz)) g_cells[cell_at(int(cx), int(cy), int(cz))] = w->cells[j] ^ (g_corrupt ? 0x0101 : 0);
                 else ++g_outside;
             }
-    r->flags = KILN_BUILD_R_CHANGED | KILN_BUILD_R_VERIFIED;
+    r->flags = KILN_BUILD_R_CHANGED | (g_corrupt ? 0 : KILN_BUILD_R_VERIFIED);
     r->blocks_written = 1;
     return KILN_OK;
 }
@@ -718,6 +719,41 @@ int main() {
         check(g_host->voxel_write(at, box, again, 4, &outcome) && outcome == 0 && g_cells[cell_at(2, 3, 4)] == 9,
               "the next write, asked in the new world, is written");
     }
+    // outcome 3 (the write did not read back and neither did the put-back): as ShroudForge's own writer (it marks the
+    // session's writes uncertain), no further voxel write in that world; the next world writes again
+    {
+        const uint16_t cells3[4] = {5, 6, 7, 8};
+        g_corrupt = true;
+        run_posts(30);
+        outcome = 9;
+        check(!g_host->voxel_write(at, box, cells3, 4, &outcome) && outcome == 3, "a put-back that does not read back: outcome 3");
+        g_corrupt = false;
+        const int writes_before = g_build_writes;
+        const uint16_t later[4] = {1, 1, 1, 1};
+        run_posts(30);
+        outcome = 9;
+        check(!g_host->voxel_write(at, box, later, 4, &outcome) && outcome == 1 && g_build_writes == writes_before,
+              "after an uncertain outcome the world takes no further ShroudForge voxel write");
+        {
+            // by now this start has refused more than ten writes for other reasons: kiln.log still says each new reason,
+            // and every write that changed the world and failed
+            std::lock_guard lock(g_log_mutex);
+            bool uncertain = false, said = false;
+            for (const auto& l : g_lines) {
+                uncertain |= l.find("ShroudForge voxel write failed; the outcome is uncertain") != std::string::npos;
+                said |= l.find("uncertain outcome") != std::string::npos && l.find("refused") != std::string::npos;
+            }
+            check(uncertain, "kiln.log has the uncertain write (after more than ten refusals)");
+            check(said, "kiln.log says why the next one is refused");
+        }
+        run_posts(30, /*new_world=*/true);
+        outcome = 9;
+        check(!g_host->voxel_write(at, box, later, 4, &outcome) && outcome == 1, "(a write asked in the old world that reaches the new one: refused)");
+        run_posts(30);
+        outcome = 9;
+        check(g_host->voxel_write(at, box, later, 4, &outcome) && outcome == 0 && g_cells[cell_at(3, 3, 4)] == 1,
+              "the next world takes writes again");
+    }
     {
         std::lock_guard lock(g_log_mutex);
         bool said = false;
@@ -730,7 +766,7 @@ int main() {
         std::lock_guard lock(g_log_mutex);
         size_t errors = 0;
         for (const auto& l : g_lines)
-            if (l[0] == 'E' && l.find("faulted") == std::string::npos)
+            if (l[0] == 'E' && l.find("faulted") == std::string::npos && l.find("the outcome is uncertain") == std::string::npos)
                 ++errors, std::printf("  unexpected log: %s\n", l.c_str());
         if (errors) ++g_fail;
     }
