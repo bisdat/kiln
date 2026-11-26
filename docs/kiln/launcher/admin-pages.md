@@ -104,8 +104,9 @@ live overlays on the plain world plane; Spawn falls back to the enemy types the 
 - Screenshots: `node tools/launcher/admin-shots.mjs [--server lab] [--prefix mock-]` → `.out/launcher/admin-shots/`.
 
 ## The @kiln/admin-ui package
-The admin pages are also a workspace package for web pages: Kiln Web Admin (`~/Work/kiln-mods/kiln-webadmin`, its
-DESIGN.md section 4) serves them from inside the server, so both panels get every page. Nothing is published.
+The admin pages are also a workspace package for web pages: Kilnwarden (the web panel mod, mod id `kilnwarden`,
+formerly Kiln Web Admin; its DESIGN.md section 4) serves them from inside the server, so both panels get every page.
+Nothing is published.
 
 | | |
 |---|---|
@@ -143,7 +144,7 @@ page (`src/admin/harness/index.html?kap=<ws url>`, served by the launcher's dev 
 the browser mock's world behind a fake socket, with a Tauri stand-in that must never be called.
 
 ### A strict Content-Security-Policy (0.2.0-dev.31.13)
-The pages run under Kiln Web Admin's header (`default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self';
+The pages run under Kilnwarden's header (`default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self';
 connect-src 'self'; img-src 'self' data: blob:; ...`, no `'unsafe-inline'`, no `'unsafe-eval'`). What that refuses, and
 so what the package never does: a `style="..."` in HTML a module writes (an `innerHTML`, a Leaflet `divIcon`'s or
 tooltip's `html`) or sets with `setAttribute("style")`, a `<style>` element, inline script, `eval`. What it allows and the
@@ -154,7 +155,7 @@ Every page has one `h1`: Items and Map, which show no header, have a visually hi
 name, so the launcher looks the same.
 
 The package's CSS carries its fonts as `data:` URLs (a Vite library build inlines assets): a host under `font-src 'self'`
-turns them into files when it builds (Kiln Web Admin's `inlineFonts` plugin does).
+turns them into files when it builds (Kilnwarden's `inlineFonts` plugin does).
 
 Checks: `tests/admin-ui-csp.spec.ts` builds the harness for production (the dev server injects inline scripts and
 styles itself), serves it from a fake origin with that exact header, and opens every page the mod vendors (the 13 admin

@@ -263,14 +263,14 @@ pub(crate) fn fake_ssh() -> Option<PathBuf> {
 
 /// Sets KILN_SSH (and the stand-in's delay) for the guard's life.
 #[cfg(unix)]
-struct SshEnv {
+pub(crate) struct SshEnv {
     _held: std::sync::MutexGuard<'static, ()>,
     dir: PathBuf,
 }
 
 #[cfg(unix)]
 impl SshEnv {
-    fn set(ssh: &Path, delay_s: u32) -> SshEnv {
+    pub(crate) fn set(ssh: &Path, delay_s: u32) -> SshEnv {
         let held = SSH_ENV.lock().unwrap_or_else(|p| p.into_inner());
         // SAFETY: every test that touches KILN_SSH / KILN_FAKE_SSH_DELAY holds SSH_ENV.
         unsafe {

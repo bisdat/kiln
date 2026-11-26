@@ -397,3 +397,133 @@ fn ssh_forwards_hold_their_port_and_use_ssh_w_per_connection() {
     unsafe { std::env::remove_var("KILN_SSH") };
     let _ = std::fs::remove_dir_all(ssh.parent().unwrap());
 }
+
+/// (0.2.0-dev.31.14) A plain-HTTP endpoint of mod `id` in the data folder `data` (`<data root>/<id>/`).
+fn panel_endpoint(data: &Path, id: &str, port: u16) {
+    let dir = data.join(id);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(endpoint::FILE), format!(r#"{{"format":1,"host":"127.0.0.1","port":{port},"sha256":null}}"#)).unwrap();
+}
+
+#[test]
+fn kilnwarden_kiln_web_admin_or_both_kilnwarden_first() {
+    let dir = temp("ids");
+    let s = server("ids", &dir);
+    let data = dir.join("kiln/data");
+    let found = |s: &ServerInstance| endpoint::find_in(s, &endpoint::root(s).unwrap()).map(|(m, ep)| (m.id, ep.port));
+    let e = found(&s).unwrap_err();
+    assert_eq!(e.code, ErrorCode::AdminUnavailable);
+    assert!(e.message.starts_with("Kilnwarden is not listening"), "{}", e.message);
+    panel_endpoint(&data, "kiln-webadmin", 1111);
+    assert_eq!(found(&s).unwrap(), ("kiln-webadmin", 1111), "a Kiln Web Admin test build");
+    panel_endpoint(&data, "kilnwarden", 2222);
+    assert_eq!(found(&s).unwrap(), ("kilnwarden", 2222), "both: Kilnwarden");
+    std::fs::remove_dir_all(data.join("kiln-webadmin")).unwrap();
+    assert_eq!(found(&s).unwrap(), ("kilnwarden", 2222), "Kilnwarden alone");
+    assert_eq!(endpoint::read(&s).unwrap().port, 2222);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn kilnwarden_follows_a_profile_data_folder_too() {
+    let dir = temp("ids-datadir");
+    let s = server("ids-datadir", &dir);
+    // a stale old copy's file in kiln/data does not count once the server booted with a profile data folder
+    panel_endpoint(&dir.join("kiln/data"), "kiln-webadmin", 1111);
+    std::fs::create_dir_all(dir.join("kiln/state")).unwrap();
+    std::fs::write(dir.join("kiln/state/boot.json"), br#"{"profile":{"mode":"active","dataDir":"profiles-copy/p1/data"}}"#).unwrap();
+    panel_endpoint(&dir.join("kiln/profiles-copy/p1/data"), "kilnwarden", 3333);
+    let (m, ep) = endpoint::find_in(&s, &endpoint::root(&s).unwrap()).unwrap();
+    assert_eq!((m, ep.port), (ids::KILNWARDEN, 3333));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_plain_http_kilnwarden_opens_through_its_gateway() {
+    let dir = temp("ids-open");
+    let s = server("ids-open", &dir);
+    let upstream = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    panel_endpoint(&dir.join("kiln/data"), "kilnwarden", upstream.local_addr().unwrap().port());
+    let mut panels = WebPanels::new(dir.join("web-panel-origins.json"));
+    let opened = panels.open(&s).unwrap();
+    assert!(opened.url.starts_with("http://") && opened.url.ends_with("/signin"), "{}", opened.url);
+    assert_eq!(opened.info.fingerprint, None);
+    panels.close_all();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// (review of 0.2.0-dev.31.14) `kiln/state/mods.json` with `mods` (id, state) as the running server's Kiln writes it.
+fn mods_json(server_dir: &Path, mods: &[(&str, &str)]) {
+    let mods: Vec<_> = mods.iter().map(|(id, state)| serde_json::json!({"id": id, "state": state})).collect();
+    std::fs::create_dir_all(server_dir.join("kiln/state")).unwrap();
+    std::fs::write(
+        server_dir.join(crate::paths::game::MODS_JSON),
+        serde_json::to_vec(&serde_json::json!({"format": 1, "pid": 1, "written": "2026-11-25T23:00:00Z", "generation": 1, "mods": mods})).unwrap(),
+    )
+    .unwrap();
+}
+
+/// (review of 0.2.0-dev.31.14) Kilnwarden left its file behind (a crash skips its removal) and the old copy is back:
+/// Kilnwarden stays off next to a loaded old copy (its M4), so the old copy's file is the live one. Before the fix the
+/// launcher took Kilnwarden's stale file and every open failed the pin check against the old copy's certificate.
+#[test]
+fn a_stale_kilnwarden_file_next_to_a_loaded_old_copy_is_not_the_panel() {
+    let dir = temp("ids-stale-new");
+    let s = server("ids-stale-new", &dir);
+    let data = dir.join("kiln/data");
+    panel_endpoint(&data, "kilnwarden", 2222);
+    panel_endpoint(&data, "kiln-webadmin", 1111);
+    let found = |s: &ServerInstance| endpoint::find_in(s, &endpoint::root(s).unwrap()).map(|(m, ep)| (m.id, ep.port)).unwrap();
+    mods_json(&dir, &[("kiln-admin", "loaded"), ("kilnwarden", "loaded"), ("kiln-webadmin", "loaded")]);
+    assert_eq!(found(&s), ("kiln-webadmin", 1111), "the old copy is loaded: Kilnwarden is off");
+    mods_json(&dir, &[("kiln-webadmin", "pending"), ("kilnwarden", "loaded")]);
+    assert_eq!(found(&s), ("kiln-webadmin", 1111), "the old copy still loading counts too (as in M4)");
+    // the old copy gone (or switched off): its file is the stale one, Kilnwarden's the live one
+    mods_json(&dir, &[("kilnwarden", "loaded"), ("kiln-webadmin", "disabled")]);
+    assert_eq!(found(&s), ("kilnwarden", 2222));
+    mods_json(&dir, &[("kilnwarden", "loaded")]);
+    assert_eq!(found(&s), ("kilnwarden", 2222));
+    // no mods.json (or one this launcher can't read): Kilnwarden first, as before
+    std::fs::write(dir.join(crate::paths::game::MODS_JSON), b"not json").unwrap();
+    assert_eq!(found(&s), ("kilnwarden", 2222));
+    std::fs::remove_file(dir.join(crate::paths::game::MODS_JSON)).unwrap();
+    assert_eq!(found(&s), ("kilnwarden", 2222));
+    // the old copy loaded but without a file (not listening yet): Kilnwarden's file is all there is
+    mods_json(&dir, &[("kilnwarden", "loaded"), ("kiln-webadmin", "loaded")]);
+    std::fs::remove_dir_all(data.join("kiln-webadmin")).unwrap();
+    assert_eq!(found(&s), ("kilnwarden", 2222));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// (review of 0.2.0-dev.31.14) The same over ssh, in a server folder whose name needs quoting: both endpoint folders
+/// and mods.json are read on the remote machine, in the data root it booted with.
+#[cfg(unix)]
+#[test]
+fn over_ssh_both_ids_and_the_loaded_old_copy_in_a_folder_that_needs_quoting() {
+    let Some(ssh) = super::review_tests::fake_ssh() else {
+        eprintln!("skipped: no python3 for the ssh stand-in");
+        return;
+    };
+    let _env = super::review_tests::SshEnv::set(&ssh, 0);
+    let dir = temp("ids-ssh").join("it's a $(server) folder");
+    std::fs::create_dir_all(&dir).unwrap();
+    let remote = crate::server::remote::RemoteSpec { host: "lab-box".into(), port: None, dir: dir.display().to_string(), instance: None };
+    let mut s = server("ids-ssh", &dir);
+    s.dir = None;
+    s.remote = Some(remote);
+    let found = |s: &ServerInstance| endpoint::find_in(s, &endpoint::root(s).unwrap()).map(|(m, ep)| (m.id, ep.port));
+    let e = found(&s).unwrap_err();
+    assert!(e.message.starts_with("Kilnwarden is not listening"), "{}", e.message);
+    let data = dir.join("kiln/data");
+    panel_endpoint(&data, "kiln-webadmin", 1111);
+    assert_eq!(found(&s).unwrap(), ("kiln-webadmin", 1111));
+    panel_endpoint(&data, "kilnwarden", 2222);
+    assert_eq!(found(&s).unwrap(), ("kilnwarden", 2222));
+    mods_json(&dir, &[("kilnwarden", "loaded"), ("kiln-webadmin", "loaded")]);
+    assert_eq!(found(&s).unwrap(), ("kiln-webadmin", 1111), "the old copy loaded: its panel");
+    // a profile data folder on the remote machine
+    std::fs::write(dir.join("kiln/state/boot.json"), br#"{"profile":{"mode":"active","dataDir":"profiles-copy/p 1/data"}}"#).unwrap();
+    panel_endpoint(&dir.join("kiln/profiles-copy/p 1/data"), "kilnwarden", 3333);
+    assert_eq!(found(&s).unwrap(), ("kilnwarden", 3333), "only the booted data root counts");
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+}

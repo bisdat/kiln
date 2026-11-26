@@ -14,22 +14,22 @@ pub const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Connects to `addr` and completes a TLS handshake that only `pin`'s certificate passes.
 pub fn verify(addr: SocketAddr, pin: &str) -> Result<()> {
-    let mut socket = TcpStream::connect_timeout(&addr, TIMEOUT).map_err(|_| Error::new(ErrorCode::AdminUnavailable, "Kiln Web Admin did not answer"))?;
+    let mut socket = TcpStream::connect_timeout(&addr, TIMEOUT).map_err(|_| Error::new(ErrorCode::AdminUnavailable, "The web panel did not answer"))?;
     socket.set_read_timeout(Some(TIMEOUT))?;
     socket.set_write_timeout(Some(TIMEOUT))?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let verifier = Arc::new(PinnedLeaf { pin: pin.to_string(), algorithms: provider.signature_verification_algorithms });
     let config = ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
-        .map_err(|_| Error::new(ErrorCode::Internal, "could not configure Web Admin TLS"))?
+        .map_err(|_| Error::new(ErrorCode::Internal, "could not configure the web panel's TLS"))?
         .dangerous()
         .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
     let mut tls = ClientConnection::new(Arc::new(config), ServerName::IpAddress(addr.ip().into()))
-        .map_err(|_| Error::new(ErrorCode::Internal, "could not start Web Admin TLS"))?;
+        .map_err(|_| Error::new(ErrorCode::Internal, "could not start the web panel's TLS"))?;
     while tls.is_handshaking() {
         tls.complete_io(&mut socket)
-            .map_err(|e| Error::new(ErrorCode::Network, format!("Web Admin TLS could not verify the server certificate: {e}")))?;
+            .map_err(|e| Error::new(ErrorCode::Network, format!("the web panel's TLS could not verify the server certificate: {e}")))?;
     }
     Ok(())
 }

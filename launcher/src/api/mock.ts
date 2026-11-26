@@ -19,6 +19,7 @@ import { serverMockHandlers, webPanelMockHooks } from "../pages/servers/mockServ
 import { updateMockHandlers } from "./mockUpdate";
 import { deckMockHandlers } from "../deck/mockDeck";
 import { nexusMockHandlers, NEXUS_MOCK_ENABLED } from "./mockNexus";
+import { webPanelModMockHooks } from "../pages/servers/mockServers";
 import { communityMockHandlers, communityMockHooks } from "./mockCommunity";
 import { mockReportContents } from "./mockReport";
 import { updatesMockHandlers } from "./mockUpdates";
@@ -2456,6 +2457,8 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },
   planActivation: (report: Pick<Activation, "retained" | "keptFiles" | "warnings">) => { activationPlan = report; },
+  /** "Open web panel": Kilnwarden and/or Kiln Web Admin on the lab server (src/pages/servers/mockServers.ts). */
+  webPanelMods: webPanelModMockHooks,
   planAddNotices: (lines: string[]) => { addNotices.push(...lines); },
   setSfOwnFolder: (id: string, own = true) => { if (own) sfOwn.add(id); else sfOwn.delete(id); },
   setCookPace: (ms: number) => { cookStepMs = ms; },

@@ -120,7 +120,11 @@ local servers). It holds the shared admin session while the server runs.
   step, run by, port, admin endpoint, policy, game and Kiln versions, pid. A local server without Kiln gets a banner
   above them, "Kiln isn't installed" with Install Kiln (the same dialog as the menu; held, with "Stop the server to
   install it.", while it runs). The install's toast adds "N changed files kept in backups" when it replaced Kiln files
-  changed by hand.
+  changed by hand. While the server runs with a web panel mod enabled, "Open web panel" (`admin_open_web_panel`)
+  opens it in the browser, signed in as the owner. The mod is Kilnwarden (`kilnwarden`) or, before its rename, Kiln
+  Web Admin (`kiln-webadmin`, the 0.1.0 test builds; launchers 0.2.0-dev.31.2 to 31.13 know only this id); with both
+  enabled the button is the same (Kilnwarden stays off by itself and says so in kiln.log, and the old copy's panel
+  opens). `pages/servers/webPanelMod.ts`.
 - **logs**: the shared LogsFor (kiln.log, the game log, proxy.log, mod logs). **ticks**: the tick stats.
 - **settings**: `enshrouded_server.json`: name, slots, port, chat, preset, every difficulty setting (the game's
   ranges, minutes stored as nanoseconds), user groups (passwords unique, permissions, reserved
