@@ -209,7 +209,8 @@ export interface AdminArtStatus {
 export interface AdminMapNoArt {
   /** The banner over the map: its title; null: no banner (the host says it elsewhere, such as its own notice). */
   title: string | null;
-  /** Under the banner's title: a sentence, or the host's own elements (steps, a fix with its progress). */
+  /** Under the banner's title: a sentence, or the host's own elements (steps, a fix with its progress); taller than the
+   *  map, the banner scrolls inside it. */
   body?: ReactNode;
   /** One button in the banner. */
   action?: { label: string; onClick: () => void; busy?: boolean };
