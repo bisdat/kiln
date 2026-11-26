@@ -27,6 +27,11 @@ internal static class NpcSpeechEngine
 
     internal static readonly SpeechBook Book = new();
     private static readonly object Gate = new();
+    // One change at a time, from the book to kiln.npcspeech and the clients (any thread: a mod's threads, a joined
+    // client's network thread): what came last is what the bubble and the clients end with, and a late joiner's
+    // snapshot is not overtaken by an older change. Held while calling kiln.npcspeech, kiln.content and the channel,
+    // none of which calls back into Kiln.Npcs.
+    private static readonly object Order = new();
     private static readonly Dictionary<uint, SpeechEffect> Applied = new();   // what this process's bubbles were told
     private static readonly Dictionary<uint, SpeechEffect> Sent = new();      // what the clients were sent (host)
     private static readonly HashSet<string> Watched = new(StringComparer.Ordinal);
@@ -100,12 +105,15 @@ internal static class NpcSpeechEngine
 
     internal static SpeechResult Say(EntityId npc, string owner, UiText text, TimeSpan duration, SayOptions options)
     {
-        var now = Clock();
-        var cur = Book.Effective(npc.Value, now);
-        if (!options.Interrupt && cur.Say is not null && cur.SayOwner != owner)
-            return SpeechResult.No($"{cur.SayOwner}'s Say is still showing over {npc}");
-        Book.Say(SpeechLayer.Local, npc.Value, owner, text, now + (long)duration.TotalMilliseconds);
-        return Changed(npc.Value);
+        lock (Order)
+        {
+            var now = Clock();
+            var cur = Book.Effective(npc.Value, now);
+            if (!options.Interrupt && cur.Say is not null && cur.SayOwner != owner)
+                return SpeechResult.No($"{cur.SayOwner}'s Say is still showing over {npc}");
+            Book.Say(SpeechLayer.Local, npc.Value, owner, text, now + (long)duration.TotalMilliseconds);
+            return Changed(npc.Value);
+        }
     }
 
     internal static void StopSay(EntityId npc, string owner)
@@ -118,12 +126,15 @@ internal static class NpcSpeechEngine
     /// <summary>The NPC's effective speech changed (maybe): this process's bubbles follow, and as the host the clients.</summary>
     internal static SpeechResult Changed(uint npc)
     {
-        var now = Clock();
-        var eff = Book.Effective(npc, now);
-        var note = ApplyHere(npc, eff, now);
-        if (IsHost) Broadcast(npc, eff, now);
-        else if (!SpeechNative.Loaded) return SpeechResult.No(note ?? "kiln.npcspeech is not here: this game shows no Kiln speech");
-        return note is null ? SpeechResult.Yes : new SpeechResult(true, note);
+        lock (Order)
+        {
+            var now = Clock();
+            var eff = Book.Effective(npc, now);
+            var note = ApplyHere(npc, eff, now);
+            if (IsHost) Broadcast(npc, eff, now);
+            else if (!SpeechNative.Loaded) return SpeechResult.No(note ?? "kiln.npcspeech is not here: this game shows no Kiln speech");
+            return note is null ? SpeechResult.Yes : new SpeechResult(true, note);
+        }
     }
 
     /// <summary>Tells kiln.npcspeech; null when it shows, else a note on why it does not here.</summary>
@@ -224,14 +235,17 @@ internal static class NpcSpeechEngine
     internal static void Snapshot(NetPeer peer)
     {
         if (!IsHost || _channel is not { } channel || !peer.HasChannel(ChannelName)) return;
-        var now = Clock();
-        SendTo(channel, peer, new SpeechResetMsg(true));
-        foreach (var npc in Book.Npcs())
+        lock (Order)
         {
-            var eff = Book.Effective(npc, now);
-            if (eff.Mode != SpeechMode.Game) SendTo(channel, peer, new SpeechMsg(npc, eff.Mode, eff.Lines.Select(SpeechText.Json).ToArray()));
-            if (eff.Say is { } s && eff.SayUntilMs > now)
-                SendTo(channel, peer, new SayMsg(npc, SpeechText.Json(s), (uint)Math.Clamp(eff.SayUntilMs - now, 1, (long)Npcs.MaxSay.TotalMilliseconds)));
+            var now = Clock();
+            SendTo(channel, peer, new SpeechResetMsg(true));
+            foreach (var npc in Book.Npcs())
+            {
+                var eff = Book.Effective(npc, now);
+                if (eff.Mode != SpeechMode.Game) SendTo(channel, peer, new SpeechMsg(npc, eff.Mode, eff.Lines.Select(SpeechText.Json).ToArray()));
+                if (eff.Say is { } s && eff.SayUntilMs > now)
+                    SendTo(channel, peer, new SayMsg(npc, SpeechText.Json(s), (uint)Math.Clamp(eff.SayUntilMs - now, 1, (long)Npcs.MaxSay.TotalMilliseconds)));
+            }
         }
     }
 
@@ -270,17 +284,23 @@ internal static class NpcSpeechEngine
 
     private static void ServerGone()
     {
-        foreach (var npc in Book.DropLayer(SpeechLayer.Remote)) Changed(npc);
-        foreach (var npc in Book.DropLayer(SpeechLayer.Local)) Changed(npc);
-        Forget();
+        lock (Order)
+        {
+            foreach (var npc in Book.DropLayer(SpeechLayer.Remote)) Changed(npc);
+            foreach (var npc in Book.DropLayer(SpeechLayer.Local)) Changed(npc);
+            Forget();
+        }
     }
 
     /// <summary>The server world ends: every override and Say ends (here and, for clients still connected, there).</summary>
     internal static void WorldEnded()
     {
-        var touched = Book.DropLayer(SpeechLayer.Local);
-        if (touched.Length > 0 && IsHost) Send(new SpeechResetMsg(true));
-        Forget();
+        lock (Order)
+        {
+            var touched = Book.DropLayer(SpeechLayer.Local);
+            if (touched.Length > 0 && IsHost) Send(new SpeechResetMsg(true));
+            Forget();
+        }
     }
 
     private static void Forget()

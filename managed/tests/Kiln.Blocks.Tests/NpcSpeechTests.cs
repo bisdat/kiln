@@ -314,6 +314,32 @@ public sealed unsafe class NpcSpeechTests : IDisposable
     }
 
     [Fact]
+    public void A_slow_call_does_not_overwrite_a_newer_one()
+    {
+        // "any thread": a joined client's network thread (Received) and its tick thread (a mod's call), or a host's mod
+        // calling from two threads; whatever came last is what the bubble and the clients end with
+        using var entered = new ManualResetEventSlim();
+        using var go = new ManualResetEventSlim();
+        _onSet = mode =>
+        {
+            if (mode != 1 || Thread.CurrentThread.Name != "slow") return;
+            entered.Set();
+            go.Wait(5000);
+        };
+        var slow = new Thread(() => NpcSpeechEngine.Set(Ramone, "a", SpeechMode.Suppress, [], 0)) { Name = "slow" };
+        slow.Start();
+        Assert.True(entered.Wait(5000));
+        var fast = new Thread(() => NpcSpeechEngine.Set(Ramone, "a", SpeechMode.Game, [], 0));
+        fast.Start();
+        Thread.Sleep(100);
+        go.Set();
+        Assert.True(slow.Join(5000) && fast.Join(5000));
+        var sets = Snapshot().Where(c => c.StartsWith($"set {Ramone.Value} ", StringComparison.Ordinal)).ToArray();
+        Assert.Equal($"set {Ramone.Value} 0 []", sets[^1]);
+        Assert.NotEqual(SpeechMode.Suppress, Wire.OfType<SpeechMsg>().LastOrDefault()?.Mode ?? SpeechMode.Game);
+    }
+
+    [Fact]
     public void Texts_keep_their_letters_and_have_a_text_for_every_language()
     {
         Assert.Contains("Zurück", SpeechText.Json(UiText.Of(("de", "Zurück"))));
