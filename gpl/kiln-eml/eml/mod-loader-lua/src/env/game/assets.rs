@@ -170,7 +170,8 @@ fn lua_create_resource(
     let value = args.get::<LuaValue>(0)?;
     let r#type = get_type(&args, 1, app_state.type_registry().as_ref())?;
 
-    let guid = if args.len() > 2 {
+    let explicit = args.len() > 2;
+    let guid = if explicit {
         let guid = args.get::<Guid>(2)?;
         let part = args.get::<u32>(3)?;
 
@@ -194,6 +195,8 @@ fn lua_create_resource(
             lua,
         )?
     };
+
+    app_state.note_created(guid, explicit); // kiln-eml: the change journal (env/writes.rs)
 
     Ok(app_state.get_resource_info(&guid)
         .map(Resource::new)
@@ -245,6 +248,8 @@ fn lua_create_content(
         return Err(LuaError::generic("content size exceeds maximum limit"));
     }
 
-    app_state.create_content(data)
-        .map(Content::new)
+    let hash = app_state.create_content(data)?;
+    app_state.note_content(hash); // kiln-eml: the change journal (env/writes.rs)
+
+    Ok(Content::new(hash))
 }

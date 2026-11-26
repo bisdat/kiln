@@ -222,7 +222,9 @@ typedef struct KilnContentApi {
     KilnResult(KILN_CALL* dump)(KilnStr path, char* written, size_t cap, size_t* out_len);
     /* Re-reads every mod folder's content/<file>.json now (also happens when a file changes). */
     KilnResult(KILN_CALL* reload_packs)(void);
-    /* JSON report of the last data-pack application: packs, errors, conflicts. NUL-terminated, cut at cap. */
+    /* JSON report of the last data-pack application: generation, packs, errors, conflicts, skipped, and setApart (the mods a
+     * pack of which threw while it applied: [{"mod", "file", "reason", "previous"}], previous = their packs from before apply
+     * again). NUL-terminated, cut at cap (*out_len: the whole length). */
     KilnResult(KILN_CALL* report)(char* buffer, size_t cap, size_t* out_len);
 
     /* fn runs after every application (world load, pack reload), on the tick thread (Pre), after the data packs:
@@ -241,8 +243,8 @@ typedef struct KilnContentApi {
     KilnResult(KILN_CALL* label_owner)(KilnOwner owner, KilnStr label);
 
     /* Which mods' data packs apply, in which order: a JSON array of mod ids in load order (Kiln.Content passes the
-     * loaded mods from Kiln.Host's mod list, so a pack follows its mod: unload reverts it; a reload keeps the list as it
-     * is when the mod stays in its place, so Kiln.Content also calls pack_mod_reloaded, which re-applies it).
+     * loaded mods from Kiln.Host's mod list, so a pack follows its mod: unload reverts it; each mod keeps the place it
+     * first had, so a reload keeps the list as it is, and Kiln.Content also calls pack_mod_reloaded, which re-applies it).
      * "null" (the default) = every mod folder without a .disabled file, in folder order. A change after the world
      * loaded re-applies the packs at the next Pre. Any thread. */
     KilnResult(KILN_CALL* pack_mods)(KilnStr json);

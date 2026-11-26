@@ -5401,5 +5401,1412 @@
         "contents": []
       }
     }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "format 1 with paths",
+    "record": {
+      "format": 1,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "child.base",
+                "children[1].extra"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "the ShroudForge dialect",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "shroudforge",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "child.base",
+                "children[1].extra"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "a changed row without paths",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "an empty paths list",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": []
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "a path with a space",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "child base"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "a path with an empty member",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "child..base"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "a path with a negative index",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "children[-1]"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "a path of 257 bytes",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "a path twice",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "child.base",
+                "child.base"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "a ShroudForge package",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "shroudforge",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "child.base",
+                "children[1].extra"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "a plan digest that is not one",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": "zz",
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "child.base",
+                "children[1].extra"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "an id that is no identifier",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "two words",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "child.base",
+                "children[1].extra"
+              ]
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
+  },
+  {
+    "schema": "eml-journal-2",
+    "why": "an unknown member on a changed row",
+    "record": {
+      "format": 2,
+      "stem": "enshrouded",
+      "generation": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "receiptSha256": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+      "dialect": "eml",
+      "attempt": "first",
+      "truncated": false,
+      "packages": [
+        {
+          "id": "alpha",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "child.base",
+                "children[1].extra"
+              ],
+              "value": 1
+            }
+          ],
+          "created": [
+            {
+              "ordinal": 1,
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "explicit": false
+            }
+          ],
+          "contents": []
+        },
+        {
+          "id": "bravo",
+          "version": "1.0.0",
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": null,
+              "paths": [
+                "fixed[]"
+              ]
+            },
+            {
+              "guid": "01234567-89ab-cdef-0123-456789abcdef",
+              "typeHash": "8b4f2d1e",
+              "part": 3,
+              "createdBy": null,
+              "paths": [
+                "child.extra"
+              ]
+            },
+            {
+              "guid": "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13",
+              "typeHash": "8b4f2d1e",
+              "part": 0,
+              "createdBy": {
+                "package": "alpha",
+                "ordinal": 1
+              },
+              "paths": [
+                "text"
+              ]
+            }
+          ],
+          "created": [],
+          "contents": [
+            {
+              "guid": "00000004-365d-c510-4862-8533f701d253",
+              "size": 4
+            }
+          ]
+        },
+        {
+          "id": "quiet",
+          "version": null,
+          "kind": "eml",
+          "contentSha256": null,
+          "settingsSha256": null,
+          "truncated": false,
+          "changed": [],
+          "created": [],
+          "contents": []
+        }
+      ],
+      "unattributed": {
+        "truncated": false,
+        "changed": [],
+        "created": [],
+        "contents": []
+      }
+    }
   }
 ]

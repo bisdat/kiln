@@ -143,6 +143,14 @@ impl RunnerState {
                 .set_environment(mod_state.env.clone())
                 .into_function()?
         };
+        // kiln-eml: a mod's entry module is that mod's code, whoever requires it first (another mod's entrypoint requiring
+        // it before its turn runs it here, and its turn then finds it loaded): its writes are its own mod's, for the
+        // change journal (env/writes.rs)
+        let _writer = if require_path.path() == "mod" {
+            lua.app_data_ref::<crate::env::AppState>().map(|state| state.enter_writer(require_path.mod_id()))
+        } else {
+            None
+        };
         let result = func.call::<LuaValue>(())?;
 
         // register mod as loaded

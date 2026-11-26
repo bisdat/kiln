@@ -6232,8 +6232,8 @@
     "baseOrigin": "Origen de la base: {origin}",
     "archiveWriter": "Escritor del archivo: {writer}",
     "journal": {
-      "read": "Paquetes del escritor del archivo nombrados por el diario de cambios de kiln-eml: {packages} paquetes, {entries} entradas (solo objetos, drops y equilibrio: no se nombra ninguna entrada de receta ni de botín).",
-      "truncated": "Paquetes del escritor del archivo nombrados por el diario de cambios de kiln-eml: {packages} paquetes, {entries} entradas (solo objetos, drops y equilibrio: no se nombra ninguna entrada de receta ni de botín). El diario está truncado, así que un paquete puede haber escrito entradas que no nombra.",
+      "read": "Paquetes del escritor del archivo nombrados por el diario de cambios de kiln-eml: {packages} paquetes, {entries} entradas (un pase de ShroudForge nombra objetos, drops y equilibrio por entrada; un pase de EML nombra los campos que escribieron sus mods, en recetas y botín por su elemento).",
+      "truncated": "Paquetes del escritor del archivo nombrados por el diario de cambios de kiln-eml: {packages} paquetes, {entries} entradas (un pase de ShroudForge nombra objetos, drops y equilibrio por entrada; un pase de EML nombra los campos que escribieron sus mods, en recetas y botín por su elemento). El diario está truncado, así que un paquete puede haber escrito entradas que no nombra.",
       "notNamed": "Los paquetes del escritor del archivo no se nombran en este inicio: {reason}",
       "none": "el escritor del archivo de este inicio no lleva un diario de cambios.",
       "stale": "el diario de cambios pertenece a un inicio anterior.",
@@ -6241,15 +6241,17 @@
     },
     "sfPackage": "{id} (paquete de ShroudForge)",
     "emlPackage": "{id} (paquete de EML)",
-    "archiveUnattributed": "Una escritura al iniciar que no hizo ningún paquete (kiln-eml)",
+    "archiveUnattributed": "Una escritura al iniciar de ningún paquete que Kiln pueda nombrar (kiln-eml)",
     "archiveOp": "Desconocida (el diario de kiln-eml nombra la entrada que escribió este paquete, no este campo)",
+    "archiveOpField": "Desconocida (el diario de kiln-eml nombra este campo como escrito por este paquete, no el valor)",
     "kind": {
       "archiveWriter": "Escribió esta entrada antes de Kiln (archivo)",
+      "archiveWriterField": "Escribió este campo antes de Kiln (archivo)",
       "drift": "Cambiado fuera de Kiln"
     },
     "unverified": "Asignación sin verificar",
     "unverifiedBody": "Los cambios de campos pueden rechazarse como Unproven. Lee el motivo de cada rechazo.",
-    "certaintyHint": "Seguro = Kiln observó al escritor. Nombrado por el diario = un paquete de ShroudForge o EML que el diario de cambios de kiln-eml nombra como autor de la entrada antes de Kiln; el cambio de Kiln se impone a él. Deriva aproximada = el valor del juego cambió fuera de Kiln; los sospechosos son una pista, no una prueba de quién lo escribió ni de que no exista otro escritor.",
+    "certaintyHint": "Seguro = Kiln observó al escritor. Nombrado por el diario = un paquete de ShroudForge o EML que el diario de cambios de kiln-eml nombra como autor de la entrada (o, para un mod de EML, del campo) antes de Kiln; el cambio de Kiln se impone a él. Deriva aproximada = el valor del juego cambió fuera de Kiln; los sospechosos son una pista, no una prueba de quién lo escribió ni de que no exista otro escritor.",
     "partial": "Informe parcial",
     "partialRows": {
       "one": "El informe nativo o los límites de seguridad de esta vista omitieron {count} fila.",

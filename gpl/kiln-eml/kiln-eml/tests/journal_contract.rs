@@ -83,3 +83,72 @@ fn the_writer_makes_the_record_kilns_reader_is_tested_on() {
         fixture_path().display()
     );
 }
+
+// ---- the EML dialect (format 2): the same contract for kiln-eml's EML pass (`Journal::from_eml` over the record EML's
+// runtime makes, then `Journal::json`), fixture schema/sfi/eml-journal/fixtures/kiln-eml-writer-eml.json, which the native
+// reader names entries and fields from (registry_writers_test.cpp: items and balance per field, a recipe and a loot
+// entry per element). ----
+const RECIPE_TYPE: u32 = 0x7e3a_11c9;
+const LOOT_TYPE: u32 = 0x2b44_9d07;
+const RECIPES: &str = "3c0a5e77-2f41-4b6a-9e10-5d8c7b6a5f40";
+const LOOT: &str = "6e9f0a12-7c3d-4b85-a1f6-0d2e4c6b8a91";
+
+fn eml_fixture_path() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../schema/sfi/eml-journal/fixtures/kiln-eml-writer-eml.json")
+}
+
+/// One EML pass: "alpha" writes the stone's stack size, the balance table's level cap and a recipe's duration; "bravo"
+/// writes the stone's damage factor, replaces recipe 2 whole after inserting it (the list's members), a loot entry's
+/// stack size, creates an item and a content; "charlie" writes nothing; "two words" (an id the record cannot name)
+/// replaces the logs whole, so its write is unattributed.
+fn eml_record() -> String {
+    use mod_loader::lua::{CreatedResource, PackageWrites, WriteRecord, WrittenResource};
+    let written = |guid: &str, ty: u32, paths: &[&str]| WrittenResource {
+        id: ResourceId::new(key(guid), ty, 0),
+        created_by: None,
+        paths: paths.iter().map(|p| p.to_string()).collect(),
+    };
+    let record = WriteRecord {
+        packages: vec![
+            PackageWrites {
+                id: Some("alpha".into()),
+                changed: vec![
+                    written(BALANCE, 0x0123_4567, &["playerLevelCap"]),
+                    written(STONE, ITEM_TYPE, &["maxStackSize"]),
+                    written(RECIPES, RECIPE_TYPE, &["recipes[1].craftingDuration"]),
+                ],
+                ..PackageWrites::default()
+            },
+            PackageWrites {
+                id: Some("bravo".into()),
+                changed: vec![
+                    written(STONE, ITEM_TYPE, &["damageSetup.dmgMod"]),
+                    written(RECIPES, RECIPE_TYPE, &["recipes[2]", "recipes[]"]),
+                    written(LOOT, LOOT_TYPE, &["items[0].stackSizeMax"]),
+                ],
+                created: vec![CreatedResource { ordinal: 1, id: ResourceId::new(key(CREATED), ITEM_TYPE, 0), explicit: false }],
+                contents: vec![ContentHash::from_data(b"kiln")],
+            },
+            PackageWrites { id: Some("charlie".into()), ..PackageWrites::default() },
+            PackageWrites { id: Some("two words".into()), changed: vec![written(LOGS, ITEM_TYPE, &[""])], ..PackageWrites::default() },
+        ],
+        unattributed: PackageWrites::default(),
+    };
+    let header = Header { stem: "enshrouded_server", generation: [0xef; 32], receipt_sha256: [0xef; 32], dialect: "eml", attempt: "first" };
+    let identity = |id: &str| {
+        Some(Identity { version: (id != "charlie").then(|| "1.0.0".to_string()), kind: "eml", content_sha256: [0; 32], settings_sha256: [0; 32] })
+    };
+    kiln_eml::sf_startup::journal::Journal::from_eml(&record).json(&header, &identity)
+}
+
+#[test]
+fn the_eml_pass_makes_the_record_kilns_reader_is_tested_on() {
+    let made = eml_record();
+    let kept = std::fs::read_to_string(eml_fixture_path()).unwrap_or_default();
+    assert!(
+        made == kept.trim_end(),
+        "kiln-eml's EML-dialect journal record is no longer the fixture Kiln's reader is tested on ({}).\nMake the fixture \
+         this one line and run the native registry_writers test:\n{made}",
+        eml_fixture_path().display()
+    );
+}

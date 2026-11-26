@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <ctime>
 #include <cctype>
 #include <cstdarg>
 #include <cstdio>
@@ -287,10 +288,99 @@ void run() {
     check(!def(kT2)->orphan && !def(kT3)->orphan, "end: T2 and T3 stay (seen in this application)");
 }
 
+// registry-fixes item 4 (review-registry-reload perf note): packs.cpp marks every mod at every application, so the journal runs
+// for every clone a pack re-applies, not only when a pack throws. It copied every clone a pack touched, found them by a
+// linear scan of what it held, and its rollback looked each one up in every clone: quadratic per mod. Membership is a hash
+// lookup now, the rollback finds clones through one index, and an unchanged redefinition keeps no copy.
+// The thread's own CPU time (review-registry-fixes): a wall clock also counts the time the thread waits while other work runs,
+// and the slot tool runs these tests at the lowest CPU priority, so on a busy runner a timed run that was paused read several
+// times longer (x50 to x62 for a linear x8 in 3 of 8 runs of gdundo beside three busy loops on its core). Best of five rounds,
+// the two sizes in turn in each, so a slower moment of the runner falls on both.
+double cpu_seconds() {
+    timespec t{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
+    return static_cast<double>(t.tv_sec) + static_cast<double>(t.tv_nsec) * 1e-9;
+}
+constexpr int kRounds = 5;
+std::string bench_guid(int i) {
+    char b[40];
+    std::snprintf(b, sizeof b, "55555555-0000-4000-8000-%012d", i);
+    return b;
+}
+void journal_cost() {
+    constexpr KilnOwner kP = 41;
+    constexpr int kSmall = 1000, kLarge = 8000;
+    fake::labels[kP] = "pack p";
+    kc::gd_packs_begin();
+    for (int i = 0; i < kLarge; ++i) define(kP, clone(bench_guid(i).c_str(), ("Bench" + std::to_string(i)).c_str(), i));
+    kc::gd_packs_end();
+    std::vector<std::array<uint8_t, 16>> guids(kLarge);
+    for (int i = 0; i < kLarge; ++i) kc::guid_parse(bench_guid(i), guids[i].data());
+    check(def(bench_guid(kLarge - 1).c_str()) != nullptr, "cost: pack p clones " + std::to_string(kLarge) + " templates");
+    // the journal's lookup alone: a second touch of each of n clones under the mark finds the first one's entry (best of five; the
+    // first touches, which add the entries, are not timed). Linear: x8 for x8 clones; a scan per clone: about x64. One round:
+    // the lookups' and the rollback's CPU time, each kept when it is the best so far.
+    // (the clones as they are, found once: nothing below adds a clone, so g_defs keeps its places)
+    std::vector<const kc::gd::Def*> now(kLarge);
+    for (int i = 0; i < kLarge; ++i) now[i] = def(bench_guid(i).c_str());
+    auto touches = [&](int first, int n, double* lookup, double* rollback) {
+        kc::gd_pack_mark(kP);
+        for (int i = 0; i < n; ++i) kc::gd::journal_touch(kP, guids[first + i].data(), now[first + i], false);
+        double t0 = cpu_seconds();
+        for (int i = 0; i < n; ++i) kc::gd::journal_touch(kP, guids[first + i].data(), now[first + i], false);
+        *lookup = std::min(*lookup, cpu_seconds() - t0);
+        t0 = cpu_seconds();
+        kc::gd::clones_pack_rollback(kP);
+        *rollback = std::min(*rollback, cpu_seconds() - t0);
+        kc::gd_pack_unmark();
+    };
+    double small = 1e9, large = 1e9, unused = 1e9;
+    for (int k = 0; k < kRounds; ++k) touches(0, kSmall, &small, &unused), touches(0, kLarge, &large, &unused);
+    const double ratio = large / std::max(small, 1e-9);
+    std::printf("  info journal: %d lookups %.3f ms, %d lookups %.3f ms (x%.1f for x%d)\n", kSmall, small * 1e3, kLarge, large * 1e3, ratio,
+                kLarge / kSmall);
+    check(ratio < 24, "cost: the journal's lookup grows linearly with the clones a pack touches (x" + std::to_string(ratio) + " for x8, at most x24)");
+    // the rollback's lookup of each clone: the first and the last 1,000 of the 8,000 clones, the same work but for where the
+    // clones are among all clones. One index: the same time; a scan of every clone for each: the last ones several times slower.
+    double first_rb = 1e9, last_rb = 1e9;
+    for (int k = 0; k < kRounds; ++k) touches(0, kSmall, &unused, &first_rb), touches(kLarge - kSmall, kSmall, &unused, &last_rb);
+    const double where = last_rb / std::max(first_rb, 1e-9);
+    std::printf("  info journal: rollback of the first %d clones %.2f ms, of the last %d %.2f ms (x%.2f)\n", kSmall, first_rb * 1e3, kSmall,
+                last_rb * 1e3, where);
+    check(where < 1.6, "cost: the rollback finds a clone without a scan of every clone (the last 1,000 x" + std::to_string(where) +
+                           " the first 1,000, at most x1.6)");
+
+    // the whole path at about 4,000 clones: the same pack applies again under the mark (unchanged), then a rollback
+    constexpr int kPath = 4000;
+    kc::gd_packs_begin();
+    kc::gd_pack_mark(kP);
+    double t0 = cpu_seconds();
+    for (int i = 0; i < kPath; ++i) define(kP, clone(bench_guid(i).c_str(), ("Bench" + std::to_string(i)).c_str(), i));
+    const double again = cpu_seconds() - t0;
+    check(kc::gd::clones_pack_journal_copies() == 0, "cost: the same pack applying again copies no clone (" +
+                                                         std::to_string(kc::gd::clones_pack_journal_copies()) + " copies)");
+    t0 = cpu_seconds();
+    const uint32_t back = kc::gd_pack_rollback(kP);
+    const double rollback = cpu_seconds() - t0;
+    std::printf("  info journal: %d unchanged redefinitions under the mark %.1f ms, their rollback %.1f ms\n", kPath, again * 1e3, rollback * 1e3);
+    check(back == kPath, "cost: the rollback counts every clone the pack touched (" + std::to_string(back) + ")");
+    check(def(bench_guid(7).c_str())->fields["x"] == 7 && def(bench_guid(7).c_str())->owner == kP && !def(bench_guid(7).c_str())->orphan,
+          "cost: an unchanged clone rolled back is as at the mark");
+    // one clone redefined unchanged, then changed, in one application: the rollback gives it its definition from the mark
+    check(define(kP, clone(bench_guid(3).c_str(), "Bench3", 3)) && define(kP, clone(bench_guid(3).c_str(), "Bench3", 333)) &&
+              def(bench_guid(3).c_str())->fields["x"] == 333,
+          "cost: Bench3 redefined unchanged, then changed (x 333)");
+    check(kc::gd::clones_pack_journal_copies() == 1, "cost: the change copied it, once");
+    check(kc::gd_pack_rollback(kP) == 1 && def(bench_guid(3).c_str())->fields["x"] == 3, "cost: the rollback gives Bench3 its x 3 back");
+    kc::gd_pack_unmark();
+    kc::gd_packs_end();
+}
+
 }  // namespace
 
 int main() {
     run();
+    journal_cost();
     if (failures) std::printf("gdundo-test: %d check(s) FAILED\n", failures);
     else std::printf("gdundo-test: all checks passed\n");
     return failures ? 1 : 0;

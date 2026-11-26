@@ -59,6 +59,9 @@ struct BaseModel {
         // ("shroudforge:<id>", "eml:<id>"; archive_journal.h). Each touched field of the entry gets one ArchiveWriter row
         // per package at the bottom of its chain, valued at the base (the archive's bytes are the base, D1).
         std::vector<std::string> archive;
+        // A package of `archive` the journal names on some fields only (format 2's member paths): who -> those Kiln
+        // fields. A package in `archive` and not here is named on the whole entry.
+        std::map<std::string, std::set<std::string>> archive_fields;
     };
     std::map<std::string, std::vector<Entry>> registries;  // entries in the registry's own order
     std::set<std::string> retired;                          // "<registry>|<id>" the ids ledger retired: never added again
@@ -103,6 +106,7 @@ struct ChainRow {
     std::shared_ptr<const FieldSpec> element_spec;  // ...typed by its leaf's (or the element's) spec (shared by the edit's rows)
     std::string mod;  // the Kiln mod (empty: an archive-writer package)
     std::string who;  // what the report names: the mod, or the old writer
+    bool archive_field = false;  // an ArchiveWriter row the journal names on this field (its member paths), not the entry
     Stage stage = Stage::Alter;
     std::string source;
     uint32_t n = 0;

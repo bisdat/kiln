@@ -1,6 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { emptyRegistryFixture, nativeShapedReport, registryFixture } from "../tests/fixtures/registryReport";
 import { parseRegistryReport, reportFreshness, REPORT_LIMITS } from "../src/registry/report";
+import de from "../src/i18n/de.json";
+import enText from "../src/i18n/en.json";
+import es from "../src/i18n/es.json";
+import fr from "../src/i18n/fr.json";
+import it from "../src/i18n/it.json";
+import ja from "../src/i18n/ja.json";
+import ko from "../src/i18n/ko.json";
+import pl from "../src/i18n/pl.json";
+import ptBR from "../src/i18n/pt-BR.json";
+import ru from "../src/i18n/ru.json";
+import zhCN from "../src/i18n/zh-CN.json";
 
 const parse = (r: unknown) => parseRegistryReport(JSON.stringify(r));
 describe("untrusted registry report", () => {
@@ -81,9 +92,23 @@ describe("untrusted registry report", () => {
     expect(out[1].value).toBe("10");
     expect(out[2].operation).not.toBe(out[0].operation);
   });
+  test("an EML pass's journal names a field: the row says the field, still no operation (next release)", () => {
+    const r = registryFixture();
+    r.fields[0].writers = [
+      { kind: "archiveWriter", who: "eml:bravo", value: 10, certainty: "named", named: "field" },
+      { kind: "archiveWriter", who: "eml:alpha", value: 10, certainty: "named", named: "entry" },
+      { kind: "archiveWriter", who: "shroudforge:old", value: 10, certainty: "named" },  // a report from before: the entry
+      ...r.fields[0].writers,
+    ] as typeof r.fields[0].writers;
+    const out = parse(r).fields[0].writers;
+    expect(out.map(w => w.kind).slice(0, 3)).toEqual(["Wrote this field before Kiln (archive)", "Wrote this entry before Kiln (archive)", "Wrote this entry before Kiln (archive)"]);
+    expect(out[0].operation).toBe("Not known (kiln-eml's journal names this field as written by this package, not the value)");
+    expect(out[1].operation).toBe("Not known (kiln-eml's journal names the entry this package wrote, not this field)");
+    expect(out[0].owner).toBe("bravo (EML package)");
+  });
   test("base.journal says whether the archive writer's packages are named", () => {
     const read = parse({ ...registryFixture(), base: { origin: "live", writer: "kiln-eml", journal: { state: "read", packages: 2, entries: 3, truncated: false, text: "x" } } });
-    expect(read.journal).toBe("Archive-writer packages named from kiln-eml's change journal: 2 packages, 3 entries (items, drops and balance only: a recipe or loot entry is not named).");
+    expect(read.journal).toBe("Archive-writer packages named from kiln-eml's change journal: 2 packages, 3 entries (a ShroudForge pass names items, drops and balance per entry; an EML pass names the fields its mods wrote, on recipes and loot by their element).");
     const truncated = parse({ ...registryFixture(), base: { origin: "live", writer: "kiln-eml", journal: { state: "read", packages: 1, entries: 1, truncated: true } } });
     expect(truncated.journal).toContain("truncated");
     const none = parse({ ...registryFixture(), base: { origin: "live", writer: "shroudforge-hosted", journal: { state: "none", packages: 0, entries: 0, truncated: false, text: "hosted ShroudForge keeps no change journal" } } });
@@ -293,4 +318,23 @@ describe("snapshot freshness", () => {
   test("unknown process state is explicit", () => expect(reportFreshness(written, undefined, now)).toContain("cannot be verified"));
   test("invalid process-start timestamp cannot establish freshness", () => expect(reportFreshness(written, { running: true, started: "invalid" }, now)).toContain("cannot be verified"));
   test("snapshot from this start is not stale", () => expect(reportFreshness(written, { running: true, started: new Date(now - 2000).toISOString() }, now)).toBeNull());
+});
+
+// Review (registry-eml-journal): the Conflicts page's archive-writer texts are in every locale with English's placeholders,
+// the EML pass's field-level ones included, and no locale still says a recipe or loot entry is never named (an EML pass
+// names them by their element).
+test("every locale has the archive-writer texts, the EML pass's field-level ones too, with English's placeholders", () => {
+  const keys = ["journal.read", "journal.truncated", "archiveUnattributed", "archiveOp", "archiveOpField", "kind.archiveWriter", "kind.archiveWriterField", "certaintyHint"];
+  const at = (o: unknown, k: string) => k.split(".").reduce<unknown>((x, p) => (x as Record<string, unknown> | undefined)?.[p], (o as Record<string, unknown>).registry);
+  const ph = (s: unknown) => (String(s).match(/\{[a-z]+\}/gi) ?? []).sort().join();
+  const old: Record<string, string> = { de: "Rezept- oder Beute-Eintrag wird nicht benannt", es: "no se nombra ninguna entrada de receta", fr: "recette ou de butin n'est pas nommée",
+    it: "ricetta o di bottino non viene indicata", ja: "レシピやルートのエントリは特定されません", ko: "레시피나 전리품 항목은 확인하지 않습니다", pl: "wpis receptury ani łupu nie jest nazywany",
+    ptBR: "receita ou de saque não é nomeada", ru: "запись рецепта или добычи не называется", zhCN: "不指认配方或战利品条目" };
+  for (const [name, loc] of Object.entries({ de, es, fr, it, ja, ko, pl, ptBR, ru, zhCN })) {
+    for (const k of keys) {
+      expect(typeof at(loc, k), `${name} ${k}`).toBe("string");
+      expect(ph(at(loc, k)), `${name} ${k}`).toBe(ph(at(enText, k)));
+    }
+    expect(String(at(loc, "journal.read")).includes(old[name]), `${name}: journal.read says recipes and loot are never named`).toBe(false);
+  }
 });

@@ -196,6 +196,9 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
     private readonly Queue<string> _autoTests = new();
     private readonly SemVersion _kilnVersion, _apiVersion;
     private readonly Dictionary<string, string> _sources = new(StringComparer.Ordinal);  // folder -> profile | dropin
+    // the side each mod of this start's load order had (LoadAll; on a client that may host, its server mods' from the registry
+    // stage's order too): it holds until the process ends (SideRefusal)
+    private readonly Dictionary<string, ManifestSide> _startSides = new(StringComparer.Ordinal);
     private volatile ModEntry[] _snapshot = [];
     private long _modsJsonGeneration;
 
@@ -301,6 +304,10 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
             }
             candidates.Add(d);
         }
+        // a client that may host a world: the registry stage ordered its server mods too, with their side (RegistryOrder), though
+        // they load only while it hosts, so LoadAll's order below does not have them (review-registry-fixes)
+        if (_options.Side == ManifestSide.Client && _options.HostedServerMods)
+            foreach (var (id, _, side) in RegistryOrder()) _startSides.TryAdd(id, side);
         _reportStart = true;
         List<string> loaded;
         try { loaded = LoadSet(candidates); }
@@ -392,7 +399,12 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         var loaded = new List<string>();
         var position = 0UL;
         var count = (ulong)result.Order.Count;
-        if (_reportStart) StartProgress.Step("mods", "Loading the mods", "", 0, count);
+        if (_reportStart)
+        {
+            StartProgress.Step("mods", "Loading the mods", "", 0, count);
+            foreach (var c in result.Order)
+                if (c.Manifest is { } sm) _startSides.TryAdd(sm.Id, sm.Side);  // the order the registry stage composed (RegistryOrder)
+        }
         foreach (var c in result.Order)
         {
             var m = c.Manifest!;
@@ -516,6 +528,13 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         {
             error = boot;
             _host.Log(LogLevel.Warn, $"mod {manifest.Id} not loaded: {boot}");
+            return false;
+        }
+        // a mod's side holds for the process (the join's mod lists and the start's registry values): RestartRequired otherwise
+        if (SideRefusal(manifest) is { } side)
+        {
+            error = side + ". It was not loaded";
+            _host.Log(LogLevel.Warn, $"mod {manifest.Id} not loaded: {error}");
             return false;
         }
         // its layout stamp against this game build's Kiln.Game, before any of its code loads
@@ -1011,6 +1030,13 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
                 _host.Log(LogLevel.Warn, $"reload {id}: {boot}");
                 return new ModOperationResult(false, boot, [id]);
             }
+            // nor can one that changes its side: the side holds for the process (registry-fixes item 1)
+            if (NewSideRefusal(directories) is { } side)
+            {
+                var message = side + ". The running version stays loaded";
+                _host.Log(LogLevel.Warn, $"reload {id}: {message}");
+                return new ModOperationResult(false, message, [id]);
+            }
             mod = null;
             Unload(id, ModState.Unloaded, "reloading", out _, out _);
             var waiting = new HashSet<string>(cascade.Prepend(id).Where(UnloadWaiting), StringComparer.Ordinal);
@@ -1023,8 +1049,47 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
                     $"{string.Join(", ", waiting)}; it loads again when that call leaves", [id, .. cascade]);
             }
         }
-        else directories.Add(record!.Directory);
+        else
+        {
+            directories.Add(record!.Directory);
+            if (NewSideRefusal(directories) is { } side)
+            {
+                var message = side + ". Nothing was loaded";
+                _host.Log(LogLevel.Warn, $"reload {id}: {message}");
+                return new ModOperationResult(false, message, [id]);
+            }
+        }
         return FinishReload(id, directories, cascade);
+    }
+
+    /// <summary>A reload's refusal before anything unloads: the new <c>kiln.mod.json</c> in one of <paramref name="directories"/>
+    /// (the mod's and its dependents' folders) names another side than the mod has in this process (<see cref="SideRefusal"/>).
+    /// Null: the reload goes ahead (a manifest that does not read is the load's to report).</summary>
+    private string? NewSideRefusal(IEnumerable<string> directories)
+    {
+        foreach (var dir in directories)
+            if (ModCandidate.Read(dir).Manifest is { } m && SideRefusal(m) is { } refusal)
+                return refusal;
+        return null;
+    }
+
+    /// <summary>The side a mod has in this process: the start's (it was in the start's load order, or a hosting client's registry
+    /// order), else its running version's. Null: neither (a first load).</summary>
+    private ManifestSide? SideInProcess(string id) =>
+        _startSides.TryGetValue(id, out var side) ? side : Find(id)?.Manifest.Side;
+
+    /// <summary>A new manifest of a mod whose <c>side</c> is not the one it has in this process, refused (RestartRequired): the side
+    /// holds until the process ends. Kiln.Network compares the side-both mod lists at the join, and the start's registry values
+    /// (registry.json bootSync, the join's kiln.registry.boot) leave out the fields a one-side mod writes, so a side changed by a
+    /// reload made the lists match while the values still left the mod out: Kiln clients were refused ("registry boot values
+    /// differ") until a restart (review-registry-reload Q5). Null: the same side, or a first load.</summary>
+    private string? SideRefusal(Manifest m)
+    {
+        if (SideInProcess(m.Id) is not { } was || was == m.Side) return null;
+        static string Word(ManifestSide s) => s switch { ManifestSide.Client => "client", ManifestSide.Both => "both", _ => "server" };
+        return $"RestartRequired: mod {m.Id}'s new version changes \"side\" in kiln.mod.json ({Word(was)} -> {Word(m.Side)}): a mod's side " +
+               "holds until the game (or the server) restarts, since the join checks players against the start's mod lists and registry " +
+               "values; restart the game (or the server) to load it";
     }
 
     /// <summary>A reload's refusal before anything unloads: the new <c>kiln.mod.json</c> in one of <paramref name="directories"/>

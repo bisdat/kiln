@@ -296,6 +296,10 @@ bool store_effective_without_registry(uintptr_t addr, uint8_t n, const LayerEval
 void store_set_gate(uintptr_t addr);
 uint32_t store_mark_evals();  // every slot holding an evaluated layer is flushed (evaluated) again; returns how many
 bool store_slot_copy(uintptr_t addr, Slot* out);  // a snapshot of the slot and its last evaluated layer bytes; false: none
+// What the slot holds, as one number that changes when it does (FNV-1a 64 over the bytes Kiln last wrote there, the foreign
+// mark and each layer's owner, band, bytes, source and mod, in order; a layer's seq itself is left out, so a mod setting the
+// same value again keeps it); 0: no slot. Cheap: no copy (the registry's later-writes look, registry_live.cpp).
+uint64_t store_slot_signature(uintptr_t addr);
 // Compare-before-write (sfi R3, owner decision D1): a registry write, or a registry layer's revert, on a slot whose memory is
 // not what Kiln last wrote there is not made: another writer (a ShroudForge run-time write in kiln mode, or any other) wrote
 // it since. Each such slot once per world (store_reset forgets them).
@@ -411,6 +415,13 @@ struct PacksReport {
     std::vector<std::string> skipped;  // mods whose packs did not apply (not loaded)
     std::vector<std::pair<std::string, ApplyResult>> files;  // rel path -> result
     std::vector<Conflict> conflicts;
+    // mods set apart in this application: a pack of theirs threw while it applied, what their packs did came off, and their
+    // packs from before apply again whole (previous) or none of them do. The report's "setApart" (Kiln.Host's reload reply).
+    struct SetApart {
+        std::string mod, file, reason;
+        bool previous = false;
+    };
+    std::vector<SetApart> set_apart;
 };
 // Reverts every pack owner, applies every pack file in order, flushes. Returns the report. A mod's packs apply whole from
 // one version: a mod with a file that cannot be read or is no pack keeps the packs of its last application in which every
@@ -470,6 +481,7 @@ void nc_packs_end();                              // ... after: pack definitions
 void nc_pack_mark(KilnOwner owner);
 uint32_t nc_pack_rollback(KilnOwner owner);
 void nc_pack_unmark();
+size_t nc_pack_journal_copies();  // definitions the journal copied since the mark (only at a change of a definition's text)
 // A data pack's "add" list (items / recipes): defines every entry as `owner`'s. Called by apply_pack (store_mutex
 // held, on the active world's thread).
 void nc_pack_add(KilnOwner owner, uint32_t kind, const std::string& list_json, const std::string& source,

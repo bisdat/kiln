@@ -237,8 +237,9 @@ Restart the server after adding or removing mods.
 a Kiln mod's new version without a restart: its code, data packs, `blocks/` and `quests/` files apply again. Some parts
 only change at the next start, and the reload says so (since 0.2.0-dev.31.17):
 - refused, with the reason first: `RestartRequiredBoot: ...` for a mod with boot content (`"boot"` in its
-  `kiln.mod.json`, or in its new version's: the running version stays loaded), and `RestartRequired: <id> is a native
-  mod ...` for a mod in `kiln/native/`;
+  `kiln.mod.json`, or in its new version's: the running version stays loaded), `RestartRequired: <id> is a native
+  mod ...` for a mod in `kiln/native/`, and `RestartRequired: mod <id>'s new version changes "side" ...` for a new
+  version with another `"side"` (the running version stays loaded; a mod's side holds until the next start);
 - applied, with what waits named in the reply: `reloaded <id> 1.2.0; registry: 2 edits need a restart: <id>
   balance.levelCap, ...`. Registry edits of values the game reads only at start (the balance table, and fields no mod
   changed at the start) keep the start's value until you restart;

@@ -15,6 +15,7 @@
 
 #include <unistd.h>
 
+#include "../registry/archive_base.h"
 #include "../registry/archive_journal.h"
 #include "../registry/drift.h"
 #include "../registry/report.h"
@@ -115,6 +116,8 @@ int main(int argc, char** argv) {
     CHECK(parse_archive_journal("{", kGen).state == "unreadable", "not JSON: unreadable");
     json other = json::parse(text);
     other["format"] = 2;
+    CHECK(parse_archive_journal(other.dump(), kGen).state == "unreadable", "format 2 of the ShroudForge dialect: unreadable");
+    other["format"] = 3;
     CHECK(parse_archive_journal(other.dump(), kGen).state == "unreadable", "another format: unreadable");
     json broken = json::parse(text);
     broken["packages"][0]["changed"][0]["guid"] = 7;
@@ -314,6 +317,8 @@ int main(int argc, char** argv) {
     meta.written = "2026-11-25T20:00:00Z", meta.generation = 1, meta.base.writer = "kiln-eml";
     meta.regmap = {"server", std::string(64, 'f'), "", false};  // a document the schema check accepts
     meta.base.journal = {j.state, j.text, j.packages.size(), named, j.truncated};
+    meta.base.archive = {{"source", "kiln-eml"}, {"phase", "done"}, {"patched", 3}, {"cached", false}, {"restored", false}, {"mods", 2},
+                         {"receipt", "kiln/eml/ownership/enshrouded_server.json"}, {"text", "kiln-eml's EML pass patched 3 resources of the archive this start"}};
     const json doc = report_json(s, r, meta);
     CHECK(doc["base"]["journal"]["state"] == "read" && doc["base"]["journal"]["packages"] == 4 && doc["base"]["journal"]["entries"] == 2 &&
               doc["base"]["journal"]["truncated"] == false,
@@ -338,6 +343,225 @@ int main(int argc, char** argv) {
           "without a journal base.journal says so: " + doc2["base"].dump());
     if (argc > 2) std::ofstream(argv[2]) << doc.dump(2);
 
+    // ---- the EML dialect (format 2): kiln-eml's own record of a fixed EML pass (gpl/kiln-eml/kiln-eml/tests/
+    // journal_contract.rs `the_eml_pass_makes_the_record_kilns_reader_is_tested_on` fails unless this fixture is byte for
+    // byte that record): named per field on items and balance, per element on recipes and loot ----
+    {
+        std::ifstream ef(root + "/schema/sfi/eml-journal/fixtures/kiln-eml-writer-eml.json");
+        std::stringstream es;
+        es << ef.rdbuf();
+        const std::string written = es.str();
+        std::string live;
+        for (int i = 0; i < 32; ++i) live += "ef";
+        const std::string stone = "1d622bd9-8170-41b1-822e-d3984b386d95", logs = "aaaaaaaa-0000-4000-8000-000000000001",
+                          made = "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13", table = "82706b40-61b1-4b8f-8b23-dcec6971bda1",
+                          recipes = "3c0a5e77-2f41-4b6a-9e10-5d8c7b6a5f40", loot = "6e9f0a12-7c3d-4b85-a1f6-0d2e4c6b8a91";
+        const ArchiveJournal e = parse_archive_journal(written, live);
+        CHECK(!written.empty() && e.state == "read" && e.format == 2 && e.dialect == "eml" && !e.truncated, "the EML pass's record reads: " + e.state + " " + e.text);
+        CHECK(e.packages.size() == 3 && e.packages[0].id == "alpha" && e.packages[0].kind == "eml" && e.packages[1].id == "bravo" &&
+                  e.packages[2].id == "charlie" && e.packages[2].version.empty(),
+              "its mods in run order (the one whose id cannot be named is not a package)");
+        CHECK(e.packages.size() == 3 && e.packages[0].paths.at(stone) == std::vector<std::string>({"maxStackSize"}) &&
+                  e.packages[1].paths.at(recipes) == std::vector<std::string>({"recipes[2]", "recipes[]"}) &&
+                  e.unattributed.paths.at(logs) == std::vector<std::string>({""}),
+              "each written resource with its member paths");
+        CHECK(parse_archive_journal(written, std::string(64, 'c')).state == "stale", "another generation: stale, names nobody");
+        CHECK(e.text.find("EML mods") != std::string::npos, "base.journal says EML mods: " + e.text);
+        // the bad ones: format 2 is the EML dialect's and its paths are the schema's
+        const json good = json::parse(written);
+        for (const auto& [what, edit] : std::vector<std::pair<std::string, std::function<void(json&)>>>{
+                 {"format 3", [](json& d) { d["format"] = 3; }},
+                 {"format 2 of the ShroudForge dialect", [](json& d) { d["dialect"] = "shroudforge"; }},
+                 {"a ShroudForge package in an EML pass", [](json& d) { d["packages"][0]["kind"] = "shroudforge"; }},
+                 {"a changed row without paths", [](json& d) { d["packages"][0]["changed"][0].erase("paths"); }},
+                 {"no paths at all", [](json& d) { d["packages"][0]["changed"][0]["paths"] = json::array(); }},
+                 {"a path with a space", [](json& d) { d["packages"][0]["changed"][0]["paths"] = {"max Stack"}; }},
+                 {"a path with a line break", [](json& d) { d["packages"][0]["changed"][0]["paths"] = {"a\nregistry: forged"}; }},
+                 {"a negative element", [](json& d) { d["packages"][0]["changed"][0]["paths"] = {"recipes[-1]"}; }},
+                 {"a path of 257 bytes", [](json& d) { d["packages"][0]["changed"][0]["paths"] = {std::string(257, 'a')}; }}}) {
+            json bad = good;
+            edit(bad);
+            const ArchiveJournal x = parse_archive_journal(bad.dump(), live);
+            CHECK(x.state == "unreadable" && x.packages.empty(), what + ": unreadable, nothing named: " + x.state + " " + x.text);
+        }
+        // the base: items (whole resources), the balance table, three recipes and a loot entry (elements of shared resources)
+        BaseModel eb;
+        auto entry = [](const std::string& id, std::initializer_list<std::pair<const char*, Value>> f) {
+            BaseModel::Entry x;
+            x.id = id;
+            for (const auto& [k, v] : f) x.fields[k] = v;
+            return x;
+        };
+        eb.registries["items"] = {entry("game:stone", {{"maxStack", Value::integer(10)}, {"power", Value::number(31)}, {"perks", Value::of_list({})}}),
+                                  entry("game:logs", {{"maxStack", Value::integer(10)}}), entry("bravo:made", {{"maxStack", Value::integer(1)}})};
+        eb.registries["balance"] = {entry("game:balance", {{"levelCap", Value::integer(25)}, {"skillPointsPerLevel", Value::integer(1)}})};
+        eb.registries["recipes"] = {entry("game:craft_a", {{"duration", Value::number(1)}}), entry("game:craft_b", {{"duration", Value::number(2)}}),
+                                    entry("game:craft_c", {{"duration", Value::number(3)}})};
+        eb.registries["loot"] = {entry("game:stone", {{"stack.max", Value::integer(5)}, {"stack.min", Value::integer(1)}})};
+        const std::map<std::string, std::string> eids = {{"items|game:stone", stone}, {"items|game:logs", logs}, {"items|bravo:made", made},
+                                                         {"balance|game:balance", table}, {"recipes|game:craft_b", "99999999-0000-4000-8000-000000000000"}};
+        ArchiveFields af;
+        af.rows["items"] = {{"maxStack", {"maxStackSize"}}, {"power", {"damageSetup.dmgMod", "damageSetup.speedMod", "itemLevelRange.minLevel"}},
+                            {"perks", {"perkReferences", "perkIds"}}};
+        af.rows["balance"] = {{"levelCap", {"playerLevelCap"}}, {"skillPointsPerLevel", {"skillPointsPerLevel"}}};
+        af.rows["recipes"] = {{"duration", {"craftingDuration"}}, {"inputs", {"input"}}};
+        af.rows["loot"] = {{"stack.max", {"stackSizeMax"}}, {"stack.min", {"stackSizeMin"}}};
+        af.array = {{"recipes", "recipes"}, {"loot", "items"}};
+        const std::map<int32_t, std::string> recipe_elements = {{0, "game:craft_a"}, {1, "game:craft_b"}, {2, "game:craft_c"}}, loot_elements = {{0, "game:stone"}};
+        af.elements = [&](const std::string& reg, const std::string& guid) -> const std::map<int32_t, std::string>* {
+            if (reg == "recipes" && guid == recipes) return &recipe_elements;
+            if (reg == "loot" && guid == loot) return &loot_elements;
+            return nullptr;
+        };
+        CHECK(name_archive_writers(e, eids, {"items", "balance"}, &eb, &af) == 7, "seven entries named (stone, logs, made, balance, two recipes, a loot entry)");
+        const auto& st = eb.registries["items"][0];
+        CHECK(st.archive == std::vector<std::string>({"eml:alpha", "eml:bravo"}) &&
+                  st.archive_fields.at("eml:alpha") == std::set<std::string>({"maxStack"}) && st.archive_fields.at("eml:bravo") == std::set<std::string>({"power"}),
+              "the stone: alpha on its stack size, bravo on its power (a formula input)");
+        CHECK(eb.registries["items"][1].archive == std::vector<std::string>({"kiln-eml:unattributed"}) && eb.registries["items"][1].archive_fields.empty(),
+              "the logs replaced whole by a mod whose id cannot be named: unattributed, the whole entry");
+        CHECK(eb.registries["items"][2].archive == std::vector<std::string>({"eml:bravo"}) && eb.registries["items"][2].archive_fields.empty(), "a creation: its creator, whole");
+        CHECK(eb.registries["balance"][0].archive_fields.at("eml:alpha") == std::set<std::string>({"levelCap"}), "the balance table: the level cap only");
+        CHECK(eb.registries["recipes"][0].archive.empty(), "a recipe nobody wrote (only the list's members changed) is not named");
+        CHECK(eb.registries["recipes"][1].archive == std::vector<std::string>({"eml:alpha"}) && eb.registries["recipes"][1].archive_fields.at("eml:alpha") == std::set<std::string>({"duration"}),
+              "recipe 1: alpha on its duration, by its element (never by the element's own GUID member)");
+        CHECK(eb.registries["recipes"][2].archive == std::vector<std::string>({"eml:bravo"}) && eb.registries["recipes"][2].archive_fields.empty(),
+              "recipe 2 put in place whole by bravo: the whole entry");
+        CHECK(eb.registries["loot"][0].archive_fields.at("eml:bravo") == std::set<std::string>({"stack.max"}), "a loot entry by its element: its stack size");
+        CHECK(archive_fields_of(af.rows["items"], {"damageSetup"}) == std::set<std::string>({"power"}) &&
+                  archive_fields_of(af.rows["items"], {"perkIds[]"}) == std::set<std::string>({"perks"}) &&
+                  archive_fields_of(af.rows["items"], {"maxStackSizeX"}).empty() && archive_fields_of(af.rows["items"], {""}).size() == 3,
+              "a path names the fields it holds or lies in, at member boundaries only; \"\" names every field");
+        // the same journal without the regmap's fields: per entry as before, never an element
+        BaseModel plain = eb;
+        for (auto& [reg, es2] : plain.registries)
+            for (auto& x : es2) x.archive.clear(), x.archive_fields.clear();
+        CHECK(name_archive_writers(e, eids, {"items", "balance"}, &plain) == 4 && plain.registries["items"][0].archive_fields.empty() &&
+                  plain.registries["recipes"][1].archive.empty(),
+              "without the fields: per entry on whole resources, no element");
+        // composition: a row only on the fields a mod is named on, and the line says the field
+        Schema es3;
+        RegistrySpec items;
+        items.name = "items", items.version = "1.0.0";
+        FieldSpec ms;
+        ms.name = "maxStack", ms.type = FieldType::Int, ms.min = 1, ms.max = 65535, ms.applies = Applies::WorldLoad;
+        FieldSpec pw;
+        pw.name = "power", pw.type = FieldType::Float, pw.min = 0, pw.max = 100000, pw.applies = Applies::Now;
+        items.fields[ms.name] = ms;
+        items.fields[pw.name] = pw;
+        RegistrySpec recipes_spec;
+        recipes_spec.name = "recipes", recipes_spec.version = "1.0.0";
+        FieldSpec du;
+        du.name = "duration", du.type = FieldType::Float, du.min = 0, du.max = 100000, du.applies = Applies::Now;
+        recipes_spec.fields[du.name] = du;
+        es3.registries["items"] = items;
+        es3.registries["recipes"] = recipes_spec;
+        BaseModel cb;
+        cb.registries["items"] = eb.registries["items"];
+        cb.registries["recipes"] = eb.registries["recipes"];
+        const Result cr = compose(es3, cb, {},
+                                  {mod("big", {batch(es3, "big", "alter", R"([{"registry": "items", "select": {"id": "game:stone"}, "field": "maxStack", "op": 100},
+                                                                               {"registry": "items", "select": {"id": "game:stone"}, "field": "power", "op": {"mul": 2}},
+                                                                               {"registry": "items", "select": {"id": "game:logs"}, "field": "maxStack", "op": 50},
+                                                                               {"registry": "recipes", "select": {"id": "game:craft_*"}, "field": "duration", "op": 9}])")})});
+        const auto& msc = cr.fields.at({"items", "game:stone", "maxStack"}).chain;
+        CHECK(msc.size() == 2 && msc[0].kind == WriterKind::ArchiveWriter && msc[0].who == "eml:alpha" && msc[0].archive_field && msc[1].kind == WriterKind::Registry,
+              "the stone's stack size: alpha's row (by field), not bravo's");
+        const auto& pwc = cr.fields.at({"items", "game:stone", "power"}).chain;
+        CHECK(pwc.size() == 2 && pwc[0].who == "eml:bravo" && pwc[0].archive_field, "its power: bravo's row");
+        const auto& lgc = cr.fields.at({"items", "game:logs", "maxStack"}).chain;
+        CHECK(lgc.size() == 2 && lgc[0].who == "kiln-eml:unattributed" && !lgc[0].archive_field, "the logs: the whole entry's row");
+        CHECK(cr.fields.at({"recipes", "game:craft_a", "duration"}).chain.size() == 1 && cr.fields.at({"recipes", "game:craft_b", "duration"}).chain.size() == 2 &&
+                  cr.fields.at({"recipes", "game:craft_c", "duration"}).chain[0].who == "eml:bravo",
+              "recipes: rows on the elements their mods wrote only");
+        const Line* fl = nullptr;
+        const Line* wl = nullptr;
+        for (const Line& l : cr.lines) {
+            if (l.field.id == "game:stone" && l.field.field == "maxStack") fl = &l;
+            if (l.field.id == "game:logs") wl = &l;
+        }
+        CHECK(fl && fl->certainty == Certainty::Named && fl->text.find("alpha (EML package) wrote this field in the game's archive before Kiln; big's edit wins (D1)") != std::string::npos,
+              "the line says the mod wrote this field: " + (fl ? fl->text : std::string()));
+        CHECK(wl && wl->text.find("wrote this entry") != std::string::npos, "a whole-entry name still says the entry: " + (wl ? wl->text : std::string()));
+        ReportMeta em;
+        em.written = "2026-11-26T05:00:00Z", em.generation = 1, em.base.writer = "kiln-eml";
+        em.regmap = {"server", std::string(64, 'f'), "", false};
+        const json ed = report_json(es3, cr, em);
+        std::string named_field, named_entry;
+        for (const json& f : ed["fields"]) {
+            if (f["id"] == "game:stone" && f["field"] == "maxStack") named_field = f["writers"][0].value("named", "");
+            if (f["id"] == "game:logs") named_entry = f["writers"][0].value("named", "");
+        }
+        CHECK(named_field == "field" && named_entry == "entry", "registry.json says what the journal names the package on: " + named_field + "/" + named_entry);
+        if (argc > 3) std::ofstream(argv[3]) << ed.dump(2);
+        // ---- review: a list replaced whole, a path per element past 64, a GUID listed twice, the unreadable text ----
+        {
+            auto fresh = [&] {
+                BaseModel b = eb;
+                for (auto& [reg, es2] : b.registries)
+                    for (auto& x : es2) x.archive.clear(), x.archive_fields.clear();
+                return b;
+            };
+            auto bravo_recipes = [&](const json& paths) {
+                json d = good;
+                for (json& c : d["packages"][1]["changed"])
+                    if (c["guid"] == recipes) c["paths"] = paths;
+                return d;
+            };
+            // the recipe list replaced whole ("recipes": a field of the resource's root holding every element)
+            BaseModel b1 = fresh();
+            const ArchiveJournal j1 = parse_archive_journal(bravo_recipes({"recipes"}).dump(), live);
+            name_archive_writers(j1, eids, {"items", "balance"}, &b1, &af);
+            CHECK(j1.state == "read" && b1.registries["recipes"][0].archive == std::vector<std::string>({"eml:bravo"}) &&
+                      b1.registries["recipes"][0].archive_fields.empty() && b1.registries["recipes"][2].archive == std::vector<std::string>({"eml:bravo"}),
+                  "the recipe list replaced whole names its mod on every recipe, whole: " + j1.state + " " + j1.text);
+            // a recipe mod that wrote one field of a hundred recipes: a path each, named on that field of each
+            json many = json::array();
+            for (int i = 0; i < 100; ++i) many.push_back("recipes[" + std::to_string(i) + "].craftingDuration");
+            BaseModel b2 = fresh();
+            const ArchiveJournal j2 = parse_archive_journal(bravo_recipes(many).dump(), live);
+            name_archive_writers(j2, eids, {"items", "balance"}, &b2, &af);
+            CHECK(j2.state == "read" && b2.registries["recipes"][0].archive_fields.count("eml:bravo") &&
+                      b2.registries["recipes"][0].archive_fields.at("eml:bravo") == std::set<std::string>({"duration"}) &&
+                      b2.registries["recipes"][2].archive_fields.at("eml:bravo") == std::set<std::string>({"duration"}),
+                  "a hundred recipe paths read, each recipe named on its duration only: " + j2.state + " " + j2.text);
+            json over = json::array();
+            for (int i = 0; i <= 16384; ++i) over.push_back("recipes[" + std::to_string(i) + "]");
+            CHECK(parse_archive_journal(bravo_recipes(over).dump(), live).state == "unreadable", "more paths than the format writes: unreadable");
+            // one GUID listed twice (another part): its paths together, so an element is still named by them
+            json twice = bravo_recipes({"recipes[2]"});
+            json row = {{"guid", recipes}, {"typeHash", "00000001"}, {"part", 1}, {"createdBy", nullptr}, {"paths", {"recipes[0].craftingDuration"}}};
+            twice["packages"][1]["changed"].push_back(row);
+            BaseModel b3 = fresh();
+            const ArchiveJournal j3 = parse_archive_journal(twice.dump(), live);
+            name_archive_writers(j3, eids, {"items", "balance"}, &b3, &af);
+            CHECK(j3.state == "read" && b3.registries["recipes"][0].archive_fields.count("eml:bravo") &&
+                      b3.registries["recipes"][0].archive_fields.at("eml:bravo") == std::set<std::string>({"duration"}) &&
+                      b3.registries["recipes"][2].archive == std::vector<std::string>({"eml:bravo"}) && b3.registries["recipes"][2].archive_fields.empty(),
+                  "a GUID listed twice: the elements its paths name are named: " + j3.state + " " + j3.text);
+            // a format-2 journal that is malformed is not called a format-1 one
+            json bad = good;
+            bad["packages"][0]["changed"][0]["paths"] = json::array();
+            const ArchiveJournal j4 = parse_archive_journal(bad.dump(), live);
+            CHECK(j4.state == "unreadable" && j4.text.find("format-1") == std::string::npos && j4.text.find("format 1 or 2") != std::string::npos,
+                  "the unreadable text says what Kiln reads: " + j4.text);
+        }
+    }
+    // ---- the live generation of an EML start: kiln-eml's state of this start (eml.json "generation") ----
+    {
+        std::string hex, why;
+        const std::string g(64, 'a');
+        CHECK(eml_state_generation(R"({"format":1,"phase":"done","cached":true,"generation":")" + g + R"("})", &hex, &why) && hex == g,
+              "done with a generation: that one");
+        CHECK(!eml_state_generation(R"({"phase":"aside","aside":"ShroudForge"})", &hex, &why) && why.find("stood aside") != std::string::npos, "aside: " + why);
+        CHECK(!eml_state_generation(R"({"phase":"idle"})", &hex, &why) && why.find("no EML mod") != std::string::npos, "idle: " + why);
+        CHECK(!eml_state_generation(R"({"phase":"failed","error":"x"})", &hex, &why) && why.find("did not end well") != std::string::npos, "failed: " + why);
+        CHECK(!eml_state_generation(R"({"phase":"done","patched":0})", &hex, &why) && why.find("no live generation") != std::string::npos,
+              "done, no generation (an older kiln-eml): " + why);
+        CHECK(!eml_state_generation(R"({"phase":"done","generation":"xyz"})", &hex, &why), "a generation that is no SHA-256");
+        CHECK(!eml_state_generation("{", &hex, &why), "not JSON");
+    }
+
     // ---- the drift probe's suspects (drift.h) ----
     const json map = json::parse(R"({"foreign": [{"symbol": "a", "rva": "0x10", "module": "xhl-core.dll", "offset": "0x1", "own": false},
                                                  {"symbol": "b", "rva": "0x20", "module": "kiln-content.dll", "offset": "0x2", "own": true},
@@ -354,6 +578,111 @@ int main(int argc, char** argv) {
     CHECK(drift_who({}) == "outside Kiln (best effort; no other loader's hook seen)" &&
               drift_who({"xhl-core.dll", "emf.dll"}) == "outside Kiln (best effort; suspects: xhl-core.dll, emf.dll)",
           "a drift row's writer says best effort and names the suspects");
+
+    // ---- who published the archive (archive_base.h; registry-followups 2) ----
+    // The compat rehearsal's starts, by the state kiln-eml gave (kiln/state/eml.json): before, base.writer said "none" on all
+    // of them but kiln mode, also where kiln-eml's EML pass or hosted ShroudForge had patched the archive.
+    {
+        const std::string stem = "enshrouded_server";
+        std::set<std::string> files;
+        ArchiveBaseInputs in;
+        in.stem = stem;
+        in.exists = [&files](const std::string& rel) { return files.count(rel) != 0; };
+        auto with = [&](const char* backend, const char* state) {
+            in.backend = backend;
+            in.eml = state != nullptr;
+            in.eml_state = state ? json::parse(state) : json();
+            return archive_base(in);
+        };
+        // kiln-eml's own EML pass (Free Skill Unlocks, Unlimited Flame Altars: 3 patched), hosted ShroudForge with no package
+        files = {"kiln/eml/ownership/enshrouded_server.json"};
+        ArchiveBase b = with("hosted", R"({"format": 1, "phase": "done", "file": "enshrouded_server", "patched": 3, "cached": false, "restored": false,
+                                           "aside": null, "mods": [{"id": "free-skill-unlocks", "state": "loaded"}, {"id": "xhl-unlimited-flame-altars", "state": "loaded"}]})");
+        CHECK(b.writer == "kiln-eml", "kiln-eml's EML pass patched the archive: the base is kiln-eml's, not as shipped (" + b.writer + ")");
+        CHECK(b.archive.value("source", "") == "kiln-eml" && b.archive.value("phase", "") == "done" && b.archive.value("patched", -1) == 3 &&
+                  b.archive.value("cached", true) == false && b.archive.value("receipt", "") == "kiln/eml/ownership/enshrouded_server.json" &&
+                  b.archive.value("mods", -1) == 2 && !b.archive.value("text", "").empty(),
+              "base.archive: what kiln-eml did and the receipt it rests on: " + b.archive.dump());
+        // nothing changed since the last run: the archive keeps kiln-eml's patches
+        b = with("hosted", R"({"phase": "done", "file": "enshrouded_server", "patched": 0, "cached": true, "restored": false, "mods": [{"id": "a", "state": "loaded"}]})");
+        CHECK(b.writer == "kiln-eml" && b.archive.value("cached", false) == true, "a cached run is still kiln-eml's: " + b.archive.dump());
+        // no receipt (an older kiln-eml's output): named all the same, receipt null
+        files.clear();
+        b = with("hosted", R"({"phase": "done", "file": "enshrouded_server", "patched": 1, "cached": false, "restored": false, "mods": []})");
+        CHECK(b.writer == "kiln-eml" && b.archive.contains("receipt") && b.archive["receipt"].is_null(), "no receipt: null: " + b.archive.dump());
+        // hosted ShroudForge reserved the writer (SF Crafting Essentials, Unlimited Flame Altars): kiln-eml stood aside
+        files = {"enshrouded_server.kfc.prepared.json"};
+        const char* aside = R"({"phase": "aside", "file": null, "patched": 0, "cached": false, "restored": false,
+                                "aside": "ShroudForge owns startup asset patching and runs EML packages in its mods folder", "mods": []})";
+        b = with("hosted", aside);
+        CHECK(b.writer == "shroudforge-hosted", "hosted ShroudForge published the archive (" + b.writer + ")");
+        CHECK(b.archive.value("source", "") == "kiln-eml" && b.archive.value("phase", "") == "aside" &&
+                  b.archive.value("record", "") == "enshrouded_server.kfc.prepared.json" && b.archive.value("receipt", "x") == "x",
+              "it rests on ShroudForge's record of its pass (named, never read): " + b.archive.dump());
+        CHECK(b.archive.value("text", "").find("ShroudForge") != std::string::npos, "the sentence names ShroudForge: " + b.archive.dump());
+        CHECK(with("installed", aside).writer == "shroudforge-installed", "the player's own ShroudForge");
+        files.clear();
+        b = with("hosted", aside);
+        CHECK(b.writer == "shroudforge-hosted" && b.archive.contains("record") && b.archive["record"].is_null(), "no record yet: null: " + b.archive.dump());
+        // EML's own proxy ran instead of kiln-eml: another loader published it
+        b = with("hosted", R"({"phase": "aside", "file": null, "patched": 0, "cached": false, "restored": false,
+                               "aside": "EML's own dbghelp.dll is loaded and ran instead", "loaders": ["dbghelp.dll"], "mods": []})");
+        CHECK(b.writer == "external", "another loader's proxy wrote the archive (" + b.writer + ")");
+        CHECK(with("none", R"({"phase": "aside", "aside": "someone", "mods": []})").writer == "external", "aside without a ShroudForge backend: external");
+        // the DLL engines set and the repo's labs: no EML mod, the game files untouched
+        b = with("hosted", R"({"phase": "idle", "file": "enshrouded_server", "patched": 0, "cached": false, "restored": false, "aside": null, "mods": []})");
+        CHECK(b.writer == "none" && b.archive.value("phase", "") == "idle", "nothing patched it: as shipped: " + b.archive.dump());
+        b = with("hosted", R"({"phase": "idle", "file": "enshrouded_server", "patched": 0, "cached": false, "restored": true, "mods": []})");
+        CHECK(b.writer == "none" && b.archive.value("restored", false) == true, "kiln-eml put the game's own data back: " + b.archive.dump());
+        b = with("hosted", R"({"phase": "idle", "file": "enshrouded_server", "staleBackup": true, "mods": []})");
+        CHECK(b.writer == "none", "a backup of an earlier build: the data is the new build's own");
+        b = with("hosted", R"({"phase": "idle", "file": "enshrouded_server", "restored": false, "mods": [],
+                               "reason": "The game data differs from its vanilla backup, and Kiln cannot prove it is its own EML output (x), so it was left as it is."})");
+        CHECK(b.writer == "external", "the data differs from the backup and is not kiln-eml's: not as shipped (" + b.writer + ")");
+        b = with("hosted", R"({"phase": "idle", "file": "enshrouded_server", "restored": false, "mods": [],
+                               "reason": "Extra archive containers retained: enshrouded_server_010.dat. They may belong to another loader"})");
+        CHECK(b.writer == "none", "retained containers alone say nothing about the archive's bytes");
+        b = with("hosted", R"({"phase": "failed", "file": "enshrouded_server", "restored": true, "error": "x", "mods": []})");
+        CHECK(b.writer == "none", "a failed run that put the game's data back");
+        b = with("hosted", R"({"phase": "failed", "file": "enshrouded_server", "restored": false, "error": "x", "mods": []})");
+        CHECK(b.writer == "external", "a failed run that left the data as it was: not known to be the game's own");
+        // kiln mode: Kiln's interpreter through kiln-eml (its journal names the packages), as before
+        b = with("kiln", R"({"phase": "done", "file": "enshrouded_server", "patched": 4, "mods": []})");
+        CHECK(b.writer == "kiln-eml", "kiln mode: kiln-eml");
+        CHECK(with("kiln", nullptr).writer == "kiln-eml", "kiln mode without kiln-eml's state: kiln-eml all the same (as before)");
+        // review: kiln mode's sentence follows kiln-eml's phase (startup_seam.rs settle_entries: done = committed or cached, idle =
+        // unchanged or restored, failed = refused or failed, and run_kiln's start with no pass): it said "published the archive"
+        // on every one. The writer stays kiln-eml, as before.
+        CHECK(b.archive.value("text", "").find("published the archive") != std::string::npos, "a done pass published it: " + b.archive.dump());
+        b = with("kiln", R"({"phase": "idle", "file": "enshrouded_server", "patched": 0, "restored": true, "mods": []})");
+        CHECK(b.writer == "kiln-eml" && b.archive.value("text", "").find("published the archive") == std::string::npos &&
+                  b.archive.value("text", "").find("vanilla backup") != std::string::npos,
+              "kiln mode put the game's own data back: " + b.archive.dump());
+        b = with("kiln", R"({"phase": "idle", "file": "enshrouded_server", "patched": 0, "restored": false, "mods": []})");
+        CHECK(b.writer == "kiln-eml" && b.archive.value("text", "").find("published nothing") != std::string::npos,
+              "kiln mode published nothing this start: " + b.archive.dump());
+        b = with("kiln", R"({"phase": "failed", "file": "enshrouded_server", "restored": false, "error": "x", "mods": []})");
+        CHECK(b.writer == "kiln-eml" && b.archive.value("text", "").find("failed") != std::string::npos &&
+                  b.archive.value("text", "").find("published the archive") == std::string::npos,
+              "kiln mode's pass failed: " + b.archive.dump());
+        CHECK(with("kiln", nullptr).archive.value("text", "").find("published the archive") == std::string::npos,
+              "kiln mode without kiln-eml's state: what was published is not known: " + with("kiln", nullptr).archive.dump());
+        // no kiln-eml: Kiln cannot tell; "none", as before, and the sentence says so
+        b = with("hosted", nullptr);
+        CHECK(b.writer == "none" && b.archive.value("source", "") == "none" && !b.archive.value("text", "").empty(),
+              "no kiln-eml: none, said: " + b.archive.dump());
+        // registry.json carries it
+        ReportMeta am;
+        am.written = meta.written;
+        am.base.writer = "kiln-eml";
+        am.base.archive = with("hosted", R"({"phase": "done", "file": "enshrouded_server", "patched": 3, "cached": false, "restored": false, "mods": []})").archive;
+        const json d3 = report_json(s, compose(s, base(), {}, {}), am);
+        CHECK(d3["base"]["writer"] == "kiln-eml" && d3["base"].contains("archive") && d3["base"]["archive"].value("patched", -1) == 3,
+              "registry.json base.archive: " + d3["base"].dump());
+        ReportMeta none;
+        none.written = meta.written;
+        CHECK(!report_json(s, compose(s, base(), {}, {}), none)["base"].contains("archive"), "no archive object when nothing was said");
+    }
 
     std::printf("registry writers: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

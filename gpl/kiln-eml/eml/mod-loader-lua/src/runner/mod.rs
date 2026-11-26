@@ -30,6 +30,8 @@ impl LuaModRunner {
 
     pub fn run(&self) -> mlua::Result<()> {
         let app_state = self.lua.app_data_ref::<AppState>().unwrap();
+        // kiln-eml: this run's writes are recorded per entrypoint for the change journal (env/writes.rs)
+        let _recording = crate::env::writes::Recording::start();
 
         for r#mod in self.state.mods().values() {
             let has_patch_capability = r#mod.info().capabilities.contains(&Capability::Patch);
@@ -48,6 +50,7 @@ impl LuaModRunner {
                 "Running mod",
             );
 
+            let _writer = app_state.begin_writer(&r#mod.info().id); // kiln-eml
             self.state.require(
                 &format!("mods.{}", r#mod.info().id),
                 &self.lua

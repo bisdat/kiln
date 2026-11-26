@@ -13,6 +13,8 @@ mod image;
 
 mod util;
 mod app_state;
+// kiln-eml: which EML mod wrote which resource member (the EML dialect's change journal)
+pub(crate) mod writes;
 
 pub use app_state::*;
 

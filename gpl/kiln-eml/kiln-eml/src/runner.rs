@@ -93,6 +93,13 @@ pub struct Outcome {
     /// this start's game data does not have their patches. `reason` says so in a sentence.
     #[serde(rename = "sfDisplaced", skip_serializing_if = "Vec::is_empty")]
     pub sf_displaced: Vec<String>,
+    /// The live generation of an EML start that ended well (phase `done`): the SHA-256 of the ownership receipt of the
+    /// output it published, or that an unchanged start found live. The EML dialect's change journal
+    /// (`kiln/eml/ownership/<stem>.change-journal.json`, format 2) names it; a reader uses that journal only when this is
+    /// its `generation`. Absent: no output of this start is proven live (and in kiln mode, whose generation is the startup
+    /// outcome's `archiveSha256`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation: Option<String>,
     /// An idle start found the vanilla backup of another game build than the game data (the game was updated since):
     /// it was not compared with it and nothing was claimed or restored.
     #[serde(rename = "staleBackup", skip_serializing_if = "std::ops::Not::not")]
@@ -128,6 +135,7 @@ impl Outcome {
             aside: None,
             reason: None,
             sf_displaced: Vec::new(),
+            generation: None,
             loaders: Vec::new(),
             stale_backup: false,
             recovery: None,
@@ -570,6 +578,7 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
     }
 
     let total = mods.len();
+    let mut retried = false; // a mod's Lua failed and the run repeats without it: the journal's attempt is a retry
     for _attempt in 0..=total {
         if mods.is_empty() {
             idle(cfg, &file, &progress, &mut out);
@@ -624,6 +633,14 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
                 out.patched = r.patched;
                 out.cached = r.cached;
                 out.fingerprint = Some(r.fingerprint);
+                out.generation = r.generation.clone();
+                // the EML dialect's change journal of the generation this run published (an unchanged start keeps the one
+                // beside the receipt it found live)
+                if let (Some(record), Some(generation)) = (&r.journal, &r.generation)
+                    && let Err(why) = write_journal(cfg, &file, record, generation, retried, &out.mods)
+                {
+                    tracing::warn!(%why, "the EML pass's change journal was not saved: Kiln's registry names none of its mods this start");
+                }
                 if !r.sf_displaced.is_empty() {
                     out.reason = Some(displaced_sentence(&r.sf_displaced));
                     out.sf_displaced = r.sf_displaced;
@@ -649,6 +666,7 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
                         tracing::error!(mod_id = %id, error = %text, "EML mod failed; running the others without it");
                         set_state(&mut out.mods, &path, "failed", Some(text));
                         mods.retain(|p| p != &path);
+                        retried = true;
                         // run again (no cache was written by the failed run)
                     }
                     None => {
@@ -674,6 +692,28 @@ pub fn run(cfg: &RunConfig, mut mods: Vec<Utf8PathBuf>, entries: Vec<Entry>) -> 
         let _ = std::fs::remove_file(cfg.cache_dir.join("files.json"));
     }
     finish(out)
+}
+
+/// The EML dialect's change journal (sf_startup/journal.rs, format 2) of the generation a run just published, beside the
+/// receipt with SHA-256 `generation`, only while that receipt is still the one (`StartupJournal::write_for`), under the
+/// install lock this process holds. `mods`: the run's mods (their manifest versions). Every publication and restore
+/// removes the journal first (mod-loader-lua ownership.rs), so one on disk always belongs to the receipt beside it.
+fn write_journal(cfg: &RunConfig, file: &str, record: &lua::WriteRecord, generation: &str, retried: bool, mods: &[Entry]) -> Result<(), String> {
+    use crate::sf_startup::journal::{Header, Identity, Journal};
+    let digest = crate::startup::unhex(generation).ok_or("the receipt's SHA-256 is not 64 hex digits")?;
+    let header = Header { stem: file, generation: digest, receipt_sha256: digest, dialect: "eml", attempt: if retried { "retry" } else { "first" } };
+    let identity = |id: &str| {
+        Some(Identity {
+            version: mods.iter().find(|m| m.id.as_deref() == Some(id)).and_then(|m| m.version.clone()).filter(|v| !v.is_empty() && v.len() <= 64),
+            kind: "eml",
+            content_sha256: [0; 32],
+            settings_sha256: [0; 32],
+        })
+    };
+    let bytes = Journal::from_eml(record).json(&header, &identity);
+    let lock = held_lock(&cfg.game_dir).ok_or("the install lock is not held")?;
+    let journal = lua::startup_host::StartupJournal::bind(cfg.game_dir.as_std_path(), file, &lock).map_err(|e| format!("{e:#}"))?;
+    journal.write_for(generation, bytes.as_bytes()).map_err(|e| e.to_string())
 }
 
 /// A kiln-mode start: no EML mod runs on its own. The plan decides each discovered package

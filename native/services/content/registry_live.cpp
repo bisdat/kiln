@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -23,6 +24,10 @@
 namespace kc {
 
 uint32_t (*g_registry_type_size)(const char* qname) = &type_size;
+uint64_t steady_ms() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+uint64_t (*g_registry_now_ms)() = &steady_ms;
 bool (*g_registry_stack_guard)(std::string* why) = [](std::string* why) { return guard_set(true, why); };
 
 namespace {
@@ -39,6 +44,12 @@ using SlotBytes = std::array<uint8_t, kSlotBytes>;
 struct LiveSlot {
     uintptr_t addr;
     uint8_t size;
+};
+// One bound slot as the last report saw it (the later-writes look, late_check): its game bytes and store layers, as one number.
+struct LateSlot {
+    uintptr_t addr;
+    uint8_t size;
+    uint64_t sig;
 };
 struct LiveField {
     FieldSpec spec;
@@ -76,6 +87,15 @@ struct LiveState {
     std::unordered_map<uintptr_t, std::string> slot_places;
     std::vector<std::string> suspects;  // the drift probe's suspects in this world (drift.h), read at world begin
     std::set<registry::EntryRef> boot_written;  // entries an old boot document wrote (RegistryLive::old's OldPatch rows), per report
+    // Writes made after the last report (registry-followups 1): what that report saw, so registry_live_publish can tell, cheaply
+    // and never per tick, when a bound field's slot changed since (late_check): the store's generation, a signature of each
+    // bound slot (the game's bytes there and its store layers), when it last looked and how long the next look waits. A look
+    // goes over late_slots a batch a tick (late_next: the next one; late_slots.size(): no look going on).
+    uint64_t late_gen = 0, late_at = 0, late_wait = 0;
+    std::vector<LateSlot> late_slots;
+    size_t late_next = 0;
+    size_t late_rebuilds = 0;  // in this install (kiln.log names the first one, the others go to the debug log)
+    std::map<KilnOwner, std::string> owner_names;  // the core's id of an owner a code writer's row names (name_code_writer)
     registry::Result reported;
     bool have_report = false;
     uint32_t ordinal = 0;
@@ -225,7 +245,27 @@ Value to_kiln(const Field& f, const rmap::Row* row, const FieldSpec& spec, const
     }
 }
 
-bool to_game(const Field& f, const rmap::Row* row, const FieldSpec& spec, const Value& v, uint8_t* out, std::string* why) {
+// A live refusal names Kiln's field and entry, never the game's member (owner's principle: mods and players see Kiln names;
+// registry-fixes item 5). encode (refl.cpp) names the member it writes: its refusals here say "the game's storage of this
+// field" instead, and kiln.log keeps the member at debug level for maintainers. `name`: the field as mods name it.
+bool encode_kiln(const Field& f, const KilnContentValue& kv, uint8_t* out, std::string* why, const std::string& name) {
+    if (encode(f, kv, out, why)) return true;
+    if (!why || f.path.empty()) return false;
+    LOGD("registry (live): %s: %s", name.c_str(), why->c_str());
+    const std::string& m = f.path;
+    if (why->rfind(m + " is read-only", 0) == 0) *why = "this field is read-only on this game build";
+    else if (why->rfind(m + " cannot be written", 0) == 0) *why = "this field cannot be written on this game build";
+    else if (const size_t at = why->find(" does not fit " + m); at != std::string::npos)
+        *why = why->substr(0, at) + " does not fit the game's storage of this field" + why->substr(at + 14 + m.size());
+    return false;
+}
+// The field as mods name it: "<registry>.<field>"; a raw member (the Advanced tier) is the member path the mod named.
+std::string kiln_field_name(const registry::FieldRef& fr) {
+    return registry::is_raw_field(fr.field) ? fr.field.substr(4) : fr.registry + "." + fr.field;
+}
+
+bool to_game(const Field& f, const rmap::Row* row, const FieldSpec& spec, const Value& v, uint8_t* out, std::string* why,
+             const std::string& name) {
     KilnContentValue kv{};
     switch (spec.type) {
         case FieldType::Int:
@@ -242,12 +282,12 @@ bool to_game(const Field& f, const rmap::Row* row, const FieldSpec& spec, const 
             if (f.en)
                 for (auto& [n, x] : f.en->values)
                     if (!found && (n == name || lower(n) == lower(name))) kv.type = KILN_CV_INT, kv.i = x, found = true;
-            if (!found) return *why = "\"" + v.t + "\" is not a value of " + f.path + " on this game build", false;
+            if (!found) return *why = "\"" + v.t + "\" is not a value of " + name + " on this game build", false;
             break;
         }
         default: return *why = "this kind of field is not written live", false;
     }
-    return encode(f, kv, out, why);
+    return encode_kiln(f, kv, out, why, name);
 }
 
 bool in_range(const FieldSpec& spec, const Value& v, std::string* why) {
@@ -345,7 +385,7 @@ void bind_scalar(const std::shared_ptr<Binding>& b, const Field* f) {
         const rmap::Row* row = b->row ? &*b->row : nullptr;
         const Value under = to_kiln(fc, row, b->spec, below);
         const Value v = registry::evaluate(b->rows, under, b->spec);
-        if (!in_range(b->spec, v, why) || !save_check(b, under, v, why) || !to_game(fc, row, b->spec, v, out, why)) return fail(b, *why);
+        if (!in_range(b->spec, v, why) || !save_check(b, under, v, why) || !to_game(fc, row, b->spec, v, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     if (!put(b, index_of(b->kind, f), -1, b->entry.addr + f->offset, f->bytes, std::move(ev))) fail(b, "the field is not readable");
@@ -369,21 +409,22 @@ Value flags_kiln(const Field& f, const rmap::Row* row, const FieldSpec& spec, co
     return Value::of_list(std::move(out));
 }
 // The bits of the names in v over the value below; bits Kiln has no name for stay as the game has them.
-bool flags_game(const Field& f, const rmap::Row* row, const FieldSpec& spec, const Value& v, const uint8_t* below, uint8_t* out, std::string* why) {
+bool flags_game(const Field& f, const rmap::Row* row, const FieldSpec& spec, const Value& v, const uint8_t* below, uint8_t* out, std::string* why,
+                const std::string& name) {
     if (v.kind != Value::List) return *why = "a flags value is a list of names", false;
     uint64_t named = 0, set = 0;
     for (const std::string& n : spec.enum_values)
         if (const int bit = flag_bit(f, row, n); bit >= 0) named |= 1ull << bit;
     for (const Value& x : v.list) {
         const int bit = x.kind == Value::Text ? flag_bit(f, row, x.t) : -1;
-        if (bit < 0) return *why = "\"" + (x.kind == Value::Text ? x.t : x.text_of()) + "\" is not a value of " + f.path + " on this game build", false;
+        if (bit < 0) return *why = "\"" + (x.kind == Value::Text ? x.t : x.text_of()) + "\" is not a value of " + name + " on this game build", false;
         set |= 1ull << bit;
     }
     KilnContentValue kv{};
     kv.type = KILN_CV_INT;
     kv.i = static_cast<int64_t>((static_cast<uint64_t>(decode(f, below).i) & ~named) | set);
     kv.f = static_cast<double>(kv.i);
-    return encode(f, kv, out, why);
+    return encode_kiln(f, kv, out, why, name);
 }
 
 void bind_flags(const std::shared_ptr<Binding>& b, const Field* f) {
@@ -391,7 +432,7 @@ void bind_flags(const std::shared_ptr<Binding>& b, const Field* f) {
     LayerEval ev = [b, fc](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
         const rmap::Row* row = b->row ? &*b->row : nullptr;
         const Value v = registry::evaluate(b->rows, flags_kiln(fc, row, b->spec, below), b->spec);
-        if (!flags_game(fc, row, b->spec, v, below, out, why)) return fail(b, *why);
+        if (!flags_game(fc, row, b->spec, v, below, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     const uintptr_t at = b->entry.addr + f->offset;
@@ -431,7 +472,7 @@ void bind_optional_enum(const std::shared_ptr<Binding>& b, const Field* swf, con
         const rmap::Row* row = b->row ? &*b->row : nullptr;
         const Value v = registry::evaluate(b->rows, optional_kiln(sw, en, row, swb, enb), b->spec);
         if (v.kind != Value::Text) return *why = "an optional enum's value is one name", std::nullopt;
-        if (v.t != "none" && !optional_game(en, row, v.t)) return *why = "\"" + v.t + "\" is not a value of " + en.path + " on this game build", std::nullopt;
+        if (v.t != "none" && !optional_game(en, row, v.t)) return *why = "\"" + v.t + "\" is not a value of " + kiln_field_name(b->ref) + " on this game build", std::nullopt;
         return v;
     };
     LayerEval sw_ev = [b, sw, value](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
@@ -439,7 +480,7 @@ void bind_optional_enum(const std::shared_ptr<Binding>& b, const Field* swf, con
         if (!v) return fail(b, *why);
         KilnContentValue kv{};
         kv.type = KILN_CV_BOOL, kv.i = v->t != "none", kv.f = static_cast<double>(kv.i);
-        if (!encode(sw, kv, out, why)) return fail(b, *why);
+        if (!encode_kiln(sw, kv, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     LayerEval en_ev = [b, en, value](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
@@ -451,7 +492,7 @@ void bind_optional_enum(const std::shared_ptr<Binding>& b, const Field* swf, con
         }
         KilnContentValue kv{};
         kv.type = KILN_CV_INT, kv.i = *optional_game(en, b->row ? &*b->row : nullptr, v->t), kv.f = static_cast<double>(kv.i);
-        if (!encode(en, kv, out, why)) return fail(b, *why);
+        if (!encode_kiln(en, kv, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     if (!put(b, index_of(b->kind, swf), -1, base + sw.offset, sw.bytes, std::move(sw_ev)) ||
@@ -475,7 +516,10 @@ void bind_formula(const std::shared_ptr<Binding>& b, const std::vector<const Fie
         in.push_back(as_double(decode(fs[0], below)));
         for (size_t k = 1; k < fs.size(); ++k) {
             uint8_t x[kSlotBytes] = {};
-            if (!store_effective(base + fs[k].offset, fs[k].bytes, x)) return fail(b, *why = fs[k].path + " is not readable");
+            if (!store_effective(base + fs[k].offset, fs[k].bytes, x)) {
+                LOGD("registry (live): %s: the formula's input %s is not readable", b->ref.text().c_str(), fs[k].path.c_str());
+                return fail(b, *why = "a value this field's formula reads is not readable");
+            }
             in.push_back(as_double(decode(fs[k], x)));
         }
         const gear::Constants c = constants();
@@ -487,7 +531,7 @@ void bind_formula(const std::shared_ptr<Binding>& b, const std::vector<const Fie
             return fail(b, *why = "the formula " + b->row->formula + " gives no game value for " + v.text_of());
         KilnContentValue kv{};
         kv.type = KILN_CV_FLOAT, kv.f = game;
-        if (!encode(fs[0], kv, out, why)) return fail(b, *why);
+        if (!encode_kiln(fs[0], kv, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     if (!put(b, index_of(b->kind, inputs[0]), -1, base + fs[0].offset, fs[0].bytes, std::move(ev)))
@@ -690,7 +734,7 @@ void bind_drops(const std::shared_ptr<Binding>& b) {
                 KilnContentValue kv{};
                 if (fk.vt == KILN_CV_FLOAT) kv.type = KILN_CV_FLOAT, kv.f = x->as_double();
                 else kv.type = KILN_CV_INT, kv.i = std::llround(x->as_double());
-                if (!encode(fk, kv, out, why)) return fail(b, *why);
+                if (!encode_kiln(fk, kv, out, why, kiln_field_name(b->ref) + "[]." + kDropLeaves[k].leaf)) return fail(b, *why);
                 return true;
             };
             const uintptr_t at = refs[i].addr + fields[k]->offset;
@@ -736,7 +780,11 @@ void bind_perks(const std::shared_ptr<Binding>& b) {
     for (int i = 0; i < 5; ++i) {
         const Field* r = sc.find("perkReferences[" + std::to_string(i) + "]");
         const Field* d = sc.find("perkIds[" + std::to_string(i) + "]");
-        if (!r || !d || r->bytes != 16 || d->bytes != 4) return (void)fail(b, "this game build's items have no perkReferences / perkIds");
+        if (!r || !d || r->bytes != 16 || d->bytes != 4) {
+            // Kiln words in the refusal, the game's members in kiln.log at debug level (registry-fixes item 5, P45)
+            LOGD("registry (live): %s: perk slot %d: perkReferences[%d] / perkIds[%d] missing or not 16 / 4 bytes", b->ref.text().c_str(), i, i, i);
+            return (void)fail(b, "this game build's items have no perk slots Kiln can write (Kiln's mapping of them needs an update)");
+        }
         refs.push_back(*r), ids.push_back(*d);
     }
     const uintptr_t base = b->entry.addr;
@@ -811,7 +859,7 @@ void bind_impact(const std::shared_ptr<Binding>& b, const std::string& path) {
         if (vf.vt == KILN_CV_INT && v.numeric() && std::isfinite(v.as_double()) && std::trunc(v.as_double()) != v.as_double())
             return fail(b, *why = std::string(kNotExact) + b->ref.registry + "." + b->ref.field + " of " + b->ref.id +
                 " is a whole number on this build; " + v.text_of() + " was not written");
-        if (!in_range(b->spec, v, why) || !to_game(vf, nullptr, b->spec, v, out, why)) return fail(b, *why);
+        if (!in_range(b->spec, v, why) || !to_game(vf, nullptr, b->spec, v, out, why, kiln_field_name(b->ref))) return fail(b, *why);
         return true;
     };
     if (!put_at(b, s.kind, s.id, s.field, -1, s.addr, vf.bytes, std::move(ev))) return (void)fail(b, "the config value is not readable");
@@ -860,6 +908,16 @@ void bind_unlock(const std::shared_ptr<Binding>& b) {
 }
 
 // ---- one field ----
+// A refusal of the mapping on this build: in Kiln words (the field and entry), the regmap path in kiln.log at debug level for
+// maintainers, never in the refusal (owner's principle; registry-fixes item 5). The words keep the phrases the proof producer
+// (RegistryProofTestMod.IsDisagreement) takes for a mapping that disagrees with the build: "is missing on this game build",
+// "is not writable on this game build".
+constexpr const char* kMappingUpdate = " (Kiln's mapping of it needs an update)";
+void refuse_mapping(const registry::FieldRef& fr, const std::vector<const ChainRow*>& rows, const std::string& why, const std::string& member) {
+    LOGD("registry (live): %s: %s (regmap path %s)", fr.text().c_str(), why.c_str(), member.c_str());
+    refuse(fr, rows, why);
+}
+
 void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     const std::vector<const ChainRow*> rows = registry_rows(fo);
     if (rows.empty()) return;  // only older writers: nothing of the registry's
@@ -901,6 +959,7 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     const rmap::Row& rw = row->second;
     if (rw.backend != rmap::Backend::Live) return refuse(fr, rows, "this field has no live back-end on this game build");
     const std::string& conv = rw.conv;
+    const std::string member0 = rw.paths.empty() ? std::string("?") : rw.paths[0];
     if (conv == "int" || conv == "float" || conv == "bool" || conv == "time" || conv == "enum") {
         const Field* f = rw.paths.empty() ? nullptr : sc.find(rw.paths[0]);
         // refl.cpp exposes a one-scalar struct (GemSlotOverride {isSet}) at its parent path.
@@ -909,33 +968,36 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
             const Field* flat = sc.find(rw.paths[0].substr(0, rw.paths[0].size() - flag.size()));
             if (flat && flat->vt == KILN_CV_BOOL) f = flat;
         }
-        if (!f || ((!g.reading || g.initializing_entry) && !f->writable)) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is not writable on this game build");
+        if (!f) return refuse_mapping(fr, rows, std::string("the game's value of this field is missing on this game build") + kMappingUpdate, member0);
+        if ((!g.reading || g.initializing_entry) && !f->writable)
+            return refuse_mapping(fr, rows, "the game's value of this field is not writable on this game build", member0);
         return bind_scalar(b, f);
     }
     const bool writing = !g.reading || g.initializing_entry;
     if (conv == "flags") {  // a bitmask of the game's enum (loot.rarities)
         const Field* f = rw.paths.size() == 1 ? sc.find(rw.paths[0]) : nullptr;
-        if (!f) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is missing on this game build");
+        if (!f) return refuse_mapping(fr, rows, std::string("the game's value of this field is missing on this game build") + kMappingUpdate, member0);
         if (f->enum_kind != KILN_CONTENT_FLAGS || !f->en)
-            return refuse(fr, rows, "the game member " + rw.paths[0] + " is not a bitmask on this game build");
-        if (writing && !f->writable) return refuse(fr, rows, "the game member " + rw.paths[0] + " is read-only on this game build");
+            return refuse_mapping(fr, rows, std::string("the game's value of this field is not a bitmask on this game build") + kMappingUpdate, member0);
+        if (writing && !f->writable) return refuse_mapping(fr, rows, "the game's value of this field is read-only on this game build", member0);
         return bind_flags(b, f);
     }
     if (conv == "optionalEnum") {  // [the switch, the enum] (loot.fixedRarity)
         const Field* sw = rw.paths.size() == 2 ? sc.find(rw.paths[0]) : nullptr;
         const Field* en = rw.paths.size() == 2 ? sc.find(rw.paths[1]) : nullptr;
-        if (!sw || !en) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[sw ? 1 : 0]) + " is missing on this game build");
+        const std::string both = rw.paths.size() == 2 ? rw.paths[0] + " and " + rw.paths[1] : member0;
+        if (!sw || !en) return refuse_mapping(fr, rows, std::string("a game value of this field is missing on this game build") + kMappingUpdate, both);
         if (sw->vt != KILN_CV_BOOL || en->enum_kind != KILN_CONTENT_ENUM || !en->en)
-            return refuse(fr, rows, "the game members " + rw.paths[0] + " and " + rw.paths[1] + " are not a switch and an enum on this game build");
+            return refuse_mapping(fr, rows, std::string("the game's values of this field are not a switch and an enum on this game build") + kMappingUpdate, both);
         if (writing && (!sw->writable || !en->writable))
-            return refuse(fr, rows, "the game member " + rw.paths[sw->writable ? 1 : 0] + " is read-only on this game build");
+            return refuse_mapping(fr, rows, "a game value of this field is read-only on this game build", both);
         return bind_optional_enum(b, sw, en);
     }
     if (conv == "formula") {
         std::vector<const Field*> in;
         for (const std::string& p : rw.paths) {
             const Field* f = sc.find(p);
-            if (!f) return refuse(fr, rows, "the game member " + p + " is missing on this game build");
+            if (!f) return refuse_mapping(fr, rows, std::string("a game value this field's formula reads is missing on this game build") + kMappingUpdate, p);
             in.push_back(f);
         }
         if (in.empty() || !registry::formulas::known(rw.formula)) return refuse(fr, rows, "unknown formula " + rw.formula);
@@ -971,10 +1033,47 @@ std::string layer_mod_of(const Layer& l) {
     return {};
 }
 
+// registry-followups 1: a code writer's row in Kiln words. kiln.content's own calls (set, set_stacks, set_ref, kiln.gamedata's
+// values) describe their layer as "<owner's label>: <registry or section> <the entry's game name>.<the game's member or list>"
+// (the rehearsal's "owner 67: items Material_T1_Wood_Logs.maxStackSize", EMF's big_stacks); the store and kiln.log's conflict
+// lines keep that. The report names "<who>: <Kiln place>" instead: the mod the owner's label gives, else the core's id of the
+// owner ("emf:big_stacks"; a Kiln.Host owner's "mod:<id>" is that mod), else the label. A source the mod chose itself
+// (Content.Apply's own label, a file and the selector it wrote) is the mod's wording and stays.
+void name_code_writer(ChainRow& row, const Layer& layer, const Slot& slot, const registry::FieldRef& ref) {
+    const std::string label = owner_label(layer.owner);
+    const std::string head = label + ": ";
+    if (layer.source.rfind(head, 0) != 0) return;
+    // the entry: a kiln.content slot carries its registry's kind; a kiln.gamedata value slot (an item's config value, which
+    // items.manaCost and items.staminaCost write) carries a gamedata kind and the item's own id (review: its row kept the game's
+    // item and member names)
+    const uint32_t kind = slot.kind >= KILN_CONTENT_ITEMS && slot.kind <= KILN_CONTENT_DROPS ? slot.kind : kind_of(ref.registry);
+    const Entry* e = kind ? reg(kind).get(slot.id) : nullptr;
+    const std::string rest = layer.source.substr(head.size());
+    const size_t space = rest.find(' ');
+    if (!e || e->name.empty() || space == std::string::npos || space == 0 || rest.compare(space + 1, e->name.size(), e->name) != 0 ||
+        rest.size() <= space + 1 + e->name.size() + 1 || rest[space + 1 + e->name.size()] != '.')
+        return;  // not kiln.content's own wording of this entry
+    std::string who = row.mod;
+    if (who.empty() && g.in && g.in->owner_name) {
+        auto it = g.owner_names.find(layer.owner);
+        if (it == g.owner_names.end()) {
+            std::string id = g.in->owner_name(layer.owner);
+            if (!id.empty()) it = g.owner_names.emplace(layer.owner, std::move(id)).first;
+        }
+        if (it != g.owner_names.end()) {
+            who = it->second;
+            if (who.rfind("mod:", 0) == 0 && who.size() > 4) row.mod = who = who.substr(4);
+        }
+    }
+    if (who.empty()) who = label;
+    row.who = who + ": " + ref.text();
+}
+
 // Replay the store's writes as whole field values. A pack or code call can write several slots
 // of the same list or formula, so apply all its slots before decoding that writer's row.
 void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveField& field) {
-    std::vector<SlotBytes> bytes(field.slots.size()), effective(field.slots.size());
+    // kiln_wrote: what Kiln last wrote into each slot (the store's current bytes; the game's bytes where the store holds none)
+    std::vector<SlotBytes> bytes(field.slots.size()), effective(field.slots.size()), kiln_wrote(field.slots.size());
     struct Write {
         size_t slot;
         SlotBytes bytes;
@@ -986,15 +1085,19 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
     std::map<std::tuple<uint64_t, KilnOwner, std::string>, Writer> writers;
     std::vector<Write> applied;
     bool blocked = false;
+    bool late = false;  // the game's bytes of a slot are not what Kiln last wrote there, and no flush has seen it yet
     for (size_t i = 0; i < field.slots.size(); ++i) {
         const auto [addr, size] = field.slots[i];
         if (!rd(addr, effective[i].data(), size)) return;
         Slot slot;
         if (!store_slot_copy(addr, &slot) || slot.n != size) {
             bytes[i] = effective[i];
+            kiln_wrote[i] = effective[i];
             continue;
         }
         std::memcpy(bytes[i].data(), slot.original, size);
+        std::memcpy(kiln_wrote[i].data(), slot.current, size);
+        late = late || (!slot.foreign && std::memcmp(effective[i].data(), slot.current, size) != 0);
         for (const Layer& layer : slot.layers) {
             Write write{i, {}};
             std::memcpy(write.bytes.data(), layer.bytes, size);
@@ -1009,10 +1112,14 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
                 writer.row.kind = layer.seq < kRegistrySeq ? registry::WriterKind::OldPack : registry::WriterKind::Code;
                 writer.row.mod = layer_mod_of(layer);
                 writer.row.who = layer.source;
+                if (writer.row.kind == registry::WriterKind::Code) name_code_writer(writer.row, layer, slot, ref);
             }
             writer.writes.push_back(write);
         }
     }
+    // what kiln.content holds as the original of each slot (the game's value before any Kiln layer): what a data-pack op of code
+    // was computed on (registry-followups 3)
+    const auto original = field.decode(bytes, nullptr);
     std::vector<double> formula_inputs;
     auto result = field.decode(effective, &formula_inputs);
     if (!result) return;
@@ -1109,11 +1216,37 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
         }
     }
     if (skipped) fo.winner = pack && below && *result == *below ? pack->who : "";
+    // the registry's value, before any code layer above it (registry-followups 3)
+    std::optional<Value> reg_value;
+    std::string reg_mod;
+    if (first_reg && !skipped && !chain.empty()) {
+        reg_value = chain.back().after;
+        for (auto it = chain.rbegin(); it != chain.rend() && reg_mod.empty(); ++it)
+            if (it->kind == registry::WriterKind::Registry) reg_mod = it->mod;
+    }
+    const ChainRow* code_top = nullptr;
     for (; next != writers.end(); ++next) {
         if (record(next->second)) {
             fo.winner = next->second.row.who;
             chain.push_back(std::move(next->second.row));
+            code_top = &chain.back();
         }
+    }
+    // registry-followups 3: a Content.* change made by code sits above registry edits and wins (D1; services/registry.md), and
+    // kiln.content computes a data-pack op it was given (mul, add, raiseOnly, ...) on the game's original value, never on what
+    // the registry made of it (services/content.md). That is how BigStacks' x4 raiseOnly gave wood logs 1000 over a registry
+    // pack's 2000; it stays so (what older mod sets get must not change). The report says it: one certain line.
+    // Review: the value the code layer gives (its row's), never the game's value now: a write outside Kiln after it (the late
+    // look's best-effort row below) is not the code's, and code that kept the registry's value replaced nothing.
+    if (code_top && reg_value && !(code_top->after == *reg_value)) {
+        registry::Line line;
+        line.field = ref, line.winner = code_top->who, line.loser = reg_mod, line.kind = registry::LineKind::Overridden;
+        line.text = ref.text() + ": " + code_top->who + " (a Content change made by code) sets " + registry::report_value_text(code_top->after) +
+                    " over " + reg_mod + "'s " + registry::report_value_text(*reg_value) +
+                    " (code wins over registry edits; a relative change made through Content is computed on " +
+                    (added ? std::string("the entry's own value as its mod added it, ") : std::string("the game's value, ")) +
+                    registry::report_value_text(original ? *original : fo.base) + ", not on the registry's)";
+        r.lines.push_back(std::move(line));
     }
     // a slot another writer changed after Kiln's layer (the store's compare-before-write skipped Kiln's write): the same
     // best-effort row, last, with the value the game holds
@@ -1126,11 +1259,33 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
         row.after = *result;
         if (fo.winner.empty() || skipped) fo.winner = row.who;
         chain.push_back(std::move(row));
+    } else if (late) {
+        // registry-followups 1: a write outside Kiln's store after Kiln's last write in this world (a DLL writing game memory),
+        // seen by the later-writes look (late_check) before any flush of the slot has: the same best-effort row, last, and a
+        // line. The game's value decides the result; nothing is refused or written back here.
+        ChainRow row;
+        row.kind = registry::WriterKind::Drift;
+        row.who = registry::drift_who(g.suspects);
+        if (result->kind == Value::List) row.list = registry::ListOp::Replace, row.list_values = result->list;
+        else row.op.set = true, row.op.value = *result;
+        row.after = *result;
+        const auto wrote = field.decode(kiln_wrote, nullptr);
+        registry::Line line;
+        line.field = ref, line.winner = row.who, line.certainty = registry::Certainty::BestEffort, line.kind = registry::LineKind::Overridden;
+        if (!chain.empty()) line.loser = chain.back().mod.empty() ? chain.back().who : chain.back().mod;
+        line.text = ref.text() + ": the game's value changed outside Kiln after Kiln's last write in this world (" +
+                    (wrote ? registry::report_value_text(*wrote) : std::string("?")) + " -> " + registry::report_value_text(*result) +
+                    "), and no writer Kiln knows explains it; " + row.who;
+        r.lines.push_back(std::move(line));
+        fo.winner = row.who;
+        chain.push_back(std::move(row));
     }
     fo.chain = std::move(chain);
     fo.result = std::move(*result);
     fo.formula_inputs = std::move(formula_inputs);
 }
+
+void late_seen();
 
 // A write compare-before-write skipped, in Kiln words (P32): the store's own row names the game's debug and member
 // names; the report names the Kiln place the slot's bound field had (slot_places, refreshed from g.fields per report).
@@ -1179,11 +1334,81 @@ void report(bool application = true) {
     g.pending = std::move(r);  // written by registry_live_publish, outside the store's lock (review finding 10)
     g.pending_set = true;
     g.pending_application |= application;
+    late_seen();
 }
 
 void queue_change_report() {
     report(false);
     g.pending_change = true;
+}
+
+// registry-followups 1: writes made after the last report. registry.json's live rows are rebuilt at each application (world
+// load, pack reload, a live change, a drop table bound later), so a write after the last one (another loader's code change
+// through kiln.content, as EMF's set_item_max_stack makes; a DLL writing game memory) stayed out of it until the next. The
+// tick's publish now looks again: once kiln.content's store generation moved (any Kiln-side write) and kLateWaitMs passed,
+// and every kLateScanMs for a write outside Kiln's store. A look compares each bound slot (its bytes and the store's signature
+// of it: no copy, nothing written) with what the last report saw, and rebuilds the live rows (report(false): registry.json
+// and the Conflicts view, no new generation or ready event) only when one differs. Never per tick: a tick compares the
+// generation and the clock. A field that keeps changing doubles the wait, up to kLateWaitMaxMs.
+// Review: a look reads at most kLateBatch slots a tick and goes on at the next ticks (under the store's lock, which the game's
+// job threads wait for too): reading every slot at once cost about 19 ms at 40,000 bound slots (a pack over every entry's
+// stacks or drops binds that many), every 10 s.
+constexpr uint64_t kLateWaitMs = 2000, kLateScanMs = 10000, kLateWaitMaxMs = 60000;
+constexpr size_t kLateBatch = 1024;
+
+uint64_t late_signature(uintptr_t addr, uint8_t size) {
+    uint8_t b[kSlotBytes] = {};
+    const uint8_t ok = rd(addr, b, size) ? 1 : 0;
+    const uint64_t store = store_slot_signature(addr);
+    uint64_t h = 1469598103934665603ull;
+    auto mix = [&h](const void* p, size_t n) {
+        for (size_t i = 0; i < n; ++i) h = (h ^ static_cast<const uint8_t*>(p)[i]) * 1099511628211ull;
+    };
+    mix(&ok, 1), mix(b, size), mix(&store, sizeof store);
+    return h;
+}
+
+void late_seen() {  // what the report just built saw (report() calls it last); a look going on starts over at its next turn
+    g.late_slots.clear();
+    for (const auto& [ref, field] : g.fields)
+        for (const LiveSlot& slot : field.slots) g.late_slots.push_back({slot.addr, slot.size, 0});
+    // each slot once (formula inputs and list slots are shared by fields), in address order (the store's map is too)
+    std::sort(g.late_slots.begin(), g.late_slots.end(), [](const LateSlot& a, const LateSlot& b) { return a.addr != b.addr ? a.addr < b.addr : a.size < b.size; });
+    g.late_slots.erase(std::unique(g.late_slots.begin(), g.late_slots.end(), [](const LateSlot& a, const LateSlot& b) { return a.addr == b.addr && a.size == b.size; }),
+                       g.late_slots.end());
+    for (LateSlot& s : g.late_slots) s.sig = late_signature(s.addr, s.size);
+    g.late_next = g.late_slots.size();
+    g.late_gen = store_generation();
+    g.late_at = g_registry_now_ms();
+}
+
+void late_check() {
+    if (!g.in || !g.applied || !g.have_report || g.pending_set || g.late_slots.empty()) return;
+    if (g.late_next >= g.late_slots.size()) {  // no look going on: one starts when it is due
+        const uint64_t now = g_registry_now_ms();
+        const bool moved = store_generation() != g.late_gen;
+        const uint64_t wait = std::max(g.late_wait, kLateWaitMs);
+        if (now - g.late_at < (moved ? wait : std::max(wait, kLateScanMs))) return;
+        g.late_at = now;
+        g.late_gen = store_generation();
+        g.late_next = 0;
+    }
+    const size_t end = std::min(g.late_next + kLateBatch, g.late_slots.size());
+    for (; g.late_next < end; ++g.late_next) {
+        const LateSlot& s = g.late_slots[g.late_next];
+        if (late_signature(s.addr, s.size) == s.sig) continue;
+        const uint64_t wait = std::max(g.late_wait, kLateWaitMs);
+        if (++g.late_rebuilds == 1)
+            LOGI("registry (live): a field the registry writes changed after the last report (a later code change or another writer): "
+                 "state/registry.json updated (later ones too, at most every %llu s while they keep coming)",
+                 static_cast<unsigned long long>(kLateWaitMaxMs / 1000));
+        else
+            LOGD("registry (live): a later write changed a field the registry writes: state/registry.json updated (%zu)", g.late_rebuilds);
+        report(false);  // late_seen: what this report saw, no look going on
+        g.late_wait = std::min(wait * 2, kLateWaitMaxMs);
+        return;
+    }
+    if (g.late_next >= g.late_slots.size()) g.late_wait = kLateWaitMs;  // a whole look found nothing changed
 }
 
 // Each committed transaction is a later composition turn. Preserve claims and chains rather than flattening values.
@@ -1820,6 +2045,11 @@ void registry_live_install(RegistryLive in) {
     g.tables_changed = false;
     g.skipped_logged = 0;
     g.slot_places.clear();
+    g.late_gen = g.late_at = g.late_wait = 0;
+    g.late_slots.clear();
+    g.late_next = 0;
+    g.late_rebuilds = 0;
+    g.owner_names.clear();
 }
 
 std::shared_ptr<const registry::Schema> registry_live_schema() {
@@ -1883,6 +2113,7 @@ void registry_live_publish() {
                 if (!rollback.error.empty()) LOGW("registry (live): drop exclusion rollback unverified: %s", rollback.error.c_str());
             } else report(false);
         }
+        late_check();  // writes made after the last report (registry-followups 1): a look every 2-10 s, a batch of slots a tick
         if (!g.in || !g.pending_set) return;
         r = std::move(g.pending);
         const bool change = !application && g.pending_change && bool(g.in->changed);

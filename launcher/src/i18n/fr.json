@@ -6232,8 +6232,8 @@
     "baseOrigin": "Origine de la base : {origin}",
     "archiveWriter": "Écrivain de l'archive : {writer}",
     "journal": {
-      "read": "Paquets de l'écrivain de l'archive nommés par le journal des modifications de kiln-eml : {packages} paquets, {entries} entrées (objets, drops et équilibrage seulement : une entrée de recette ou de butin n'est pas nommée).",
-      "truncated": "Paquets de l'écrivain de l'archive nommés par le journal des modifications de kiln-eml : {packages} paquets, {entries} entrées (objets, drops et équilibrage seulement : une entrée de recette ou de butin n'est pas nommée). Le journal est tronqué : un paquet peut avoir écrit des entrées qu'il ne nomme pas.",
+      "read": "Paquets de l'écrivain de l'archive nommés par le journal des modifications de kiln-eml : {packages} paquets, {entries} entrées (une passe ShroudForge nomme les objets, drops et équilibrage par entrée ; une passe EML nomme les champs que ses mods ont écrits, sur les recettes et le butin par leur élément).",
+      "truncated": "Paquets de l'écrivain de l'archive nommés par le journal des modifications de kiln-eml : {packages} paquets, {entries} entrées (une passe ShroudForge nomme les objets, drops et équilibrage par entrée ; une passe EML nomme les champs que ses mods ont écrits, sur les recettes et le butin par leur élément). Le journal est tronqué : un paquet peut avoir écrit des entrées qu'il ne nomme pas.",
       "notNamed": "Les paquets de l'écrivain de l'archive ne sont pas nommés pour ce démarrage : {reason}",
       "none": "l'écrivain de l'archive de ce démarrage ne tient pas de journal des modifications.",
       "stale": "le journal des modifications appartient à un démarrage précédent.",
@@ -6241,15 +6241,17 @@
     },
     "sfPackage": "{id} (paquet ShroudForge)",
     "emlPackage": "{id} (paquet EML)",
-    "archiveUnattributed": "Une écriture au démarrage qu'aucun paquet n'a faite (kiln-eml)",
+    "archiveUnattributed": "Une écriture au démarrage d'aucun paquet que Kiln puisse nommer (kiln-eml)",
     "archiveOp": "Inconnue (le journal de kiln-eml nomme l'entrée que ce paquet a écrite, pas ce champ)",
+    "archiveOpField": "Inconnue (le journal de kiln-eml nomme ce champ comme écrit par ce paquet, pas la valeur)",
     "kind": {
       "archiveWriter": "A écrit cette entrée avant Kiln (archive)",
+      "archiveWriterField": "A écrit ce champ avant Kiln (archive)",
       "drift": "Modifié hors de Kiln"
     },
     "unverified": "Correspondance non vérifiée",
     "unverifiedBody": "Des modifications de champs peuvent être refusées comme Unproven. Lisez la raison de chaque refus.",
-    "certaintyHint": "Certain = Kiln a observé l'écrivain. Nommé par le journal = un paquet ShroudForge ou EML que le journal des modifications de kiln-eml désigne comme ayant écrit l'entrée avant Kiln ; la modification de Kiln l'emporte sur lui. Dérive au mieux = la valeur du jeu a changé hors de Kiln ; les suspects sont un indice, pas une preuve de qui l'a écrite ni qu'il n'existe aucun autre écrivain.",
+    "certaintyHint": "Certain = Kiln a observé l'écrivain. Nommé par le journal = un paquet ShroudForge ou EML que le journal des modifications de kiln-eml désigne comme ayant écrit l'entrée (ou, pour un mod EML, le champ) avant Kiln ; la modification de Kiln l'emporte sur lui. Dérive au mieux = la valeur du jeu a changé hors de Kiln ; les suspects sont un indice, pas une preuve de qui l'a écrite ni qu'il n'existe aucun autre écrivain.",
     "partial": "Rapport partiel",
     "partialRows": {
       "one": "{count} ligne a été omise par le rapport natif ou par les limites de sécurité de cette vue.",

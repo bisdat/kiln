@@ -108,6 +108,31 @@ struct Def {
 
 std::recursive_mutex g_mu;
 std::vector<Def> g_defs;
+// g_defs by GUID: the place of each clone (registry-fixes item 4: a pack's every definition and its journal's rollback looked
+// each GUID up in every clone, quadratic per mod). Kept with g_defs (define_parsed adds, clones_forget_unbound rebuilds).
+struct GuidHash {
+    size_t operator()(const std::array<uint8_t, 16>& g) const {
+        uint64_t a, b;
+        std::memcpy(&a, g.data(), 8), std::memcpy(&b, g.data() + 8, 8);
+        return std::hash<uint64_t>{}(a ^ (b * 0x9E3779B97F4A7C15ull));
+    }
+};
+using GuidKey = std::array<uint8_t, 16>;
+GuidKey guid_key(const uint8_t guid[16]) {
+    GuidKey k;
+    std::memcpy(k.data(), guid, 16);
+    return k;
+}
+std::unordered_map<GuidKey, size_t, GuidHash> g_def_at;
+std::vector<Def>::iterator find_def(const uint8_t guid[16]) {
+    const auto f = g_def_at.find(guid_key(guid));
+    return f == g_def_at.end() || f->second >= g_defs.size() || std::memcmp(g_defs[f->second].guid, guid, 16) != 0 ? g_defs.end()
+                                                                                                                  : g_defs.begin() + f->second;
+}
+void index_defs() {
+    g_def_at.clear();
+    for (size_t i = 0; i < g_defs.size(); ++i) g_def_at.emplace(guid_key(g_defs[i].guid), i);
+}
 void publish_budget();  // the buff budget and the receipts, after a change (g_mu held)
 // Bumped whenever a template clone goes into a world's table: kiln.content then resolves the item references that named
 // it before it was there (an item's equipment.placedEntity), at once instead of at its next periodic retry.
@@ -133,27 +158,40 @@ bool g_templates = false;
 KilnOwner g_defs_owner = 0;
 std::set<std::string> g_seen_pack;  // pack definitions (guid text) seen in the current pack application
 // One mod's pack application (clones_pack_mark .. clones_pack_unmark): each clone the owner's packs added or changed since
-// the mark, in the order of its first change, with a copy from before (none: the packs added it) and whether a pack of
-// this application had already defined it (g_seen_pack). By GUID: g_defs is a vector of values. Under g_mu.
+// the mark, in the order of its first change, whether the packs added it, and whether a pack of this application had already
+// defined it (g_seen_pack). packs.cpp marks every mod at every application, so this runs for every clone a pack applies again:
+// membership is a hash lookup, and a copy from before is kept only when a definition changes the clone (registry-fixes
+// item 4: before, a copy of each and a scan of what the journal held). By GUID: g_defs is a vector of values. Under g_mu.
 struct PackJournal {
     struct Touch {
         std::array<uint8_t, 16> guid{};
-        std::optional<Def> was;
+        bool added = false;      // the packs added it
+        std::optional<Def> was;  // as at the mark, copied at the first definition that changes it; none: unchanged so far
         bool seen = false;
     };
     KilnOwner owner = 0;
     std::vector<Touch> touched;
+    std::unordered_map<GuidKey, size_t, GuidHash> at;  // touched by GUID
+    size_t copies = 0;                                  // clones copied (tests)
 };
 PackJournal g_pack_journal;
-void journal_touch(KilnOwner owner, const uint8_t guid[16], const Def* now, bool seen) {
+// Before a pack of the marked owner defines the clone `guid` (now: the clone as it is, null: none yet); `changes`: the
+// definition changes what a rollback puts back, so a copy is kept, once.
+void journal_touch(KilnOwner owner, const uint8_t guid[16], const Def* now, bool seen, bool changes = true) {
     if (!owner || owner != g_pack_journal.owner) return;
-    for (const auto& t : g_pack_journal.touched)
-        if (std::memcmp(t.guid.data(), guid, 16) == 0) return;
-    PackJournal::Touch t;
-    std::memcpy(t.guid.data(), guid, 16);
-    if (now) t.was = *now;
-    t.seen = seen;
-    g_pack_journal.touched.push_back(std::move(t));
+    const auto [at, fresh] = g_pack_journal.at.try_emplace(guid_key(guid), g_pack_journal.touched.size());
+    if (fresh) {
+        PackJournal::Touch t;
+        std::memcpy(t.guid.data(), guid, 16);
+        t.added = !now;
+        t.seen = seen;
+        g_pack_journal.touched.push_back(std::move(t));
+    }
+    PackJournal::Touch& t = g_pack_journal.touched[at->second];
+    if (now && changes && !t.added && !t.was) {
+        t.was = *now;
+        ++g_pack_journal.copies;
+    }
 }
 
 using GetBuffFn = uintptr_t(__fastcall*)(uint32_t id, uintptr_t registry);
@@ -2002,6 +2040,7 @@ uint32_t clones_forget_unbound(KilnOwner owner) {
     std::lock_guard lock(g_mu);
     const size_t before = g_defs.size();
     std::erase_if(g_defs, [&](const Def& d) { return d.owner == owner && !d.data; });
+    index_defs();
     publish_budget();
     return static_cast<uint32_t>(before - g_defs.size());
 }
@@ -2119,10 +2158,15 @@ KilnResult define_parsed(KilnOwner owner, uint32_t section, const gjson& j, Def 
     };
     std::lock_guard l1(store_mutex());
     std::lock_guard lock(g_mu);
-    auto it = std::find_if(g_defs.begin(), g_defs.end(), [&](const Def& x) { return std::memcmp(x.guid, d.guid, 16) == 0; });
+    auto it = find_def(d.guid);
     if (pack) {
         const std::string gt = guid_text(d.guid);
-        journal_touch(owner, d.guid, it != g_defs.end() ? &*it : nullptr, g_seen_pack.count(gt) != 0);  // a marked owner's pack
+        // a marked owner's pack: a copy only when this definition changes what a rollback puts back (the same pack applying
+        // again, the common case, changes nothing of it)
+        const bool changes = it == g_defs.end() || it->owner != owner || it->source != source || it->orphan ||
+                             it->placeholder != d.placeholder || it->mod != d.mod || it->fields != d.fields || it->texts != d.texts ||
+                             it->body != j;
+        journal_touch(owner, d.guid, it != g_defs.end() ? &*it : nullptr, g_seen_pack.count(gt) != 0, changes);
         g_seen_pack.insert(gt);
     }
     std::string state = d.placeholder ? "placeholder" : "defined";
@@ -2162,6 +2206,7 @@ KilnResult define_parsed(KilnOwner owner, uint32_t section, const gjson& j, Def 
         ++it->version;
     } else {
         g_defs.push_back(std::move(d));
+        g_def_at.insert_or_assign(guid_key(g_defs.back().guid), g_defs.size() - 1);
         it = g_defs.end() - 1;
     }
     const uintptr_t w = active_world();
@@ -2711,7 +2756,13 @@ void clones_packs_begin() {
 
 void clones_pack_mark(KilnOwner owner) {
     std::lock_guard lock(g_mu);
-    g_pack_journal = PackJournal{owner, {}};
+    g_pack_journal = PackJournal{};
+    g_pack_journal.owner = owner;
+}
+
+size_t clones_pack_journal_copies() {
+    std::lock_guard lock(g_mu);
+    return g_pack_journal.copies;
 }
 
 void clones_pack_unmark() {
@@ -2730,16 +2781,17 @@ uint32_t clones_pack_rollback(KilnOwner owner) {
         const std::string gt = guid_text(t->guid.data());
         if (t->seen) g_seen_pack.insert(gt);
         else g_seen_pack.erase(gt);  // clones_packs_end orphans it unless a pack defines it again
-        auto it = std::find_if(g_defs.begin(), g_defs.end(), [&](const Def& x) { return std::memcmp(x.guid, t->guid.data(), 16) == 0; });
+        auto it = find_def(t->guid.data());
         if (it == g_defs.end()) continue;
         ++n;
-        if (!t->was) {
+        if (t->added) {
             // added by the packs: off as a removed pack's clone is (a registered one keeps its record, reserved)
             it->orphan = true;
             LOGI("gamedata: %s clone %s (%s) comes off: the pack that added it threw while it applied", section_name(it->section),
                  it->name.c_str(), gt.c_str());
             continue;
         }
+        if (!t->was) continue;  // no definition of the pack that threw changed it
         const Def& was = *t->was;
         if (it->owner == was.owner && it->source == was.source && it->fields == was.fields && it->body == was.body &&
             it->texts == was.texts && it->placeholder == was.placeholder && it->orphan == was.orphan && it->mod == was.mod)
@@ -2755,6 +2807,7 @@ uint32_t clones_pack_rollback(KilnOwner owner) {
         if (live) register_def(*it, w);
     }
     g_pack_journal.touched.clear();  // the mark stays: what applies next in its place is journaled from here
+    g_pack_journal.at.clear();
     if (n) {
         publish_budget();
         changed();
