@@ -115,6 +115,9 @@ public sealed partial class UiWindow
     /// <summary>The id other mods find it under (<see cref="UiWindowOptions.PlacementId"/>, else the title when made).</summary>
     internal string DockKey { get; }
 
+    /// <summary>The id of its mod (Kiln's own windows: "kiln"), what <see cref="Ui.FindWindow"/> takes.</summary>
+    internal string OwnerId => Owner?.Info.Id ?? "kiln";
+
     internal UiDockState Dock { get; } = new();
 
     /// <summary>Docks this window to <paramref name="target"/> (another window, also another mod's, that accepts docks:
@@ -142,7 +145,7 @@ public sealed partial class UiWindow
         if (side is < DockSide.Left or > DockSide.Bottom) throw new ArgumentOutOfRangeException(nameof(side), side, "Left, Right, Top or Bottom");
         if (!float.IsFinite(offset)) throw new ArgumentOutOfRangeException(nameof(offset), offset, "pixels at UI scale 1 (a finite number)");
         var to = target.Resolve();
-        if (ReferenceEquals(to, this) || (Options.AcceptDock && target.ModId == (Owner?.Info.Id ?? "kiln") && target.PlacementId == DockKey))
+        if (ReferenceEquals(to, this) || (Options.AcceptDock && target.ModId == OwnerId && target.PlacementId == DockKey))
             throw new ArgumentException("a window cannot dock to itself", nameof(target));
         var seen = new HashSet<UiWindow>(ReferenceEqualityComparer.Instance);
         for (var w = to; w != null && seen.Add(w); w = w.Dock.Current?.Target.Resolve())
@@ -345,6 +348,8 @@ internal sealed class UiDockFrame
     private readonly Dictionary<UiWindow, Node> _nodes = new(ReferenceEqualityComparer.Instance);
     private readonly List<UiWindow> _order = [];
     private readonly List<(UiWindow W, UiDockChange Change)> _changes = [];
+    // the windows that accept docks, by (mod, placement id), read once this frame (Ui.FindWindow's first one wins)
+    private Dictionary<(string Mod, string Id), UiWindow>? _dockable;
 
     private UiDockFrame(UiViewport vp, long frame)
     {
@@ -405,7 +410,7 @@ internal sealed class UiDockFrame
             changed = false;
             foreach (var n in nodes)
             {
-                if (n.Wait || !n.Appearing || n.Link is not { } l || l.Target.Resolve() is not { } t || ReferenceEquals(t, n.W)) continue;
+                if (n.Wait || !n.Appearing || n.Link is not { } l || f.Resolve(l.Target) is not { } t || ReferenceEquals(t, n.W)) continue;
                 if (f._nodes.TryGetValue(t, out var tn) && !tn.Wait) continue;  // open and drawn this frame
                 var st = n.W.Dock;
                 if (st.WaitStart < 0 || st.WaitFrame < f._frame - 1 || st.WaitOpens != n.Opens)
@@ -503,9 +508,21 @@ internal sealed class UiDockFrame
         lock (w.Dock.Lock) return w.Dock.Snap;
     }
 
+    /// <summary>The window <paramref name="h"/> names this frame (<see cref="UiWindowHandle.Resolve"/>, read once a frame).</summary>
+    private UiWindow? Resolve(UiWindowHandle h)
+    {
+        if (_dockable == null)
+        {
+            _dockable = [];
+            foreach (var w in UiEngine.Windows)
+                if (!w.Disposed && w.Options.AcceptDock) _dockable.TryAdd((w.OwnerId, w.DockKey), w);
+        }
+        return _dockable.GetValueOrDefault((h.ModId, h.PlacementId));
+    }
+
     /// <summary>The open window <paramref name="l"/> names, other than <paramref name="self"/>; null when it is closed or gone.</summary>
     private Node? Open(UiDockLink l, Node self) =>
-        l.Target.Resolve() is { } t && !ReferenceEquals(t, self.W) && _nodes.TryGetValue(t, out var n) ? n : null;
+        Resolve(l.Target) is { } t && !ReferenceEquals(t, self.W) && _nodes.TryGetValue(t, out var n) ? n : null;
 
     private Node? TargetOf(Node n) => n.Link is { } l ? Open(l, n) : null;
 

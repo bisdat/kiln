@@ -439,7 +439,7 @@ internal static unsafe class UiEngine
     internal static UiWindow? FindDockable(string mod, string id)
     {
         foreach (var w in Windows)
-            if (!w.Disposed && w.Options.AcceptDock && w.DockKey == id && (w.Owner?.Info.Id ?? "kiln") == mod) return w;
+            if (!w.Disposed && w.Options.AcceptDock && w.DockKey == id && w.OwnerId == mod) return w;
         return null;
     }
 
