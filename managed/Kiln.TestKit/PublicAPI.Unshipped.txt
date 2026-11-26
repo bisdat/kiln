@@ -1,1 +1,3 @@
 #nullable enable
+Kiln.TestKit.HarnessUiPlacement.FrameWindows() -> System.Collections.Generic.IReadOnlyDictionary<Kiln.UiWindow!, Kiln.UiPlacement>!
+Kiln.TestKit.HarnessUiPlacement.PlayerDrags(Kiln.UiWindow! window, float x, float y, bool shift = false) -> void
