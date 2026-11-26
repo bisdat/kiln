@@ -536,6 +536,12 @@ int main(int argc, char** argv) {
                       b3.registries["recipes"][0].archive_fields.at("eml:bravo") == std::set<std::string>({"duration"}) &&
                       b3.registries["recipes"][2].archive == std::vector<std::string>({"eml:bravo"}) && b3.registries["recipes"][2].archive_fields.empty(),
                   "a GUID listed twice: the elements its paths name are named: " + j3.state + " " + j3.text);
+            // a format-2 journal that is malformed is not called a format-1 one
+            json bad = good;
+            bad["packages"][0]["changed"][0]["paths"] = json::array();
+            const ArchiveJournal j4 = parse_archive_journal(bad.dump(), live);
+            CHECK(j4.state == "unreadable" && j4.text.find("format-1") == std::string::npos && j4.text.find("format 1 or 2") != std::string::npos,
+                  "the unreadable text says what Kiln reads: " + j4.text);
         }
     }
     // ---- the live generation of an EML start: kiln-eml's state of this start (eml.json "generation") ----

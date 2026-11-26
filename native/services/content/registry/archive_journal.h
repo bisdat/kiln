@@ -49,7 +49,7 @@ namespace kc::registry {
 
 struct ArchiveJournal {
     // read: this start's journal, bound to its live generation; none: this start has none (the text says why); stale: one
-    // for another generation; unreadable: the file is not a format-1 journal (the text says what is wrong).
+    // for another generation; unreadable: the file is not a journal of format 1 or 2 (the text says what is wrong).
     std::string state = "none";
     std::string text;
     std::string dialect;  // "shroudforge" (format 1) | "eml" (format 2)

@@ -104,7 +104,7 @@ bool sf_id(const std::string& id) {
 ArchiveJournal unreadable(const std::string& why) {
     ArchiveJournal j;
     j.state = "unreadable";
-    j.text = "kiln-eml's change journal is not a format-1 journal (" + why + "): no archive-writer package is named in this start";
+    j.text = "kiln-eml's change journal is not one Kiln reads (format 1 or 2: " + why + "): no archive-writer package is named in this start";
     return j;
 }
 
