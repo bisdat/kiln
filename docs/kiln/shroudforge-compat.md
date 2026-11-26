@@ -539,7 +539,8 @@ or a side mouse button, with Ctrl, Shift or Alt. Kiln stores SF's canonical text
 `windows_scancode_table` (Pause, Print Screen and Num Lock by their virtual key, as SF's own conversion), the same table
 the hosted runtime's feed and kiln-sfi's port use, so the captured code is the one SF sees for that key on any layout
 (the Ü key of a German keyboard is `SDL:47`). The box takes the press on the window thread like the Keys page's rebind
-(kept from the game and from key bindings, dropped when the page is not drawn; Escape closes the menu inside kiln.ui);
+(kept from the game and from key bindings, dropped when the page is not drawn or a Kiln text field takes the keyboard;
+Escape closes the menu inside kiln.ui);
 Backspace, Delete or Unbind clear it; the wheel and controller buttons are refused with the reason (SF shortcuts read
 the keyboard and the mouse only). The text field below still takes SF's own form, and the page converts readable forms
 (`Ctrl+G`, `F5`, `Mouse4`, a layout character such as `Ü`) before it saves; the data layer and the shared fixtures stay
@@ -727,7 +728,9 @@ kiln-shroudforge feeds it (`native/plugins/shroudforge/src/key_feed.cpp`):
   Kiln's search or pressed in a mod's own shortcut box also ran that mod's shortcut (likely netjunk's Altar Cleanup
   "nothing to undo", logged the moment his Kiln menu opened). A status that cannot be read counts as not capturing. Known
   limit: a modifier pressed while Kiln has the keyboard and still held after it lets go is not seen by SF until it is
-  pressed again. `run.py` `keys-captured`.
+  pressed again. Print Screen's lone `WM_KEYUP` (window messages only: Windows sends no `WM_KEYDOWN` for it), which the
+  runtime counts as a press and its release, is held back too unless the runtime holds the key. `run.py`
+  `keys-captured`.
 - **Teardown** (the worker, also after a failed create or update): unsubscribe (kiln.ui waits for a record in flight),
   then `end` under the adapter's lock, then `shroudforge_destroy`. The chosen runtime DLL is never unloaded. No export
   is called after `end` or destroy, even when the window thread delivers a record during teardown or kiln.ui's
