@@ -194,6 +194,9 @@ async function routeBesideBanner(page: Page, where: string, action: boolean) {
   await expect(page.locator('.ka-map-area > div[style*="z-index: 1001"] > .k-banner')).toHaveCount(1);
   const route = page.locator(".ka-map-route");
   await expect(route).toContainText("Dialog test spire");
+  // the web fonts in first (font-display: swap; the screenshot waits for them, SHOTS=0 does not): a late one rewraps the
+  // banner, which moves the route panel below it where the banner does not fill the column (1920×1080)
+  await page.evaluate(() => document.fonts.ready);
   if (process.env.SHOTS !== "0") {
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: join(SHOTS, `map-route-banner-${where}.png`) });
