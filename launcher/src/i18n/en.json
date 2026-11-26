@@ -6815,9 +6815,25 @@
     "snapshotSub": "{time} · generation {generation} · {phase}",
     "baseOrigin": "Base origin: {origin}",
     "archiveWriter": "Archive writer: {writer}",
+    "journal": {
+      "read": "Archive-writer packages named from kiln-eml's change journal: {packages} packages, {entries} entries (items, drops and balance only: a recipe or loot entry is not named).",
+      "truncated": "Archive-writer packages named from kiln-eml's change journal: {packages} packages, {entries} entries (items, drops and balance only: a recipe or loot entry is not named). The journal is truncated, so a package may have written entries it does not name.",
+      "notNamed": "Archive-writer packages are not named in this start: {reason}",
+      "none": "this start's archive writer keeps no change journal.",
+      "stale": "the change journal belongs to an earlier start.",
+      "unreadable": "the change journal could not be read."
+    },
+    "sfPackage": "{id} (ShroudForge package)",
+    "emlPackage": "{id} (EML package)",
+    "archiveUnattributed": "A startup write no package made (kiln-eml)",
+    "archiveOp": "Not known (kiln-eml's journal names the entry this package wrote, not this field)",
+    "kind": {
+      "archiveWriter": "Wrote this entry before Kiln (archive)",
+      "drift": "Changed outside Kiln"
+    },
     "unverified": "Mapping unverified",
     "unverifiedBody": "Field edits may be refused as Unproven. Read each refusal for its reason.",
-    "certaintyHint": "Certain = Kiln observed the writer. Named from journal = archive-writer attribution. Best-effort drift is not proof of who wrote it or that no other writer exists.",
+    "certaintyHint": "Certain = Kiln observed the writer. Named from journal = a ShroudForge or EML package kiln-eml's change journal names as having written the entry before Kiln; Kiln's edit wins over it. Best-effort drift = the game's value changed outside Kiln; the suspects are a hint, not proof of who wrote it or that no other writer exists.",
     "partial": "Partial report",
     "partialRows": {
       "one": "{count} row was omitted by the native report or this view's safety limits.",

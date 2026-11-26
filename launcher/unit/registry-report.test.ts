@@ -53,6 +53,46 @@ describe("untrusted registry report", () => {
     const r = registryFixture(); r.fields[0].writers[0].certainty = "named";
     expect(parse(r).fields[0].writers[0].certainty).toBe("Named from journal");
   });
+  test("archive-writer packages are named and drift rows are labelled best effort", () => {
+    const r = registryFixture();
+    r.fields[0].writers = [
+      { kind: "archiveWriter", who: "shroudforge:alpha", op: 10, value: 10, certainty: "named" },
+      { kind: "archiveWriter", who: "eml:bravo", op: 10, value: 10, certainty: "named" },
+      { kind: "drift", who: "outside Kiln (best effort; suspects: xhl-core.dll)", op: 12, value: 12, certainty: "bestEffort" },
+      ...r.fields[0].writers,
+    ] as typeof r.fields[0].writers;
+    const out = parse(r).fields[0].writers;
+    expect(out.map(w => w.owner).slice(0, 3)).toEqual(["alpha (ShroudForge package)", "bravo (EML package)", "outside Kiln (best effort; suspects: xhl-core.dll)"]);
+    expect(out.map(w => w.kind).slice(0, 3)).toEqual(["Wrote this entry before Kiln (archive)", "Wrote this entry before Kiln (archive)", "Changed outside Kiln"]);
+    expect(out.map(w => w.certain)).toEqual([false, false, false, true, true]);
+    expect(out[2].certainty).toBe("Best-effort drift");
+    expect(out[3].kind).toBe("oldPack");
+  });
+  test("an archive-writer row claims no operation on the field: the journal names the entry", () => {
+    const r = registryFixture();
+    r.fields[0].writers = [
+      { kind: "archiveWriter", who: "shroudforge:alpha", op: 10, value: 10, certainty: "named" },  // an older report's op is not shown either
+      { kind: "archiveWriter", who: "eml:bravo", value: 10, certainty: "named" },
+      ...r.fields[0].writers,
+    ] as typeof r.fields[0].writers;
+    const out = parse(r).fields[0].writers;
+    expect(out[0].operation).toBe("Not known (kiln-eml's journal names the entry this package wrote, not this field)");
+    expect(out[1].operation).toBe(out[0].operation);
+    expect(out[1].value).toBe("10");
+    expect(out[2].operation).not.toBe(out[0].operation);
+  });
+  test("base.journal says whether the archive writer's packages are named", () => {
+    const read = parse({ ...registryFixture(), base: { origin: "live", writer: "kiln-eml", journal: { state: "read", packages: 2, entries: 3, truncated: false, text: "x" } } });
+    expect(read.journal).toBe("Archive-writer packages named from kiln-eml's change journal: 2 packages, 3 entries (items, drops and balance only: a recipe or loot entry is not named).");
+    const truncated = parse({ ...registryFixture(), base: { origin: "live", writer: "kiln-eml", journal: { state: "read", packages: 1, entries: 1, truncated: true } } });
+    expect(truncated.journal).toContain("truncated");
+    const none = parse({ ...registryFixture(), base: { origin: "live", writer: "shroudforge-hosted", journal: { state: "none", packages: 0, entries: 0, truncated: false, text: "hosted ShroudForge keeps no change journal" } } });
+    expect(none.journal).toBe("Archive-writer packages are not named in this start: hosted ShroudForge keeps no change journal");
+    expect(parse({ ...registryFixture(), base: { origin: "live", writer: "none", journal: { state: "none", packages: 0, entries: 0, truncated: false } } }).journal).toBe("");
+    expect(parse(registryFixture()).journal).toBe("");  // a report from before 31.14 has no journal
+    const stale = parse({ ...registryFixture(), base: { origin: "live", writer: "kiln-eml", journal: { state: "stale", packages: 0, entries: 0, truncated: false, text: "left by an earlier start" } } });
+    expect(stale.journal).toBe("Archive-writer packages are not named in this start: left by an earlier start");
+  });
   test.each(["null", "[]", "{}", "{", '{"format":2}'])("rejects invalid or unsupported document %s", text => {
     expect(() => parseRegistryReport(text)).toThrow();
   });

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <set>
 
 #include "../gamedata.h"
 #include "model.h"
@@ -53,8 +54,10 @@ std::vector<OldWrite> old_writes(const std::vector<OldDoc>& docs, model::Model& 
                     const std::string n = p.substr(head.size(), close - head.size());
                     if (n.empty() || n.size() > 9 || !std::all_of(n.begin(), n.end(), [](char c) { return c >= '0' && c <= '9'; })) return false;
                     const size_t el = std::stoul(n);
+                    // the element of this document's resource: another resource of the type has an element N too
                     for (size_t i = 0; i < es->size(); ++i)
-                        if ((*es)[i].place.element == static_cast<int32_t>(el)) return *idx = i, *rest = p.substr(close + 2), true;
+                        if ((*es)[i].place.element == static_cast<int32_t>(el) && std::memcmp(&(*es)[i].place.key, &d.res, sizeof d.res) == 0)
+                            return *idx = i, *rest = p.substr(close + 2), true;
                     return false;
                 };
                 auto value_for = [&](const map::Row& row, const FieldSpec& spec, FieldType type, const nlohmann::json& v, Value* x) {
@@ -91,6 +94,29 @@ std::vector<OldWrite> old_writes(const std::vector<OldDoc>& docs, model::Model& 
                     w.list_values = std::move(vals);
                     out.push_back(std::move(w));
                 };
+                // the entries this document writes, whatever their paths map to (an entry mark, kind OldPatch with no field):
+                // the live back-end's drift probe (drift.h) takes a change there for Kiln's own patch, never for another
+                // loader's, since many paths (formula inputs, lists of structs, "[*]" over a registry's elements) have no
+                // row of their own. An element "<array>[N]..." marks that element; any other path marks every entry of the
+                // resource.
+                std::set<size_t> marked;
+                auto mark = [&](const std::string& path) {
+                    size_t el = 0;
+                    std::string below;
+                    if (array && locate(path, &el, &below)) return (void)marked.insert(el);
+                    for (size_t k = 0; k < es->size(); ++k)
+                        if (std::memcmp(&(*es)[k].place.key, &d.res, sizeof d.res) == 0) marked.insert(k);
+                };
+                for (const auto& [spath, svalue] : d.sets) mark(spath);
+                for (const OldDoc::List& o : d.lists) mark(o.path);
+                for (const size_t k : marked) {
+                    OldWrite w;
+                    w.kind = WriterKind::OldPatch;
+                    w.mod = d.mod;
+                    w.who = d.mod + "/" + d.key;
+                    w.field = {regname, (*es)[k].id, ""};
+                    out.push_back(std::move(w));
+                }
                 for (const auto& [spath, svalue] : d.sets) {
                     size_t i = 0;
                     std::string rest;

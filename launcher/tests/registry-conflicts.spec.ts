@@ -130,3 +130,37 @@ test("long field lists paginate, filter and disclose native omissions", async ({
   await page.getByRole("textbox", { name: "Filter fields or owners" }).fill("not-present");
   await expect(page.getByText("No displayed fields match this filter.", { exact: true })).toBeVisible();
 });
+
+test("names archive-writer packages from kiln-eml's journal and labels drift best effort", async ({ page }) => {
+  const r = registryFixture();
+  const row = { ...r.fields[0], writers: [
+    { kind: "archiveWriter", who: "shroudforge:betterstacks", value: 10, certainty: "named" },
+    { kind: "drift", who: "outside Kiln (best effort; suspects: xhl-core.dll)", op: 12, value: 12, certainty: "bestEffort" },
+    { kind: "registry", mod: "stacker", stage: "alter", n: 0, op: { mul: 2 }, value: 24, certainty: "certain" },
+  ], result: 24 };
+  const conflicts = [{ registry: "items", id: "game:fixture_stack", field: "items[game:fixture_stack].maxStack", kind: "composedOn", winner: "stacker",
+    loser: "shroudforge:betterstacks", certainty: "named",
+    text: "items[game:fixture_stack].maxStack: betterstacks (ShroudForge package) wrote this entry in the game's archive before Kiln; stacker's edit wins (D1): 10 -> 20" }];
+  await report(page, { ...r, base: { origin: "live", writer: "kiln-eml", journal: { state: "read", packages: 1, entries: 1, truncated: false } },
+    fields: [row], conflicts, counts: { ...r.counts, conflicts: 1 } });
+  await expect(page.getByText("Archive-writer packages named from kiln-eml's change journal: 1 packages, 1 entries (items, drops and balance only: a recipe or loot entry is not named).", { exact: true })).toBeVisible();
+  await expect(page.getByText(/betterstacks \(ShroudForge package\) wrote this entry in the game's archive before Kiln; stacker's edit wins \(D1\)/)).toBeVisible();
+  await expect(page.getByText("Named from journal", { exact: true }).first()).toBeVisible();
+  const field = page.locator(".registry-field").first();
+  await field.locator("summary").click();
+  const owners = field.locator("ol li");
+  await expect(owners.nth(0)).toContainText("betterstacks (ShroudForge package)");
+  await expect(owners.nth(0)).toContainText("Wrote this entry before Kiln (archive)");
+  await expect(owners.nth(0)).toContainText("Named from journal");
+  await expect(owners.nth(0)).toContainText("Operation: Not known (kiln-eml's journal names the entry this package wrote, not this field)");
+  await expect(owners.nth(1)).toContainText("outside Kiln (best effort; suspects: xhl-core.dll)");
+  await expect(owners.nth(1)).toContainText("Changed outside Kiln");
+  await expect(owners.nth(1)).toContainText("Best-effort drift");
+  await expect(owners.nth(2)).toContainText("stacker");
+});
+
+test("a start whose archive writer keeps no journal says its packages are not named", async ({ page }) => {
+  await report(page, { ...registryFixture(), base: { origin: "live", writer: "shroudforge-hosted",
+    journal: { state: "none", packages: 0, entries: 0, truncated: false, text: "hosted ShroudForge keeps no change journal" } } });
+  await expect(page.getByText("Archive-writer packages are not named in this start: hosted ShroudForge keeps no change journal", { exact: true })).toBeVisible();
+});

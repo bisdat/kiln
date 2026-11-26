@@ -363,7 +363,7 @@ std::vector<PackFile> files_of(const std::vector<std::pair<std::string, std::str
 
 // What S11 does at resources-ready: lower the sections, compose, install.
 void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch>& code = {}, const std::string& rollback = "",
-           const std::vector<std::string>& left_out = {}) {
+           const std::vector<std::string>& left_out = {}, const std::vector<registry::OldWrite>& old = {}) {
     const registry::Schema& sc = registry_schema();
     std::vector<registry::ModInput> mods;
     for (const RegistrySection& s : registry_sections(files, sc)) {
@@ -384,7 +384,8 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
     in.regmap = g_regmap;
     in.base = base();
     in.mods = mods;
-    in.result = registry::compose(sc, in.base, {}, mods);
+    in.old = old;
+    in.result = registry::compose(sc, in.base, old, mods);
     in.ids = {{"items|game:material_t1_wood_logs", guid_text(G1)}, {"items|game:sword_t2", guid_text(G2)}, {"items|game:material_stone", guid_text(G4)},
               {"recipes|game:plank_recipe", guid_text(G3)}, {"drops|game:dt_wolf", guid_text(G3)},
               {"loot|game:material_t1_wood_logs", guid_text(G1)}, {"perks|game:perk_a", guid_text(P1)}, {"perks|game:perk_b", guid_text(P2)}};
@@ -806,6 +807,13 @@ void another_writer_in_the_report() {
     // P32: the row names the Kiln place, never the game's debug or member names
     check(reported("items[game:material_t1_wood_logs].maxStack was written by another writer after Kiln's layer"), "the skipped row names the Kiln field");
     check(!reported("Material_T1_Wood_Logs") && !reported("maxStackSize"), "no game debug or member name in the row");
+    // the drift probe: the slot another writer changed after Kiln's layer gets a best-effort writer row, last
+    const auto row = json_field({"items", "game:material_t1_wood_logs", "maxStack"});
+    check(!row["writers"].empty(), "the field row has writers: " + row.dump());
+    const auto& last = row["writers"].back();
+    check(last["kind"] == "drift" && last["certainty"] == "bestEffort" && last["value"] == 777 && !last.contains("mod") &&
+              last["who"].get<std::string>().rfind("outside Kiln (best effort", 0) == 0,
+          "the foreign write is a best-effort drift row: " + row["writers"].dump());
 }
 // P32: a skipped revert (the pack removed after another writer took the slot) still names the Kiln place it had
 void skipped_revert_names_the_kiln_place() {
@@ -820,6 +828,62 @@ void skipped_revert_names_the_kiln_place() {
     check(reported("items[game:material_t1_wood_logs].maxStack was written by another writer after Kiln's layer: Kiln's revert not applied"),
           "the skipped revert names the Kiln field");
     check(!reported("Material_T1_Wood_Logs") && !reported("maxStackSize"), "no game debug or member name in the row");
+}
+
+// The drift probe (commitment 7): a value that changed outside Kiln between the stage's read (10) and Kiln's first write at
+// world load (12) is a best-effort writer row with a line, never a refusal; Kiln's relative edit composes on what the game
+// holds. Without drift no such row; an entry the stage read the same as the game has none.
+void drift_probe() {
+    world();
+    g_files = {{"bigstacks/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}},
+                                           {"registry": "items", "select": {"id": "game:material_stone"}, "field": "maxStack", "op": {"mul": 2}}]}})"}};
+    const auto files = files_of({{"bigstacks", "bigstacks/content/a.json"}});
+    stage(files);
+    mem<uint32_t>(WOOD_AT, 12);  // another DLL engine wrote the logs' stack size after resources-ready
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 48, "Kiln's x4 composes on the value the game holds");
+    check(g_last_report.refused.empty(), "drift is never a refusal");
+    const auto row = json_field({"items", "game:material_t1_wood_logs", "maxStack"});
+    check(row["writers"].size() == 2 && row["writers"][0]["kind"] == "drift" && row["writers"][0]["certainty"] == "bestEffort" &&
+              row["writers"][0]["value"] == 12 && row["writers"][1]["kind"] == "registry" && row["result"] == 48,
+          "a drift row below the registry edit: " + row.dump());
+    check(row["base"]["value"] == 10, "the base stays what the stage read");
+    const registry::Line* line = nullptr;
+    for (const registry::Line& l : g_last_report.lines)
+        if (l.field.id == "game:material_t1_wood_logs") line = &l;
+    check(line && line->certainty == registry::Certainty::BestEffort && line->kind == registry::LineKind::ComposedOn && line->winner == "bigstacks" &&
+              line->text.find("changed outside Kiln") != std::string::npos && line->text.find("best effort") != std::string::npos,
+          "one best-effort line: " + (line ? line->text : std::string("none")));
+    const auto stone = json_field({"items", "game:material_stone", "maxStack"});
+    check(stone["writers"].size() == 1 && stone["writers"][0]["kind"] == "registry", "no drift where the game holds what the stage read");
+    // a reload checks again: the drift row stays (the slot's original is the value before Kiln's first write)
+    apply_registry_files(files);
+    check(json_field({"items", "game:material_t1_wood_logs", "maxStack"})["writers"][0]["kind"] == "drift", "a reload reports it again");
+}
+// Review (registry-writers): an entry an old boot document wrote (boot_bridge.cpp's entry mark: a path no Kiln field's row
+// covers, such as a formula's input or "[*]" over a registry's elements) holds Kiln's own patch where the stage read the
+// value before it: the drift probe never calls that change another loader's. An entry no document wrote is still checked.
+void drift_probe_kiln_boot_patch() {
+    world();
+    g_files = {{"bigstacks/content/a.json",
+                R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}},
+                                           {"registry": "items", "select": {"id": "game:material_stone"}, "field": "maxStack", "op": {"mul": 2}}]}})"}};
+    const auto files = files_of({{"bigstacks", "bigstacks/content/a.json"}});
+    registry::OldWrite mark;
+    mark.kind = registry::WriterKind::OldPatch, mark.mod = "oldmod", mark.who = "oldmod/stacks", mark.field = {"items", "game:material_t1_wood_logs", ""};
+    stage(files, {}, "", {}, {mark});
+    mem<uint32_t>(WOOD_AT, 12);   // oldmod's boot patch: the game holds 12 where the stage read 10
+    mem<uint32_t>(STONE_AT, 70);  // the stone: no document wrote it, so a change there is still drift
+    apply_registry_files(files);
+    check(at<uint32_t>(WOOD_AT) == 48, "Kiln's x4 composes on the value the game holds");
+    const auto logs = json_field({"items", "game:material_t1_wood_logs", "maxStack"});
+    for (const auto& w : logs["writers"]) check(w["kind"] != "drift", "no drift row on an entry Kiln's boot patch wrote: " + logs.dump());
+    for (const registry::Line& l : g_last_report.lines)
+        check(!(l.field.id == "game:material_t1_wood_logs" && l.certainty == registry::Certainty::BestEffort), "no best-effort line there: " + l.text);
+    const auto stone = json_field({"items", "game:material_stone", "maxStack"});
+    check(!stone["writers"].empty() && stone["writers"][0]["kind"] == "drift" && stone["writers"][0]["value"] == 70,
+          "an entry no document wrote is still checked: " + stone.dump());
 }
 // P2: an explicit retained live change, reverted by handle, must compose over packs and never overtake code.
 void live_transactions() {
@@ -1061,6 +1125,8 @@ int main() {
         {"another_writer_in_the_report", another_writer_in_the_report},
         {"live_c_table", live_c_table},
         {"skipped_revert_names_the_kiln_place", skipped_revert_names_the_kiln_place},
+        {"drift_probe", drift_probe},
+        {"drift_probe_kiln_boot_patch", drift_probe_kiln_boot_patch},
         {"live_transactions", live_transactions},
         {"live_transaction_foreign_revert", live_transaction_foreign_revert},
         {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},

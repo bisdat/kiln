@@ -24,6 +24,8 @@
 #include "../../../core/src/owners_internal.h"
 #include "kiln_boot_collector.hpp"
 #include "pristine.h"
+#include "archive_journal.h"
+#include "drift.h"
 #include "entry_compat.h"
 #include "visibility.h"
 #include "services/kiln_assets.h"
@@ -36,6 +38,10 @@
 #include "stage.h"
 #include "stage_owner.h"
 #include "live_table.h"
+
+namespace kc {
+bool eml_live_generation(std::string* hex, std::string* why);  // gamedata_bootview_eml.cpp
+}
 
 namespace kc::registry::stage {
 
@@ -159,6 +165,47 @@ std::string writer_of() {
     return st.backend == KILN_LAUNCH_BACKEND_KILN ? "kiln-eml" : "none";
 }
 
+// kiln-eml's change journal of this start (archive_journal.h read_archive_journal): <kiln>/eml/ownership/<exe
+// stem>.change-journal.json, only from the game folder itself (no part of the path a symbolic link, a junction or another
+// reparse point, as kiln-eml refuses for its own writes), read and closed at once, at most 16 MiB.
+std::optional<std::string> archive_journal(std::string* generation, std::string* why) {
+    if (!eml_live_generation(generation, why)) return std::nullopt;
+    wchar_t exe[MAX_PATH * 2] = {};
+    const DWORD n = GetModuleFileNameW(nullptr, exe, static_cast<DWORD>(std::size(exe)));
+    if (n == 0 || n >= std::size(exe)) return *why = "the game's file name is not known", std::nullopt;
+    const auto reparse = [](const fs::path& p) {
+        const DWORD a = GetFileAttributesW(p.c_str());
+        return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+    };
+    return read_archive_journal(u8(api_path(KILN_PATH_KILN)), fs::path(exe).stem(), reparse, why);
+}
+
+// The drift probe's suspects (drift.h): the hook map's foreign modules and hosted ShroudForge. Once per world, no lock held.
+std::vector<std::string> drift_suspects_now() {
+    bool hosted = false;
+    if (const auto* t = g_api ? static_cast<const KilnLaunchApi*>(g_api->service(KilnStr{KILN_LAUNCH_SERVICE, sizeof(KILN_LAUNCH_SERVICE) - 1}, KILN_LAUNCH_VERSION)) : nullptr;
+        t && t->header.size >= offsetof(KilnLaunchApi, status) + sizeof(void*) && t->status) {
+        KilnLaunchStatus st{};
+        st.size = sizeof st;
+        hosted = t->status(&st) == KILN_OK && (st.backend == KILN_LAUNCH_BACKEND_HOSTED || st.backend == KILN_LAUNCH_BACKEND_INSTALLED);
+    }
+    json map;
+    const auto* hooks = g_api ? static_cast<const KilnHooksApi*>(g_api->service(KilnStr{KILN_HOOKS_SERVICE, sizeof(KILN_HOOKS_SERVICE) - 1}, 1)) : nullptr;
+    if (hooks && hooks->header.size >= offsetof(KilnHooksApi, map_json) + sizeof(void*) && hooks->map_json) {
+        size_t len = 0;
+        hooks->map_json(nullptr, 0, &len);
+        if (len > 0 && len < (size_t{64} << 20)) {
+            std::string text(len + 1, '\0');
+            size_t got = 0;
+            if (hooks->map_json(text.data(), text.size(), &got) == KILN_OK) {
+                text.resize(std::min(got, len));
+                map = json::parse(text, nullptr, false);
+            }
+        }
+    }
+    return drift_suspects(map, hosted);
+}
+
 Env make_env() {
     Env e;
     KilnBuildInfo bi{};
@@ -179,6 +226,7 @@ Env make_env() {
     e.pid = GetCurrentProcessId();
     e.now = &utc_now;
     e.writer = writer_of();
+    e.archive_journal = &archive_journal;
     e.source = [](std::string* why) -> std::unique_ptr<model::Source> {
         kiln::boot_view::LiveView& v = live_view();
         v.restart(); // each owned source is a new read generation; the prior stage/ledger source may be released
@@ -522,6 +570,7 @@ void bind_service() {
         in.rollback = h.rollback;
         in.left_out = h.left_out;
         in.on_world_thread = [](uint32_t kind) { return g_api && g_api->on_world_thread && g_api->on_world_thread(kind); };
+        in.suspects = &drift_suspects_now;
         if (!in.result.definitions.empty()) registry_entries_prepare(&in);
         const Result reconciled = in.result;
         registry_live_install(std::move(in));

@@ -77,6 +77,9 @@ struct RegistryLive {
     // The mods that plan leaves out (registry.json rollback.leftOut): their live changes are RestartRequired until the rollback
     // is cleared, like their GameStart edits.
     std::vector<std::string> left_out;
+    // The drift probe's suspects (registry/drift.h): asked once per world at registry_live_world_begin, with no lock of
+    // kiln.content's held. Unset: none are named.
+    std::function<std::vector<std::string>()> suspects;
 };
 
 // One pack file's "registry" section, lowered (packs.cpp registry_sections).

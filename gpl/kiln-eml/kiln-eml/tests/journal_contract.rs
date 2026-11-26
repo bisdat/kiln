@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! The startup change journal's contract with Kiln's registry stage, which reads the file format only (MIT code:
+//! native/services/content/registry/archive_journal.cpp). kiln-eml's own writer (`sf_startup::journal`: the recorder of a
+//! pass and `Journal::json`) makes the record of one fixed pass, and it must be byte for byte the fixture
+//! `schema/sfi/eml-journal/fixtures/kiln-eml-writer.json`, which the native reader's host test
+//! (native/services/content/tests/registry_writers_test.cpp) reads and names entries from. So a change of the writer's
+//! output fails here, with the new record printed, until the fixture is made again from it; the reader's test then says
+//! whether Kiln still reads it. The GUIDs are given as the game's key bytes: their text is what Kiln's id table holds for
+//! the same bytes (keen::Guid's Windows layout, printed the usual way).
+use kfc::guid::{ContentHash, Guid, ResourceId};
+use kiln_eml::sf_startup::journal::{Header, Identity, Recorder};
+
+/// The game's 16 key bytes of the GUID whose text is `text` (data1, data2, data3 little-endian, the rest as written).
+fn key(text: &str) -> Guid {
+    let hex: Vec<u8> = text
+        .split('-')
+        .flat_map(|g| (0..g.len()).step_by(2).map(move |i| u8::from_str_radix(&g[i..i + 2], 16).unwrap()))
+        .collect();
+    let mut b = [0u8; 16];
+    b[..4].copy_from_slice(&[hex[3], hex[2], hex[1], hex[0]]);
+    b[4..6].copy_from_slice(&[hex[5], hex[4]]);
+    b[6..8].copy_from_slice(&[hex[7], hex[6]]);
+    b[8..].copy_from_slice(&hex[8..]);
+    Guid::from(b)
+}
+
+const ITEM_TYPE: u32 = 0x5c3f_0e21;
+const STONE: &str = "1d622bd9-8170-41b1-822e-d3984b386d95";
+const LOGS: &str = "aaaaaaaa-0000-4000-8000-000000000001";
+const CREATED: &str = "5d2f8a90-1c3b-4e7f-9a12-6b4c8d0e2f13";
+const EXPLICIT: &str = "0e0e0e0e-1111-4222-8333-444444444444";
+const BALANCE: &str = "82706b40-61b1-4b8f-8b23-dcec6971bda1";
+
+fn fixture_path() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../schema/sfi/eml-journal/fixtures/kiln-eml-writer.json")
+}
+
+/// One pass: a write before any entrypoint; "alpha" (ShroudForge) writes the stone and the balance table, creates an item
+/// at random and one with its own GUID, and a content; "bravo" (an EML package of the pass) writes the stone and alpha's
+/// first creation; "charlie" changes nothing.
+fn record() -> String {
+    let r = Recorder::default();
+    r.wrote(ResourceId::new(key(LOGS), ITEM_TYPE, 0));
+    r.begin("alpha");
+    r.wrote(ResourceId::new(key(STONE), ITEM_TYPE, 0));
+    r.wrote(ResourceId::new(key(BALANCE), 0x0123_4567, 0));
+    r.created(ResourceId::new(key(CREATED), ITEM_TYPE, 0), false);
+    r.created(ResourceId::new(key(EXPLICIT), ITEM_TYPE, 1), true);
+    r.content(ContentHash::from_data(b"kiln"));
+    r.end();
+    r.begin("bravo");
+    r.wrote(ResourceId::new(key(STONE), ITEM_TYPE, 0));
+    r.wrote(ResourceId::new(key(CREATED), ITEM_TYPE, 0));
+    r.end();
+    r.begin("charlie");
+    r.end();
+    let header = Header {
+        stem: "enshrouded_server",
+        generation: [0xab; 32],
+        receipt_sha256: [0xcd; 32],
+        dialect: "shroudforge",
+        attempt: "first",
+    };
+    let identity = |id: &str| {
+        Some(Identity {
+            version: (id != "charlie").then(|| "1.2.0".to_string()),
+            kind: if id == "bravo" { "eml" } else { "shroudforge" },
+            content_sha256: [0x11; 32],
+            settings_sha256: [0x22; 32],
+        })
+    };
+    r.take().json(&header, &identity)
+}
+
+#[test]
+fn the_writer_makes_the_record_kilns_reader_is_tested_on() {
+    let made = record();
+    let kept = std::fs::read_to_string(fixture_path()).unwrap_or_default();
+    assert!(
+        made == kept.trim_end(),
+        "kiln-eml's journal record is no longer the fixture Kiln's reader is tested on ({}).\nMake the fixture this \
+         one line and run the native registry_writers test:\n{made}",
+        fixture_path().display()
+    );
+}

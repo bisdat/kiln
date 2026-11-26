@@ -40,7 +40,9 @@ json writer_json(const ChainRow& r, size_t list_cap) {
     if (r.element.on)
         w["element"] = r.element.list + "[" + (r.element.all ? std::string("*") : std::to_string(r.element.index)) + "]" +
                        (r.element.leaf.empty() ? "" : "." + r.element.leaf);
-    if (r.list == ListOp::None) {
+    if (r.kind == WriterKind::ArchiveWriter) {
+        // no op: kiln-eml's journal names the entry's resource, not what the package did to this field (archive_journal.h)
+    } else if (r.list == ListOp::None) {
         if (r.op.set) write_value(w, "op", r.op.value, "opEntriesLeftOut", list_cap);
         else w["op"] = r.op.to_json();
     } else if (r.list == ListOp::Clear) {
@@ -51,7 +53,8 @@ json writer_json(const ChainRow& r, size_t list_cap) {
         if (r.list_values.size() > list_cap) w["listEntriesLeftOut"] = r.list_values.size() - list_cap;
     }
     write_value(w, "value", r.after, "valueEntriesLeftOut", list_cap);
-    w["certainty"] = r.kind == WriterKind::ArchiveWriter ? "named" : "certain";  // the check's own rows too: Kiln's
+    // the check's own rows too are Kiln's: certain; a package from the journal: named; the drift probe: best effort
+    w["certainty"] = r.kind == WriterKind::ArchiveWriter ? "named" : r.kind == WriterKind::Drift ? "bestEffort" : "certain";
     return w;
 }
 
@@ -75,6 +78,12 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
     doc["regmap"]["record"] = meta.regmap.record.empty() ? json(nullptr) : json(meta.regmap.record);
     doc["base"] = {{"origin", meta.base.origin}, {"writer", meta.base.writer}};
     if (!meta.base.token.empty()) doc["base"]["token"] = meta.base.token;
+    {
+        const auto& jr = meta.base.journal;
+        json journal = {{"state", jr.state}, {"packages", jr.packages}, {"entries", jr.entries}, {"truncated", jr.truncated}};
+        if (!jr.text.empty()) journal["text"] = jr.text;
+        doc["base"]["journal"] = std::move(journal);
+    }
     json order = json::array();
     for (const ReportMeta::Order& o : meta.order) {
         json row = {{"mod", o.mod}, {"version", o.version}};

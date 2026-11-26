@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: MIT
+// kiln.content registry stage: which archive-writer package wrote which game entry before Kiln (commitment 7, D1).
+//
+// kiln-eml keeps a change journal of its kiln-mode ShroudForge-dialect startup pass beside its ownership receipt:
+// <game>/kiln/eml/ownership/<stem>.change-journal.json (schema/sfi/eml-journal/startup-journal.schema.json, format 1).
+// Per package of the committed attempt, in run order (ShroudForge packages and EML packages the pass ran), the archive
+// resources its entrypoint wrote and the ones it created, by resource key (GUID, type hash, part); never a value. This
+// reader takes that record (Kiln's own code over the documented file format; nothing of kiln-eml's source) and names each
+// package on the registry entries whose resource it lists, so the report says "<package> (ShroudForge) wrote this before
+// Kiln's edit; Kiln's edit wins (D1)" instead of nothing.
+//
+// What it can and cannot say:
+//  - the journal is per resource: a package is named on every field of an entry whose resource it wrote, whatever member
+//    it changed. "Wrote" means written, not changed (writing a field's current value lists the resource too). The journal
+//    can over-name a writer, never miss one, within its bounds;
+//  - only a registry whose entries are each one whole resource (regmap entries kind resource or single: items, drops,
+//    balance) can be named from it. An entry of a registry whose entries are the elements of a shared resource (kind
+//    array: recipes, loot) is never named: the journal lists the shared resource, not which element a package wrote, and
+//    an element's own GUID member (recipeGuid) is no resource key, so matching it could name a package that never wrote it;
+//  - a journal is used only when its generation is the start's live generation (the kiln-mode startup outcome's
+//    archiveSha256): a writer that ignores the receipt (hosted ShroudForge, another loader) can leave one behind that
+//    names another generation. Such a journal is "stale" and names nobody;
+//  - only kiln-mode starts write one. Hosted or installed ShroudForge, kiln-eml's own EML dialect and other loaders keep
+//    none: their pregame values are in the base and the report says no journal named them (Journal::state).
+// Plain data apart from read_archive_journal (one file): no game memory, no lock.
+#pragma once
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <map>
+#include <optional>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "compose.h"
+
+namespace kc::registry {
+
+struct ArchiveJournal {
+    // read: this start's journal, bound to its live generation; none: this start has none (the text says why); stale: one
+    // for another generation; unreadable: the file is not a format-1 journal (the text says what is wrong).
+    std::string state = "none";
+    std::string text;
+    std::string dialect;  // "shroudforge"
+    bool truncated = false;
+    struct Package {
+        std::string id, version, kind;  // kind "shroudforge" | "eml"
+        std::vector<std::string> changed, created;  // resource GUIDs, lower case, as the game prints them
+        bool truncated = false;
+    };
+    std::vector<Package> packages;  // in run order
+    Package unattributed;           // id empty: writes made while no entrypoint ran
+};
+
+// The largest journal read: kiln-eml reads its own at most this big (StartupJournal::read), and its bounds keep one far
+// below (32,768 rows in all).
+constexpr uintmax_t kArchiveJournalMax = 16u << 20;
+
+// The journal's text, read only from the game folder itself as kiln-eml writes it (kiln-eml refuses a linked archive or
+// state path): <kiln>/eml/ownership/<stem>.change-journal.json, where kiln is <game>/kiln. nullopt + *why when there is
+// none, when the kiln folder, eml, ownership or the file is a link (is_link: a symbolic link, a junction or any other
+// reparse point), when it is no regular file, larger than kArchiveJournalMax, or unreadable. Read and closed at once (an
+// open handle can make the next kiln-mode start fail to remove it).
+using ArchiveLinkTest = std::function<bool(const std::filesystem::path&)>;
+std::optional<std::string> read_archive_journal(const std::filesystem::path& kiln, const std::filesystem::path& stem, const ArchiveLinkTest& is_link,
+                                                std::string* why);
+
+// The journal's text against the generation this start's archive writer published (lower-case hex, 64 digits). Never
+// throws: a malformed file is state "unreadable" with the reason. A package must be named as the format says (a ShroudForge
+// identifier, kind "shroudforge" or "eml", each id once): a journal that names one otherwise names nobody.
+ArchiveJournal parse_archive_journal(const std::string& text, const std::string& live_generation);
+
+// What the report calls a package: "shroudforge:<id>" / "eml:<id>"; "kiln-eml:unattributed" for the unattributed bucket.
+inline std::string archive_writer_who(const std::string& kind, const std::string& id) {
+    return id.empty() ? std::string("kiln-eml:unattributed") : (kind == "eml" ? "eml:" : "shroudforge:") + id;
+}
+// For messages: "<id> (ShroudForge package)", "<id> (EML package)", "a startup write no package made (kiln-eml)".
+inline std::string archive_writer_label(const std::string& who) {
+    if (who == "kiln-eml:unattributed") return "a startup write no package made (kiln-eml)";
+    if (who.rfind("eml:", 0) == 0) return who.substr(4) + " (EML package)";
+    if (who.rfind("shroudforge:", 0) == 0) return who.substr(12) + " (ShroudForge package)";
+    return who;
+}
+
+// Names the journal's packages on the base's game entries: every entry of a registry in `whole` (its entries are each one
+// whole resource, so the id table's GUID is the resource's) whose GUID (ids: "<registry>|<kiln id>" -> GUID text, the
+// model's id table) a package wrote or created gets that package, in run order (BaseModel::Entry::archive). An entry of
+// any other registry is never named. Returns how many entries were named.
+size_t name_archive_writers(const ArchiveJournal& journal, const std::map<std::string, std::string>& ids, const std::set<std::string>& whole,
+                            BaseModel* base);
+
+}  // namespace kc::registry

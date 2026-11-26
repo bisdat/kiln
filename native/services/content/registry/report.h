@@ -35,6 +35,13 @@ struct ReportMeta {
     // writer of this start ("kiln-eml", "shroudforge-hosted", "external", "none") and its token.
     struct Base {
         std::string origin = "live", writer = "none", token;
+        // The archive writer's change journal (archive_journal.h): read (its packages are named on the entries they wrote),
+        // none, stale or unreadable, with a sentence for players; how many packages it lists and entries it named.
+        struct Journal {
+            std::string state = "none", text;
+            size_t packages = 0, entries = 0;
+            bool truncated = false;
+        } journal;
     } base;
     struct Order {
         std::string mod, version, edits_hash;

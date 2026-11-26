@@ -6,6 +6,7 @@
 // game recipe removed with the item it needs, registry.json and its phases, the id table and the plan written to the data
 // folder, a second start from the cache giving the same registry.json, Kiln.Host's order, a native stage callback's edits,
 // the registry's writes on a resource's bytes after the old documents.
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -1102,6 +1103,171 @@ void other_mapping_report(const std::string& dir) {
     check(rep["regmap"]["verified"] == false && rep["regmap"]["record"].is_string(), "registry.json: a record of another mapping is not verified");
 }
 
+// kiln-eml's change journal of this start names the package that wrote the plank before Kiln (archive_journal.h): its row
+// lies below the registry edits, named, and the conflict line says the registry edit wins (D1); a journal of another
+// generation names nobody and registry.json says why; without one, base.journal says this start has none.
+void archive_journal_writers(const std::string& dir) {
+    auto journal = [](const std::string& generation) {
+        return json{{"format", 1}, {"stem", "enshrouded_server"}, {"generation", generation}, {"receiptSha256", std::string(64, 'b')},
+                    {"dialect", "shroudforge"}, {"attempt", "first"}, {"truncated", false},
+                    {"packages", json::array({{{"id", "betterstacks"}, {"version", "1.0.0"}, {"kind", "shroudforge"},
+                                               {"contentSha256", std::string(64, '1')}, {"settingsSha256", std::string(64, '2')}, {"truncated", false},
+                                               {"changed", json::array({{{"guid", g(2)}, {"typeHash", "8c3dbe3d"}, {"part", 0}, {"createdBy", nullptr}}})},
+                                               {"created", json::array()}, {"contents", json::array()}}})},
+                    {"unattributed", {{"truncated", false}, {"changed", json::array()}, {"created", json::array()}, {"contents", json::array()}}}}
+            .dump();
+    };
+    const std::string live = std::string(64, 'a');
+    for (const std::string& written : {live, std::string(64, 'c'), std::string()}) {
+        TreeView view = world();
+        Files files;
+        stage::Env e = env_of(&view, &files, dir, &sections);
+        e.writer = "kiln-eml";
+        if (!written.empty())
+            e.archive_journal = [&](std::string* generation, std::string*) -> std::optional<std::string> { return *generation = live, journal(written); };
+        stage::Runner r(std::move(e));
+        const auto docs = old_patch();
+        const auto boot = r.run([&](model::Model& m) { return boothook::old_writes(docs, m); });
+        r.finish({{boot.at(0).fields.at(0).field, true, Value::integer(60), ""}});
+        const json rep = json::parse(files.report);
+        const json* plank = nullptr;
+        for (const json& f : rep["fields"])
+            if (f["id"] == "game:plank" && f["field"] == "maxStack") plank = &f;
+        check(plank != nullptr, "the plank's maxStack row");
+        bool line = false;
+        for (const json& c : rep["conflicts"])
+            line = line || (c["loser"] == "shroudforge:betterstacks" && c["certainty"] == "named" &&
+                            c["text"].get<std::string>().find("betterstacks (ShroudForge package) wrote this entry") != std::string::npos);
+        if (written == live) {
+            check(rep["base"]["journal"]["state"] == "read" && rep["base"]["journal"]["entries"] == 1, "base.journal: read, one entry named: " + rep["base"].dump());
+            check((*plank)["writers"][0]["kind"] == "archiveWriter" && (*plank)["writers"][0]["who"] == "shroudforge:betterstacks" &&
+                      (*plank)["writers"][0]["certainty"] == "named" && (*plank)["writers"][0]["value"] == 20 && (*plank)["result"] == 160,
+                  "the package is the plank's first writer, named, at the base value; the registry's x4 x2 still give 160: " + plank->dump());
+            check(line, "a conflict line names the package and says the registry edit wins: " + rep["conflicts"].dump());
+            bool other = false;
+            for (const json& f : rep["fields"])
+                for (const json& w : f["writers"]) other = other || (f["id"] != "game:plank" && w["kind"] == "archiveWriter");
+            check(!other, "no other entry names the package");
+        } else {
+            check((*plank)["writers"][0]["kind"] == "registry" && !line, "no package is named");
+            const std::string state = rep["base"]["journal"]["state"];
+            check(written.empty() ? state == "none" : state == "stale", "base.journal says why nothing is named: " + rep["base"].dump());
+            bool warned = false;
+            for (const std::string& l : files.log) warned = warned || (l.rfind("1 ", 0) == 0 && l.find("another generation") != std::string::npos);
+            check(written.empty() || warned, "a stale journal is a warning in kiln.log");
+        }
+    }
+}
+
+// Review (registry-writers): the journal lists resources by their key, so only a registry whose entries are each a whole
+// resource (items, drops, balance) can be named from it. A recipe is an element of the shared RecipeRegistryResource: its
+// recipeGuid is a member, not a resource key, so a package that wrote a resource with that GUID never wrote the recipe,
+// and a package that wrote the recipe list cannot be pinned on one recipe. Neither names the recipe; base.journal says so.
+std::vector<stage::Env::DataFile> recipe_sections(const Schema& schema) {
+    const std::string fast = R"({"registry": {"alter": [{"registry": "recipes", "select": {"id": "game:craft_planks"}, "field": "duration", "op": 1}]}})";
+    return stage::read_sections("bigmod", "2.0.0", {{"content/r.json", fast}}, schema);
+}
+void archive_journal_shared_resources(const std::string& dir) {
+    const std::string live = std::string(64, 'a');
+    // "other" wrote a resource whose GUID is the recipe's recipeGuid (g(101)); "lists" wrote the recipe list itself (g(100))
+    const std::string journal =
+        json{{"format", 1}, {"stem", "enshrouded_server"}, {"generation", live}, {"receiptSha256", std::string(64, 'b')}, {"dialect", "shroudforge"},
+             {"attempt", "first"}, {"truncated", false},
+             {"packages", json::array({{{"id", "other"}, {"version", "1.0.0"}, {"kind", "shroudforge"}, {"contentSha256", std::string(64, '1')},
+                                        {"settingsSha256", std::string(64, '2')}, {"truncated", false},
+                                        {"changed", json::array({{{"guid", g(101)}, {"typeHash", "01234567"}, {"part", 0}, {"createdBy", nullptr}}})},
+                                        {"created", json::array()}, {"contents", json::array()}},
+                                       {{"id", "lists"}, {"version", "1.0.0"}, {"kind", "shroudforge"}, {"contentSha256", std::string(64, '3')},
+                                        {"settingsSha256", std::string(64, '4')}, {"truncated", false},
+                                        {"changed", json::array({{{"guid", g(100)}, {"typeHash", "89abcdef"}, {"part", 0}, {"createdBy", nullptr}}})},
+                                        {"created", json::array()}, {"contents", json::array()}}})},
+             {"unattributed", {{"truncated", false}, {"changed", json::array()}, {"created", json::array()}, {"contents", json::array()}}}}
+            .dump();
+    TreeView view = world();
+    Files files;
+    stage::Env e = env_of(&view, &files, dir, &recipe_sections);
+    e.writer = "kiln-eml";
+    e.archive_journal = [&](std::string* generation, std::string*) -> std::optional<std::string> { return *generation = live, journal; };
+    stage::Runner r(std::move(e));
+    r.run({});
+    r.finish({});
+    const json rep = json::parse(files.report);
+    const json* duration = nullptr;
+    for (const json& f : rep["fields"])
+        if (f["id"] == "game:craft_planks" && f["field"] == "duration") duration = &f;
+    check(duration != nullptr, "the recipe's duration row: " + rep["fields"].dump());
+    for (const json& w : (*duration)["writers"]) check(w["kind"] != "archiveWriter", "no package is named on a recipe: " + duration->dump());
+    for (const json& c : rep["conflicts"]) check(c["certainty"] != "named", "no named conflict line on a recipe: " + c.dump());
+    check(rep["base"]["journal"]["state"] == "read" && rep["base"]["journal"]["entries"] == 0, "the journal is read and names no entry: " + rep["base"].dump());
+    check(rep["base"]["journal"]["text"].get<std::string>().find("recipes") != std::string::npos,
+          "base.journal says recipes cannot be named from it: " + rep["base"].dump());
+}
+
+// Review (registry-writers): old_writes marks every entry an old boot document writes (an OldPatch row with no field),
+// also where no Kiln field's row covers the path ("[*]" over the recipes, a formula's input): the live drift probe takes a
+// change there for Kiln's own patch. Composition skips the marks; an entry no document writes has none.
+void old_writes_marks(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &recipe_sections));
+    boothook::OldDoc faster;
+    faster.mod = "oldmod", faster.key = "faster";
+    faster.res = key_of(g(100), "keen::RecipeRegistryResource"), faster.type = "keen::RecipeRegistryResource";
+    faster.sets = {{"recipes[*].craftingDuration", {{"mul", 0.5}}}};
+    boothook::OldDoc hits;
+    hits.mod = "oldmod", hits.key = "hits";
+    hits.res = key_of(g(2), "keen::ItemInfo"), hits.type = "keen::ItemInfo";
+    hits.sets = {{"damageSetup.dmgMod", 2.0}};
+    std::vector<OldWrite> got;
+    r.run([&](model::Model& m) { return got = boothook::old_writes({faster, hits}, m); });
+    r.finish({});
+    auto marked = [&](const std::string& reg, const std::string& id) {
+        return std::any_of(got.begin(), got.end(), [&](const OldWrite& w) {
+            return w.kind == WriterKind::OldPatch && w.field.registry == reg && w.field.id == id && w.field.field.empty() && w.who.rfind("oldmod/", 0) == 0;
+        });
+    };
+    check(marked("recipes", "game:craft_planks"), "a \"[*]\" document over the recipes marks the recipe");
+    check(marked("items", "game:plank"), "a formula input's path marks the item");
+    check(!marked("items", "game:material_t1_wood_logs"), "an item no document writes is not marked");
+    const json rep = json::parse(files.report);
+    for (const json& f : rep["fields"])
+        for (const json& w : f["writers"]) check(!(w["kind"] == "oldPatch" && f["field"] == ""), "a mark is never a chain row: " + f.dump());
+    check(!rep["fields"].empty() && rep["refused"].empty(), "the recipe edit still composes: " + rep.dump().substr(0, 600));
+}
+
+// Review (registry-writers): an old document's element path ("recipes[0]...") names an element of ITS resource. With two
+// resources of the registry's type (two recipe lists; the model reads the first one's elements as the registry's entries),
+// element 0 of the second list is not the first list's recipe 0: no row of that document lies on game:craft_planks.
+void old_writes_element_of_its_resource(const std::string& dir) {
+    TreeView view = world();
+    json in = {{"itemStack", {{"item", 1001}, {"itemRef", g(1)}, {"count", 1}}}, {"inputItemCategory", {{"category", 0}, {"categoryRef", "none"}, {"count", 0}}}};
+    view.add("keen::RecipeRegistryResource", g(110),
+             {{"recipes", json::array({{{"debugName", "Craft_Logs"}, {"recipeGuid", g(111)}, {"recipeId", 5002}, {"input", json::array({in})},
+                                        {"output", json::array({{{"item", 1001}, {"itemRef", g(1)}, {"count", 1}}})}, {"craftingDuration", 4.0}}})},
+              {"inputCategories", json::array()}});
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &recipe_sections));
+    boothook::OldDoc slow;
+    slow.mod = "oldmod", slow.key = "slow";
+    slow.res = key_of(g(110), "keen::RecipeRegistryResource"), slow.type = "keen::RecipeRegistryResource";
+    slow.sets = {{"recipes[0].craftingDuration", 9.0}};
+    std::vector<OldWrite> got;
+    r.run([&](model::Model& m) { return got = boothook::old_writes({slow}, m); });
+    r.finish({});
+    bool logs = false, planks = false;
+    for (const OldWrite& w : got)
+        if (w.field.field == "duration") {
+            if (w.field.id == "game:craft_logs") logs = true;
+            if (w.field.id == "game:craft_planks") planks = true;
+        }
+    check(!planks, "the second list's recipe 0 is not the first list's: no row on game:craft_planks");
+    check(!logs, "the second list's recipes are no registry entries (the first list is read)");
+    for (const OldWrite& w : got) check(w.field.id != "game:craft_planks", "nothing of the document is on the other list's recipe: " + w.field.text());
+    const json rep = json::parse(files.report);
+    for (const json& f : rep["fields"])
+        for (const json& w : f["writers"]) check(w["kind"] != "oldPatch", "no old patch row in registry.json: " + f.dump());
+}
+
 int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
@@ -1120,7 +1286,11 @@ int main(int argc, char** argv) {
         {"rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage", [&] { rollback_plan_lowering_a_stack_asks_the_guard_at_the_stage(dir); }},
         {"an_unreadable_index_is_kept_and_reported", [&] { an_unreadable_index_is_kept_and_reported(dir); }},
         {"migrated_names_of_a_callback_turn", [&] { migrated_names_of_a_callback_turn(dir); }},
-        {"a_start_without_a_base_is_not_a_good_plan", [&] { a_start_without_a_base_is_not_a_good_plan(dir); }}};
+        {"a_start_without_a_base_is_not_a_good_plan", [&] { a_start_without_a_base_is_not_a_good_plan(dir); }},
+        {"archive_journal_writers", [&] { archive_journal_writers(dir); }},
+        {"archive_journal_shared_resources", [&] { archive_journal_shared_resources(dir); }},
+        {"old_writes_marks", [&] { old_writes_marks(dir); }},
+        {"old_writes_element_of_its_resource", [&] { old_writes_element_of_its_resource(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();

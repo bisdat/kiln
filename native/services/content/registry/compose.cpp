@@ -2,6 +2,8 @@
 // kiln.content registry stage: composition and conflicts (compose.h).
 #include "compose.h"
 
+#include "archive_journal.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -24,6 +26,7 @@ std::string report_value_text(const Value& v) {
 const char* writer_kind_name(WriterKind k) {
     switch (k) {
         case WriterKind::ArchiveWriter: return "archiveWriter";
+        case WriterKind::Drift: return "drift";
         case WriterKind::OldPatch: return "oldPatch";
         case WriterKind::OldPack: return "oldPack";
         case WriterKind::Code: return "code";
@@ -168,7 +171,20 @@ struct EntryState {
     bool added = false;  // a mod's entry: its raw members are its like entry's
     std::string like;
     bool retired = false;  // the ids ledger retired this id: never added again, never edited
+    std::vector<std::string> archive;  // BaseModel::Entry::archive: the archive-writer packages that wrote it (a game entry only)
 };
+
+// An archive-writer package's row of a field: what the archive holds, which is the base (D1). Never "another writer" for
+// exclusive or yield (note_row), but the row a registry edit's line names when it is the one just below.
+ChainRow archive_row(const std::string& who, const Value& base) {
+    ChainRow r;
+    r.kind = WriterKind::ArchiveWriter;
+    r.who = who;
+    r.op.set = true;
+    r.op.value = base;
+    r.after = base;
+    return r;
+}
 
 // Entry maps looked up by (registry, id) views: no string is copied to ask.
 struct EntryKey {
@@ -245,7 +261,15 @@ struct State {
         auto [it, fresh] = fields.try_emplace(f);
         if (fresh) {
             if (const FieldOutcome* p = parent ? parent->find_field(f) : nullptr) it->second = *p;
-            else it->second.result = it->second.base = base_of(f);
+            else {
+                it->second.result = it->second.base = base_of(f);
+                // the packages that wrote the entry before Kiln, below every Kiln writer (archive_journal.h). The journal names
+                // the entry, not the field: no package is the field's winner (with no Kiln writer the archive's value, the
+                // base, stands)
+                const EntryState* e = entry(f.registry, f.id);
+                if (e && !e->added && it->second.base.kind != Value::None)
+                    for (const std::string& who : e->archive) it->second.chain.push_back(archive_row(who, it->second.base));
+            }
         }
         return it->second;
     }
@@ -497,7 +521,9 @@ struct Target {
 
 bool absolute(const Target& t) { return t.elem() ? false : t.list == ListOp::None ? t.op().set : (t.list == ListOp::Clear || t.list == ListOp::Replace); }
 bool absolute(const ChainRow& r) { return r.element.on ? false : r.list == ListOp::None ? r.op.set : (r.list == ListOp::Clear || r.list == ListOp::Replace); }
-Certainty certainty_of(WriterKind k) { return k == WriterKind::ArchiveWriter ? Certainty::Named : Certainty::Certain; }
+Certainty certainty_of(WriterKind k) {
+    return k == WriterKind::ArchiveWriter ? Certainty::Named : k == WriterKind::Drift ? Certainty::BestEffort : Certainty::Certain;
+}
 
 // The place a target names, for messages: "items[game:x].maxStack", "items[game:x].damageSetup.dmgMod (raw)".
 std::string place_text(const Target& t) {
@@ -600,6 +626,10 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         // older path is no conflict with itself)
         auto other = [&](const ChainRow& r) { return r.mod != w.mod || r.mod.empty(); };
         const ChainRow* prev = fo && !fo->chain.empty() ? &fo->chain.back() : nullptr;  // the row just before this edit
+        ChainRow seed;  // a field not touched yet: its archive rows come with the touch, so the last package is the row below
+        if (!fo)
+            if (const EntryState* es = s.entry(t.ref.registry, t.ref.id); es && !es->added && !es->archive.empty() && cur.kind != Value::None)
+                seed = archive_row(es->archive.back(), cur), prev = &seed;
         const ChainRow* last_other = other_row(fo, w.mod, false);  // the latest other writer that is not the archive writer (base, D1)
         const ChainRow* excl = other_row(fo, w.mod, true);         // the latest other writer whose edit is exclusive
         const bool earlier = last_other != nullptr;                // an earlier writer for yield: not the archive writer, not the mod itself
@@ -689,7 +719,11 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         fo.winner = w.mod;
         if (report && st.line) {
             const std::string place = place_text(t), was = report_value_text(before), now = report_value_text(st.next);
-            std::string text = st.kind == LineKind::Overridden ? cat({place, ": ", w.mod, " sets ", now, " over ", st.other, "'s ", was, " (the later one wins)"})
+            // an archive-writer package below: the journal names the entry's resource, not the field (archive_journal.h)
+            std::string text = st.certainty == Certainty::Named
+                                   ? cat({place, ": ", archive_writer_label(st.other), " wrote this entry in the game's archive before Kiln; ", w.mod,
+                                          "'s edit wins (D1): ", was, " -> ", now})
+                               : st.kind == LineKind::Overridden ? cat({place, ": ", w.mod, " sets ", now, " over ", st.other, "'s ", was, " (the later one wins)"})
                                : st.kind == LineKind::ComposedOn ? cat({place, ": ", w.mod, "'s change composed on ", st.other, "'s value: ", was, " -> ", now})
                                                                  : cat({place, ": ", w.mod, "'s change stacks on ", st.other, "'s: ", was, " -> ", now});
             c.out.lines.push_back({st.kind, t.ref, w.mod, st.other, std::move(text), st.certainty});
@@ -1296,10 +1330,13 @@ void check_references(Ctx& c, State& s, bool fields_only = false) {
                 if (!dropped_mods.empty()) {
                     resummarize(fo);
                     fo.result = v;
-                    fo.winner = fo.chain.empty() ? std::string() : fo.chain.back().who;
+                    // the winner is the last Kiln writer left; archive-writer packages (named per entry) never are one, and
+                    // a field only they are left on is no touched field any more
+                    const auto last = std::find_if(fo.chain.rbegin(), fo.chain.rend(), [](const ChainRow& r) { return r.kind != WriterKind::ArchiveWriter; });
+                    fo.winner = last == fo.chain.rend() ? std::string() : last->who;
                     // a conflict line naming an edit taken out no longer holds
                     std::erase_if(c.out.lines, [&](const Line& l) { return l.field == fr && (dropped_mods.count(l.winner) || dropped_mods.count(l.loser)); });
-                    if (fo.chain.empty()) s.fields.erase(it);
+                    if (last == fo.chain.rend()) s.fields.erase(it);
                 }
             }
             // 2: a game entry acts only on what the stage took away (an entry a mod removed, a retired id, one the game build
@@ -1416,6 +1453,7 @@ static State base_state(const BaseModel& base) {
             x.removed_in = e.removed_in;
             x.removed = !e.removed_in.empty();
             x.removed_by = e.removed_in.empty() ? "" : "game build " + e.removed_in;
+            x.archive = e.archive;
             s.add_entry(reg, std::move(x));
         }
     // retired ids ("<registry>|<id>") hold their place, removed: an add of one is refused as taken, an edit as missing

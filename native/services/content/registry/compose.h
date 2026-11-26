@@ -55,6 +55,10 @@ struct BaseModel {
         std::string removed_in;  // not empty: the alias ledger says this game build removed it
         // Internal flattened stack ranges, one per drop group. Never part of schema fields or author-facing values.
         std::vector<std::pair<size_t, size_t>> drop_groups;
+        // The archive-writer packages that wrote or created this entry's resource before Kiln, in the order they ran
+        // ("shroudforge:<id>", "eml:<id>"; archive_journal.h). Each touched field of the entry gets one ArchiveWriter row
+        // per package at the bottom of its chain, valued at the base (the archive's bytes are the base, D1).
+        std::vector<std::string> archive;
     };
     std::map<std::string, std::vector<Entry>> registries;  // entries in the registry's own order
     std::set<std::string> retired;                          // "<registry>|<id>" the ids ledger retired: never added again
@@ -73,8 +77,9 @@ struct BaseModel {
 };
 
 // Check: the stage's reference check itself (a list element naming an entry the stage removed, taken out of an entry of a
-// registry whose entries are not removed).
-enum class WriterKind : uint8_t { ArchiveWriter, OldPatch, OldPack, Code, Registry, Check };
+// registry whose entries are not removed). Drift: the live back-end's best-effort drift probe (drift.h): the game's value
+// changed outside Kiln and no writer Kiln knows explains it (never composed; a report row only).
+enum class WriterKind : uint8_t { ArchiveWriter, OldPatch, OldPack, Code, Registry, Check, Drift };
 const char* writer_kind_name(WriterKind k);
 
 // A write below the registry: an old Kiln path, or an archive-writer package the journal names (D1).
@@ -82,6 +87,9 @@ struct OldWrite {
     WriterKind kind = WriterKind::OldPatch;
     std::string mod;  // the Kiln mod behind it (empty for an archive-writer package)
     std::string who;  // "<mod>/<key>", "<mod>: content/<file>", "shroudforge:<package>"
+    // field.field empty: an entry mark (boot_bridge.cpp old_writes), not a write: an old boot document wrote this entry,
+    // whatever its paths map to. Composition skips it; the live drift probe (drift.h) never calls a change there another
+    // loader's.
     FieldRef field;
     Op op;
     ListOp list = ListOp::None;  // a list write (op unused): clear, append, remove, replace

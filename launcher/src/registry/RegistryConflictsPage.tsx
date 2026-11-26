@@ -39,6 +39,7 @@ function RegistryFor({ gameId }: { gameId: string }) {
         {stale && <Banner tone="warn" title={t("registry.stale")}>{t("registry.staleBody", { reason: stale })}</Banner>}
         <Card title={t("registry.snapshot")} sub={t("registry.snapshotSub", { time: new Date(r.written).toLocaleString(language), generation: r.generation, phase: r.phase })}>
           <p>{t("registry.baseOrigin", { origin: r.baseOrigin })}</p><p>{t("registry.archiveWriter", { writer: r.baseWriter })}</p>
+          {r.journal && <p className="registry-journal">{r.journal}</p>}
           {!r.verified && <Banner tone="warn" title={t("registry.unverified")}>{t("registry.unverifiedBody")}</Banner>}
           <p className="registry-hint">{t("registry.certaintyHint")}</p>
         </Card>

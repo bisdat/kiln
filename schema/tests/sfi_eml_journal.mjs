@@ -179,6 +179,18 @@ for (const [what, ok] of [
   ['unattributed', records.some(r => r.unattributed.changed.length > 0)]]) {
   assert(ok, `a fixture with ${what}`); ++assertions;
 }
+// kiln-eml's own record of a fixed pass (gpl/kiln-eml/kiln-eml/tests/journal_contract.rs fails unless it is byte for byte
+// what the writer makes; Kiln's native reader is tested on it, native/services/content/tests/registry_writers_test.cpp):
+// valid, in field order (raw text), the rules kept.
+{
+  const raw = text('../sfi/eml-journal/fixtures/kiln-eml-writer.json').trimEnd();
+  const record = JSON.parse(raw);
+  assert(validate(record), `kiln-eml-writer.json: ${JSON.stringify(validate.errors)}`); ++assertions;
+  rules(record, 'kiln-eml-writer.json');
+  let at = 0;
+  for (const field of ORDER) { const i = raw.indexOf(`"${field}":`, at); assert(i >= at, `kiln-eml-writer.json: ${field}`); at = i; }
+  ++assertions;
+}
 // The journals kiln-eml's tests wrote (EML_JOURNAL_OUT), when given: valid, in field order (raw text), the rules kept.
 let written = 0;
 if (process.env.EML_JOURNAL_DIR) {
