@@ -72,6 +72,9 @@
 #   docs built elsewhere, and managed/api-history.tsv). A release exports a commit, so when the index changed the release stops at
 #   once and says to commit it; run again then. After the promote below it is generated once more from the same XML docs and goes
 #   into the same closing commit as the API record and the ledger. Test builds (--beta, --worktree, --launcher-only) skip both.
+# The stage/bundle gate (tools/release/test_stage_bundle.py), right after kilnctl is built: stage.sh's sigdb/regmap step
+#   and every component's manifest entry judged by this run's real `kilnctl bundle create` before the long stage
+#   (tools/check.sh runs the same gate, with the real kilnctl only when one is built); a skipped kilnctl case fails it.
 # The doc gate: the API reference build (tools/docs-site/build.sh, in the assemble step) runs with KILN_DOCS_STRICT=1: a public name with no XML
 #   summary fails the release (undocumented-baseline.txt names none). tools/check.sh holds it current in every commit (stage `docs`).
 # KILN_API_BASELINE: the last release's Kiln.Api .nupkg (or it unzipped) for pack.sh's API compat gate; unset: a loud
@@ -549,6 +552,16 @@ for f in kilnctl kiln; do
   install -m 755 "$lin_target/release/$f" "$linux_bin/$f"
 done
 kilnctl=$linux_bin/kilnctl
+# the stage/bundle gate with this run's kilnctl (tools/check.sh runs it without one unless a kilnctl is built): stage.sh's
+# sigdb/regmap step and every component's manifest entry, judged by the real kilnctl bundle create before the long stage
+step "stage/bundle gate (kilnctl bundle create)"
+gate_log=$work/stage-bundle-gate.log
+gate_rc=0
+KILNCTL=$kilnctl python3 -I "$src/tools/release/test_stage_bundle.py" >"$gate_log" 2>&1 || gate_rc=$?
+cat "$gate_log" >>"$log"
+((gate_rc == 0)) || { grep -E -A14 '^(FAIL|ERROR):' "$gate_log" | head -50 >&2
+  die "the stage/bundle gate failed: kilnctl bundle create would refuse the stage (tools/release/test_stage_bundle.py)"; }
+! grep -q 'skipped=' "$gate_log" || die "the stage/bundle gate skipped kilnctl bundle create although KILNCTL=$kilnctl"
 # kiln-eml's archive inspector for Linux (component eml, kiln/tools/eml-inspect/linux-x86_64/) is built where the other
 # Linux files are, for their glibc; the stage takes it from KILN_EML_INSPECT_LINUX (its Windows .exe builds in the stage)
 if [[ -f $src/gpl/kiln-eml/kiln-eml/src/kiln_eml_inspect.rs ]]; then

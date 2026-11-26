@@ -20,8 +20,10 @@
 #   bundle  tools/release/test_stage_bundle.py: tools/package/stage.sh's sigdb + regmap step run on a minimal stage (no
 #           build, well under a second), judged by kilnctl bundle create's rule: every bundle path in exactly one
 #           component, regmap/common in core only, each side's regmap beside its sigdb, and every side's install
-#           holding regmap/common, regmap/<side> and sigdb/<side>.json. KILNCTL=<built kilnctl> adds the real
-#           kilnctl bundle create on that stage
+#           holding regmap/common, regmap/<side> and sigdb/<side>.json; the other components (admin, emf, samples, eml,
+#           shroudforge, enshwick, sfi) by their manifest entries. The real kilnctl bundle create runs on those stages
+#           when a kilnctl is built: KILNCTL=<kilnctl>, else ${CARGO_TARGET_DIR:-target}/{release,debug}/kilnctl if newer
+#           than crates/kiln-manage/src/bundle.rs; the result line names the one it ran, or why none
 #   drift   tools/docs-site/drift.py: the skill and docs/kiln against the code, no build needed (a second or two): every
 #           `Type.Member` they name is public API (inherited and C# 14 extension members count; tools/docs-site/drift-allow.txt
 #           lists the false positives, a reason each), no "since 0.2.0-dev.N" claim is earlier than managed/api-history.tsv's
@@ -148,8 +150,21 @@ else
 fi
 # bundle
 t=$SECONDS
-if python3 -I "$repo/tools/release/test_stage_bundle.py" >"$work/bundle.log" 2>&1; then
-  result bundle OK $((SECONDS - t)) "stage.sh: one component per bundle path, every side's regmap and sigdb complete ($(grep -oE '^Ran [0-9]+ tests' "$work/bundle.log" | sed 's/^Ran //')$(grep -q 'skipped=' "$work/bundle.log" && echo ", kilnctl not run: KILNCTL unset"))"
+# the real kilnctl bundle create runs when a kilnctl is built: KILNCTL, else the newest of CARGO_TARGET_DIR's (or
+# target/'s) release and debug kilnctl, if it is newer than the bundle rule's source (an older one may judge another rule)
+kilnctl=${KILNCTL:-} kilnctl_note=""
+if [[ -z $kilnctl ]]; then
+  for c in "${CARGO_TARGET_DIR:-$repo/target}"/{release,debug}/kilnctl; do
+    [[ -x $c && ( -z $kilnctl || $c -nt $kilnctl ) ]] && kilnctl=$c
+  done
+  if [[ -n $kilnctl && $repo/crates/kiln-manage/src/bundle.rs -nt $kilnctl ]]; then
+    kilnctl_note=", kilnctl not run: $kilnctl is older than crates/kiln-manage/src/bundle.rs"; kilnctl=""
+  fi
+fi
+[[ -z $kilnctl && -z $kilnctl_note ]] && kilnctl_note=", kilnctl not run: none built (KILNCTL unset)"
+[[ -n $kilnctl ]] && kilnctl_note=", kilnctl bundle create: $kilnctl"
+if KILNCTL=$kilnctl python3 -I "$repo/tools/release/test_stage_bundle.py" >"$work/bundle.log" 2>&1; then
+  result bundle OK $((SECONDS - t)) "stage.sh: one component per bundle path, every side's regmap and sigdb complete, every component declared ($(grep -oE '^Ran [0-9]+ tests' "$work/bundle.log" | sed 's/^Ran //')$kilnctl_note)"
 else
   result bundle FAILED $((SECONDS - t)) "tools/release/test_stage_bundle.py (kilnctl bundle create would refuse the stage, or a side's install is incomplete):"
   grep -E -A14 '^(FAIL|ERROR):' "$work/bundle.log" | head -50
