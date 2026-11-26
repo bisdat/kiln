@@ -555,7 +555,11 @@ export function FestiveMantel() {
  *  shell puts this after it; it takes no clicks), as lamps stand in front of a door. */
 export function FestiveHearth() {
   const root = useRef<SVGSVGElement>(null);
-  useFrame(root, (el) => animate(el), []);
+  // like the mantel, they move only on Play: behind a sheet they are hidden (festive.css) and the mouth is the pilot light
+  useFrame(root, (el) => {
+    const run = animate(el);
+    return (ft, F, k) => { if (k < 0.5) run(ft, F, k); };
+  }, []);
   return (
     <svg ref={root} className="k-fest-mantel k-fest-hearth" viewBox="0 0 1000 880" aria-hidden focusable="false">
       <Diya x={-34} y={906} ph={0.12} s={1.5} />

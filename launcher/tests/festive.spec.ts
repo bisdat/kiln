@@ -74,6 +74,33 @@ test("forced on: the mantel and its wish, the threshold's diyas (no clicks taken
   await expect(page.locator(".k-fest-mantel").first()).toBeHidden();
 });
 
+test("behind a sheet nothing festive moves (the mantel and the threshold's diyas are hidden there); on Play they burn with the fire", async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __festSets: number };
+    w.__festSets = 0;
+    const set = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (n: string, v: string) {
+      if (this instanceof SVGElement && this.closest(".k-fest-mantel, .k-fest-rim")) w.__festSets += 1;
+      return set.call(this, n, v);
+    };
+  });
+  const sets = () => page.evaluate(() => (window as unknown as { __festSets: number }).__festSets);
+  await open(page, "?theme=festive", "/servers");
+  test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire never starts");
+  await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+  await expect(page.locator(".k-fest-hearth")).toBeHidden();
+  await page.waitForTimeout(500);
+  const a = await sets();
+  await page.waitForTimeout(1500);
+  expect(await sets()).toBe(a);
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Play" }).click();
+  await expect(page.locator(".k-fest-hearth")).toBeVisible();
+  await page.waitForTimeout(600);
+  const b = await sets();
+  await page.waitForTimeout(800);
+  expect(await sets()).toBeGreaterThan(b);
+});
+
 test("forced off: every day's fire, byte for byte", async ({ page }) => {
   await record(page);
   await open(page, "?theme=normal");
