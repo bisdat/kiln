@@ -217,4 +217,32 @@ public sealed class ShroudForgeNewsTests : IDisposable
         Assert.False(FakeUiTable.MenuOpen);
         Assert.Equal(0, reads);
     }
+
+    // Kiln's toasts: a notice a hosted mod publishes while the game runs shows over the game at once, as ShroudForge's
+    // window would show it in its feed (netjunk 2026-11-26, Kiln 31.18: "the first press does nothing", the scan's
+    // result and "press the cleanup key again within 60 seconds" were only in kiln.log)
+    private static SfNews N(string id, long at, string title = "Altar Cleanup", string message = "Press again", string level = "info") =>
+        new(id, id.Split('.')[0], title, message, level, at);
+
+    [Fact]
+    public void Each_notice_published_after_the_start_is_toasted_once_and_again_when_it_changes()
+    {
+        var toasts = new SfNewsToasts(startSeconds: 1000);
+        Assert.Empty(toasts.Poll([N("altar-cleanup.result", 900)]));  // from an earlier game: in the page only
+        Assert.Equal(["altar-cleanup.result"], toasts.Poll([N("altar-cleanup.result", 1005), N("glider.hello", 990)]).Select(n => n.Id));
+        Assert.Empty(toasts.Poll([N("altar-cleanup.result", 1005)]));  // the same notice
+        Assert.Equal([1010L], toasts.Poll([N("altar-cleanup.result", 1010)]).Select(n => n.UpdatedAt));  // republished
+        var many = Enumerable.Range(0, 10).Select(i => N("m" + i + ".x", 1100 + i)).ToList();
+        Assert.Equal(SfNewsToasts.MaxPerPoll, toasts.Poll(many).Count);  // a burst does not fill the screen
+    }
+
+    [Fact]
+    public void A_toast_says_the_title_and_the_message_in_the_look_of_its_level()
+    {
+        Assert.Equal(("Altar Cleanup: 487 blocks found. Press Keypad 1 again within 60 seconds to clean up.", ToastKind.Info),
+            SfNewsToasts.Text(N("altar-cleanup.result", 1, "Altar Cleanup", "487 blocks found. Press Keypad 1 again within 60 seconds to clean up.")));
+        Assert.Equal(("Only a message", ToastKind.Warning), SfNewsToasts.Text(N("a.b", 1, "", "Only a message", "warn")));
+        Assert.Equal(("Failed: no altar here", ToastKind.Error), SfNewsToasts.Text(N("a.b", 1, "Failed", "no altar here", "error")));
+        Assert.Equal(("Done", ToastKind.Success), SfNewsToasts.Text(N("a.b", 1, "Done", "", "success")));
+    }
 }

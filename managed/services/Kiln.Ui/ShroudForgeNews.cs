@@ -108,3 +108,45 @@ internal static class ShroudForgeNews
         StatePath = () => Path.Combine(ShroudForgePackages.Folder(ShroudForgeUi.GameDir(), "state"), "state.json");
     }
 }
+
+/// <summary>A hosted mod's new notices as Kiln's toasts, over the game: a ShroudForge mod cannot draw on the HUD, and
+/// what it publishes is what it has to tell the player now (Altar Cleanup: its scan's result and "press the cleanup key
+/// again within 60 seconds"). Only while Kiln answers ShroudForge's menu (no ShroudForge window runs to show its feed).
+/// A notice toasts once when it comes after this game started, and again when its mod publishes it anew. Not thread-safe:
+/// one poller (the ShroudForge menu thread).</summary>
+internal sealed class SfNewsToasts(long startSeconds)
+{
+    /// <summary>The most toasts one poll makes (the newest).</summary>
+    internal const int MaxPerPoll = 3;
+    /// <summary>How long a toast stays: long enough to read a question with a time limit.</summary>
+    internal const double Seconds = 10;
+
+    private readonly Dictionary<string, long> _seen = new(StringComparer.Ordinal);
+
+    /// <summary>The notices of <paramref name="news"/> (newest first) not toasted yet, at most <see cref="MaxPerPoll"/>.</summary>
+    public IReadOnlyList<SfNews> Poll(IReadOnlyList<SfNews> news)
+    {
+        var fresh = new List<SfNews>();
+        foreach (var n in news)
+        {
+            if (n.UpdatedAt < startSeconds || _seen.TryGetValue(n.Id, out var at) && at >= n.UpdatedAt) continue;
+            _seen[n.Id] = n.UpdatedAt;
+            if (fresh.Count < MaxPerPoll) fresh.Add(n);
+        }
+        return fresh;
+    }
+
+    /// <summary>A notice's toast: "title: message" (either alone when the other is empty), in its level's look.</summary>
+    public static (string Text, ToastKind Kind) Text(SfNews n)
+    {
+        var text = n.Title.Length == 0 ? n.Message : n.Message.Length == 0 ? n.Title : n.Title + ": " + n.Message;
+        var kind = n.Level switch
+        {
+            "warn" or "warning" => ToastKind.Warning,
+            "error" => ToastKind.Error,
+            "success" => ToastKind.Success,
+            _ => ToastKind.Info,
+        };
+        return (ShroudForgeUi.Clip(text, 600), kind);
+    }
+}

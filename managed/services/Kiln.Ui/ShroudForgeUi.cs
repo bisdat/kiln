@@ -1353,11 +1353,19 @@ internal static class ShroudForgeMenu
                 UiEngine.Log(LogLevel.Info, $"ShroudForge has no Modloader window: key {_binding.Key} and shroudforge.ui.toggle_modloader() toggle Kiln's ShroudForge page (remap in Keys; Mods is always available)");
             }
             finally { ModContext.CurrentMod = mod; }
+            // a hosted start: the mods' new notices as Kiln's toasts (no ShroudForge window shows its feed)
+            var toasts = hosted ? new SfNewsToasts(StartSeconds()) : null;
             while (true)
             {
-                var wait = WaitForSingleObject(h, 2000);
+                var wait = WaitForSingleObject(h, hosted ? 1000u : 2000u);
                 if (wait != 0 && wait != 258) break;  // WAIT_TIMEOUT: check runtime lifecycle too
                 if (!keep()) break;
+                if (toasts is not null)
+                    foreach (var n in toasts.Poll(ShroudForgeNews.Reload()))
+                    {
+                        var (text, kind) = SfNewsToasts.Text(n);
+                        UiEngine.AddToast(text, kind, SfNewsToasts.Seconds);
+                    }
                 if (wait == 0 && hosted) ModToggled(ShroudForgeNews.Reload, () => DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 else if (wait == 0) Toggle();
             }
@@ -1393,6 +1401,16 @@ internal static class ShroudForgeMenu
     {
         ModManagerHost.Page.Request(new EngineFilter("shroudforge"), mod);
         Ui.MenuOpen = true;
+    }
+
+    /// <summary>When this game process started (Unix seconds); now when that cannot be read.</summary>
+    private static long StartSeconds()
+    {
+        try { return new DateTimeOffset(System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()).ToUnixTimeSeconds(); }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            return DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        }
     }
 
     /// <summary>ShroudForge's runtime signalled the menu event (a mod's shroudforge.ui.toggle_modloader()) in a hosted
