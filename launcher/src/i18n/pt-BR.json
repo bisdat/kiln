@@ -6232,8 +6232,8 @@
     "baseOrigin": "Origem da base: {origin}",
     "archiveWriter": "Gravador do arquivo: {writer}",
     "journal": {
-      "read": "Pacotes do gravador do arquivo nomeados pelo diário de alterações do kiln-eml: {packages} pacotes, {entries} entradas (somente itens, drops e balanceamento: uma entrada de receita ou de saque não é nomeada).",
-      "truncated": "Pacotes do gravador do arquivo nomeados pelo diário de alterações do kiln-eml: {packages} pacotes, {entries} entradas (somente itens, drops e balanceamento: uma entrada de receita ou de saque não é nomeada). O diário está truncado, então um pacote pode ter gravado entradas que ele não nomeia.",
+      "read": "Pacotes do gravador do arquivo nomeados pelo diário de alterações do kiln-eml: {packages} pacotes, {entries} entradas (uma passagem do ShroudForge nomeia itens, drops e balanceamento por entrada; uma passagem do EML nomeia os campos que seus mods gravaram, em receitas e saque pelo elemento).",
+      "truncated": "Pacotes do gravador do arquivo nomeados pelo diário de alterações do kiln-eml: {packages} pacotes, {entries} entradas (uma passagem do ShroudForge nomeia itens, drops e balanceamento por entrada; uma passagem do EML nomeia os campos que seus mods gravaram, em receitas e saque pelo elemento). O diário está truncado, então um pacote pode ter gravado entradas que ele não nomeia.",
       "notNamed": "Os pacotes do gravador do arquivo não são nomeados nesta inicialização: {reason}",
       "none": "o gravador do arquivo desta inicialização não mantém um diário de alterações.",
       "stale": "o diário de alterações pertence a uma inicialização anterior.",
@@ -6241,15 +6241,17 @@
     },
     "sfPackage": "{id} (pacote do ShroudForge)",
     "emlPackage": "{id} (pacote do EML)",
-    "archiveUnattributed": "Uma gravação na inicialização que nenhum pacote fez (kiln-eml)",
+    "archiveUnattributed": "Uma gravação na inicialização de nenhum pacote que o Kiln consiga nomear (kiln-eml)",
     "archiveOp": "Desconhecida (o diário do kiln-eml nomeia a entrada que este pacote gravou, não este campo)",
+    "archiveOpField": "Desconhecida (o diário do kiln-eml nomeia este campo como gravado por este pacote, não o valor)",
     "kind": {
       "archiveWriter": "Gravou esta entrada antes do Kiln (arquivo)",
+      "archiveWriterField": "Gravou este campo antes do Kiln (arquivo)",
       "drift": "Alterado fora do Kiln"
     },
     "unverified": "Mapeamento não verificado",
     "unverifiedBody": "Alterações de campos podem ser recusadas como Unproven. Leia o motivo de cada recusa.",
-    "certaintyHint": "Certo = o Kiln observou o gravador. Nomeado pelo diário = um pacote do ShroudForge ou EML que o diário de alterações do kiln-eml aponta como tendo gravado a entrada antes do Kiln; a alteração do Kiln prevalece sobre ele. Divergência estimada = o valor do jogo mudou fora do Kiln; os suspeitos são uma pista, não uma prova de quem o gravou nem de que não exista outro gravador.",
+    "certaintyHint": "Certo = o Kiln observou o gravador. Nomeado pelo diário = um pacote do ShroudForge ou EML que o diário de alterações do kiln-eml aponta como tendo gravado a entrada (ou, para um mod do EML, o campo) antes do Kiln; a alteração do Kiln prevalece sobre ele. Divergência estimada = o valor do jogo mudou fora do Kiln; os suspeitos são uma pista, não uma prova de quem o gravou nem de que não exista outro gravador.",
     "partial": "Relatório parcial",
     "partialRows": {
       "one": "{count} linha foi omitida pelo relatório nativo ou pelos limites de segurança desta visualização.",

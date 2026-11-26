@@ -1,6 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { emptyRegistryFixture, nativeShapedReport, registryFixture } from "../tests/fixtures/registryReport";
 import { parseRegistryReport, reportFreshness, REPORT_LIMITS } from "../src/registry/report";
+import de from "../src/i18n/de.json";
+import enText from "../src/i18n/en.json";
+import es from "../src/i18n/es.json";
+import fr from "../src/i18n/fr.json";
+import it from "../src/i18n/it.json";
+import ja from "../src/i18n/ja.json";
+import ko from "../src/i18n/ko.json";
+import pl from "../src/i18n/pl.json";
+import ptBR from "../src/i18n/pt-BR.json";
+import ru from "../src/i18n/ru.json";
+import zhCN from "../src/i18n/zh-CN.json";
 
 const parse = (r: unknown) => parseRegistryReport(JSON.stringify(r));
 describe("untrusted registry report", () => {
@@ -307,4 +318,23 @@ describe("snapshot freshness", () => {
   test("unknown process state is explicit", () => expect(reportFreshness(written, undefined, now)).toContain("cannot be verified"));
   test("invalid process-start timestamp cannot establish freshness", () => expect(reportFreshness(written, { running: true, started: "invalid" }, now)).toContain("cannot be verified"));
   test("snapshot from this start is not stale", () => expect(reportFreshness(written, { running: true, started: new Date(now - 2000).toISOString() }, now)).toBeNull());
+});
+
+// Review (registry-eml-journal): the Conflicts page's archive-writer texts are in every locale with English's placeholders,
+// the EML pass's field-level ones included, and no locale still says a recipe or loot entry is never named (an EML pass
+// names them by their element).
+test("every locale has the archive-writer texts, the EML pass's field-level ones too, with English's placeholders", () => {
+  const keys = ["journal.read", "journal.truncated", "archiveUnattributed", "archiveOp", "archiveOpField", "kind.archiveWriter", "kind.archiveWriterField", "certaintyHint"];
+  const at = (o: unknown, k: string) => k.split(".").reduce<unknown>((x, p) => (x as Record<string, unknown> | undefined)?.[p], (o as Record<string, unknown>).registry);
+  const ph = (s: unknown) => (String(s).match(/\{[a-z]+\}/gi) ?? []).sort().join();
+  const old: Record<string, string> = { de: "Rezept- oder Beute-Eintrag wird nicht benannt", es: "no se nombra ninguna entrada de receta", fr: "recette ou de butin n'est pas nommée",
+    it: "ricetta o di bottino non viene indicata", ja: "レシピやルートのエントリは特定されません", ko: "레시피나 전리품 항목은 확인하지 않습니다", pl: "wpis receptury ani łupu nie jest nazywany",
+    ptBR: "receita ou de saque não é nomeada", ru: "запись рецепта или добычи не называется", zhCN: "不指认配方或战利品条目" };
+  for (const [name, loc] of Object.entries({ de, es, fr, it, ja, ko, pl, ptBR, ru, zhCN })) {
+    for (const k of keys) {
+      expect(typeof at(loc, k), `${name} ${k}`).toBe("string");
+      expect(ph(at(loc, k)), `${name} ${k}`).toBe(ph(at(enText, k)));
+    }
+    expect(String(at(loc, "journal.read")).includes(old[name]), `${name}: journal.read says recipes and loot are never named`).toBe(false);
+  }
 });
