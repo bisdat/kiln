@@ -287,6 +287,44 @@ void worldload_ready_event(const std::string& dir) {
     check(r.read(2, "items", "game:plank", "maxStack", &value) == KILN_OK && value == "42", "a late refresh updates the resolved view");
     check(r.generation() == generation && seen.size() == 2, "a late refresh keeps the generation and sends no ready event");
 }
+// Owner 11-26 (registry-followups review Q1): a live report's JSON and state/registry.json are made off the publishing (world
+// tick) thread. With env.post_report set, a live publish only queues; report_json() is already the newest report; the
+// writer writes the newest report once, however many publishes queued before it ran.
+void live_report_written_off_thread(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    auto env = env_of(&view, &files, dir, &sections);
+    std::vector<std::function<void()>> posted;
+    std::thread::id writer;
+    env.post_report = [&](std::function<void()> fn) { posted.push_back(std::move(fn)); };
+    int writes = 0;
+    auto write = env.write_report;
+    env.write_report = [&, write](const std::string& t) { ++writes; writer = std::this_thread::get_id(); return write(t); };
+    stage::Runner r(env);
+    std::function<void(const Result&, bool)> live_report;
+    const Result* live_result = nullptr;
+    r.set_live([&](const stage::LiveHandoff& h) { live_report = h.report, live_result = h.result; });
+    r.run({});
+    r.finish({});
+    const std::string start_file = files.report;
+    check(writes == 1 && posted.empty() && json::parse(start_file)["phase"] == "start", "the start's report is written at once");
+    live_report(*live_result, true);
+    Result late = *live_result;
+    late.fields.at({"items", "game:plank", "maxStack"}).result = Value::integer(42);
+    live_report(late, false);
+    check(writes == 1 && files.report == start_file, "a live publish neither builds nor writes state/registry.json on its thread (" + std::to_string(writes) + " write(s))");
+    check(posted.size() == 2, "each live publish queues the writer (" + std::to_string(posted.size()) + ")");
+    std::string text;
+    check(r.report_json(&text) == KILN_OK && json::parse(text)["phase"] == "worldLoad" && json::parse(text)["generation"] == r.generation(),
+          "report_json gives the newest report before the writer ran");
+    std::thread([&] { for (auto& fn : posted) fn(); }).join();
+    check(writes == 2, "the writer writes the newest report once for two queued publishes (" + std::to_string(writes) + " write(s))");
+    check(writer != std::this_thread::get_id(), "state/registry.json is written on the writer's thread");
+    check(json::parse(files.report)["phase"] == "worldLoad" && json::parse(files.report)["generation"] == r.generation(),
+          "the file holds the newest report");
+    std::string again;
+    check(r.report_json(&again) == KILN_OK && json::parse(again) == json::parse(files.report), "report_json and the file agree after the writer ran");
+}
 Files warm_id_table(const std::string& dir) {
     TreeView view = world(); Files files;
     stage::Runner runner(env_of(&view, &files, dir, &no_sections));
@@ -908,6 +946,7 @@ int main(int argc, char** argv) {
         {"R3 submit_unbound_owner", [&] { submit_unbound_owner(dir); }},
         {"R4 worldload_ready_event", [&] { worldload_ready_event(dir); }},
         {"P2 transaction_snapshot_is_not_worldload", [&] { transaction_snapshot_is_not_worldload(dir); }},
+        {"Q1 live_report_written_off_thread", [&] { live_report_written_off_thread(dir); }},
         {"P2 unused_live_base_is_lazy", [&] { unused_live_base_is_lazy(dir); }},
         {"NS1 registry_users_decode_at_the_stage", [&] { registry_users_decode_at_the_stage(dir); }},
         {"P2 full_live_base_uses_cache", [&] { full_live_base_uses_cache(dir); }},

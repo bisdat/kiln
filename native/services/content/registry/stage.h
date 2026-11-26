@@ -55,6 +55,9 @@ struct Env {
     std::function<std::vector<std::pair<std::string, std::string>>()> folders;
     // Files: registry.json under state; the id table, the plans and the cache under kiln.content's data folder (rel paths).
     std::function<bool(const std::string& text)> write_report;
+    // Runs fn later on a thread of its own (kiln.content's report writer): a live report's JSON and state/registry.json, so a
+    // world tick that publishes a report never makes either (owner 11-26). Unset: at once, on the publishing thread.
+    std::function<void(std::function<void()> fn)> post_report;
     std::function<bool(const std::string& rel, const std::string& text)> write_data;
     std::function<std::optional<std::string>(const std::string& rel)> read_data;
     // The file is there (one file-system lookup, nothing read; proof-2 N7, as proof.h's exists); unset: read_data decides.
