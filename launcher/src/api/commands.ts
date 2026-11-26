@@ -1686,6 +1686,9 @@ export interface SfStartupNote {
   /** Kiln's ShroudForge tried the pass once more without the mod it failed in (first), and that failed too. */
   skipped?: SfSkippedMod[];
   retryError?: string;
+  /** ShroudForge refused its clean copy of the game data: it carries an uninstalled mod's changes (Steam's manifest lists
+   *  other bytes, or it holds a known mod's program). `text` then leads with the plain words and what the player does. */
+  staleGameData?: boolean;
   text: string;
 }
 /** A mod ShroudForge's startup pass ran without: the one it failed in, then any left out because they need it. */

@@ -946,6 +946,7 @@ internal static partial class KilnApis
         "P:Kiln.Knowledge.Available=kiln.knowledge", // KnowledgeNative.T != null: Services.Get("kiln.knowledge")
         "P:Kiln.MarkersLab.Available=kiln.markers.lab", // T != null: Services.Get("kiln.markers.lab")
         "P:Kiln.NoClip.Available=rules.noclip", // Is("rules.noclip")
+        "P:Kiln.Npcs.Available=npcspeech.bubble", // Is("npcspeech.bubble")
         "P:Kiln.PadInput.Available=kiln.ui.input", // returns false first when the table of kiln.ui.input is null
         "P:Kiln.PlayerAnimStates.Available=kiln.playeranim", // T != null: Services.Get("kiln.playeranim")
         "P:Kiln.PlayerCharacters.Available=kiln.characters", // T != null: Services.Get("kiln.characters")

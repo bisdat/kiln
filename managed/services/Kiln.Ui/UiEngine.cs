@@ -394,11 +394,7 @@ internal static unsafe class UiEngine
             windows = _windows;
             hud = _hud;
         }
-        foreach (var w in windows)
-        {
-            if (!w.Open || w.Disposed) continue;
-            DrawWindow(ui, w);
-        }
+        DrawWindows(ui, windows);
         Ui.Crafting.DrawPanels(ui);
         UiInventoryScreens.Draw(ui);  // panels beside the game's backpack and chest screens
         ChatCompletionPanel.Draw(ui); // non-focusable suggestions over native HUD/Social chat
@@ -432,12 +428,52 @@ internal static unsafe class UiEngine
         _keysDrawn = false;
     }
 
-    internal static void DrawWindow(UiDraw ui, UiWindow w)
+    /// <summary>The registered windows (any thread; a snapshot).</summary>
+    internal static UiWindow[] Windows
+    {
+        get { lock (Lock) return _windows; }
+    }
+
+    /// <summary>The window another mod may dock to under (<paramref name="mod"/>, <paramref name="id"/>): the first one of
+    /// that mod with that placement id (or title) and <see cref="UiWindowOptions.AcceptDock"/>, not removed; else null.</summary>
+    internal static UiWindow? FindDockable(string mod, string id)
+    {
+        foreach (var w in Windows)
+            if (!w.Disposed && w.Options.AcceptDock && w.DockKey == id && w.OwnerId == mod) return w;
+        return null;
+    }
+
+    /// <summary>The open windows of this frame, in their docking order (UiDock.cs): each group of docked windows from
+    /// the one that leads it this frame, every other window in its own order as before.</summary>
+    internal static void DrawWindows(UiDraw ui) => DrawWindows(ui, Windows);
+
+    private static void DrawWindows(UiDraw ui, UiWindow[] windows)
+    {
+        var open = windows.Where(w => w.Open && !w.Disposed).ToArray();
+        if (open.Length == 0) return;
+        var frame = UiDockFrame.Plan(open, UiViewport.Of(ui), ui.HeldMods, UiDocking.Live, UiDocking.Clock());
+        try
+        {
+            foreach (var w in frame.Order)
+                if (w.Open && !w.Disposed) DrawWindow(ui, w, frame);
+        }
+        finally
+        {
+            frame.Finish();
+        }
+    }
+
+    internal static void DrawWindow(UiDraw ui, UiWindow w) => DrawWindow(ui, w, null);
+
+    private static void DrawWindow(UiDraw ui, UiWindow w, UiDockFrame? dock)
     {
         var o = w.Options;
         var vp = UiViewport.Of(ui);
-        // the options on first use (FirstUseEver), a remembered placement when it appears, MoveTo / Resize once (UiPlacement.cs)
-        w.Placer.PlanWindow(vp, o).Apply(ui);
+        // the options on first use (FirstUseEver), a remembered placement when it appears, MoveTo / Resize once (UiPlacement.cs),
+        // then its dock: placed beside the window it docks to, or its group kept inside the viewport (UiDock.cs)
+        var plan = w.Placer.PlanWindow(vp, o);
+        if (dock != null) plan = dock.Place(w, plan);
+        plan.Apply(ui);
         if (o.BackgroundAlpha is { } a) ui.NextWindowAlpha(a);
         uint flags = 0;
         if (o.AutoResize) flags |= 1u << 6;
@@ -448,7 +484,8 @@ internal static unsafe class UiEngine
         ui.PushLookRaw(o.Theme, o.Style);  // the player's look unless the window's mod chose its own
         var shown = ui.BeginWindow(w.Key, ref open, flags);
         var (rx, ry, rw, rh) = ui.WindowRect;
-        w.Placer.Drawn(vp, rx, ry, rw, rh, shown);
+        w.Placer.Drawn(vp, rx, ry, rw, rh, shown, dock?.KeepsPosition(w) ?? false);
+        dock?.Drawn(w, rx, ry, rw, rh);
         if (shown)
         {
             var inner = ui.LookDepth;

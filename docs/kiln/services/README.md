@@ -38,6 +38,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [markers.md](markers.md) | kiln.markers / Kiln.Markers: markers on the game's map, Kiln's compass strip and world labels, following an entity, server markers to players with Kiln |
 | [net-steam-messages.md](net-steam-messages.md) | kiln.net / SteamMessages: Steam peer-to-peer messages on leased Steam channels, each lease its owner's (since 0.2.0-dev.30.3; C# mods opt in with `"steamMessages": true`) |
 | [npcs.md](npcs.md) | Friendly NPCs and quests in the game's own UI |
+| [npc-speech.md](npc-speech.md) | kiln.npcspeech / Kiln.Npcs: a mod's lines in the game's speech bubble over a friendly NPC (`Npcs.Say`, `Npcs.Speech` Suppress / Replace), host-decided, shown by Kiln clients (since 0.2.0-dev.31.16, mod API 0.2.23) |
 | [survivors.md](survivors.md) | kiln.survivors: recruit roster survivors, give their summon tool, summon them into a base, assign beds (since 0.2.0-dev.31) |
 | [pacing.md](pacing.md) | kiln.pacing: where the game waits, and its task pools |
 | [player-state.md](player-state.md) | Player state and actions |

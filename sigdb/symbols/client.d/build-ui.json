@@ -1,7 +1,7 @@
 {
   "format": 1,
   "side": "client",
-  "comment": "GitHub #132, since 0.2.0-dev.31.12: the build menu's material counts count a player's building links too, so the menu, the cursor (server.d/build-sources.json) and the placement agree. The material selector's gatherer (C 0x40e5d0, void(selectorState, access, bool currentOnly), docs/re/building.md 1.2.2) rebuilds up to seven groups of 0x648 bytes (rows {ptr, count, capacity} at +0/+8/+0x10; 24-byte rows: item +0, the key (u32, u8) +4, the aggregate stock u64 +0x10): it zeroes a group it rebuilds, adds a zero row per known pool material, the bag's stacks, then per pool material the client's published base stock map's u16 (build/client.StockRowsRet is that add's return; build/client.MaterialRowAdd finds a row by item and adds the count at +0x10). kiln-items wraps the gatherer from inside (build/client.MaterialRowsBody and build/client.MaterialRowsDone, since 0.2.0-dev.31.13; never its entry, which Building Tools finds by its bytes) and adds the server's building snapshot to the rows of its items afterwards, taking its own earlier addition back first where the game left the row alone. Client 26430625 (5d9ef2f1). Evidence: docs/re/stations.md section 13.",
+  "comment": "GitHub #132, since 0.2.0-dev.31.12, and #148: the build menu's material counts count a player's building links too, so the catalogue's tabs, the hammer's list, the cursor (server.d/build-sources.json) and the placement agree. The material selector's gatherer (C 0x40e5d0, void(selectorState, access, bool currentOnly), docs/re/building.md 1.2.2) fills up to seven groups of 0x648 bytes, one per material pool kind (rows {ptr, count, capacity, grow} at +0/+8/+0x10/+0x18; 24-byte rows: item +0, the container key (u32, u8) +4, the aggregate stock u64 +0x10; the sort mode byte at +0x638: 0 Backpack & Magic Chests, 1 Last Used, 2 by amount, 3 All Materials, 4 Favorites): it zeroes the stock of a group it rebuilds, adds a zero row per listed material in modes 1 and 4 only, the bag's stacks, then per pool material the client's published base stock map's u16 (build/client.StockRowsRet is that add's return; build/client.MaterialRowAdd finds a row by item and adds the count at +0x10, or appends a row, never in modes 1 and 4). Since #148 kiln-items adds the server's building snapshot where the game adds the base's stock: a mid hook at build/client.StockRowsRet calls build/client.MaterialRowAdd with the material's linked count and the no-container key (build/client.NoContainerKey), once per group and call, between build/client.MaterialRowsBody and build/client.MaterialRowsDone (since 0.2.0-dev.31.13; never the entry, which Building Tools finds by its bytes). Client 26430625 (5d9ef2f1). Evidence: docs/re/stations.md section 13.",
   "symbols": {
     "build/client.MaterialRows": {
       "comment": "the material selector's gatherer: its prologue, then lea r15,[rcx+0x638] (the first group's mode byte; 0x638 + 0x10 = 0x648, the group stride). Client 0x40e5d0",
@@ -12,7 +12,7 @@
       ]
     },
     "build/client.MaterialRowsBody": {
-      "comment": "kiln-items' first half of the gatherer (build_rows_enter: its own earlier additions taken back): the first instruction after the prologue, lea r15,[rcx+0x638] (entry + 0x23): rcx the selector state, rsp the function's (the same at build/client.MaterialRowsDone). The same site as kiln-tools' tools/MaterialSelectorBody; not the entry, which Building Tools (0.34.0) finds by its first 35 bytes. Client 0x40e5f3",
+      "comment": "kiln-items' first half of the gatherer (build_rows_enter: opens the call with the server's building snapshot, which build/client.StockRowsRet adds): the first instruction after the prologue, lea r15,[rcx+0x638] (entry + 0x23): rcx the selector state, rsp the function's (the same at build/client.MaterialRowsDone). The same site as kiln-tools' tools/MaterialSelectorBody; not the entry, which Building Tools (0.34.0) finds by its first 35 bytes. Client 0x40e5f3",
       "find": [
         {
           "scope": { "symbol": "build/client.MaterialRows", "size": 64 },
@@ -22,7 +22,7 @@
       ]
     },
     "build/client.MaterialRowsDone": {
-      "comment": "kiln-items' second half (build_rows_leave: the links added): the epilogue's first instruction, mov rbx,[rsp+0x1d0] (entry + 0xa8a), after the finalizer on every path; rsi the selector state. The same site as kiln-tools' tools/MaterialSelectorDone. Client 0x40f05a",
+      "comment": "kiln-items' second half (build_rows_leave: closes the call): the epilogue's first instruction, mov rbx,[rsp+0x1d0] (entry + 0xa8a), after the finalizer on every path; rsi the selector state. The same site as kiln-tools' tools/MaterialSelectorDone. Client 0x40f05a",
       "find": [
         {
           "scope": { "symbol": "build/client.MaterialRows", "size": 2876 },
@@ -31,15 +31,24 @@
         }
       ]
     },
+    "@build/client.NoContainerKey.site": {
+      "comment": "#148: the u32 the gatherer passes build/client.MaterialRowAdd as the container key of a listed material's zero row (mov r8d,[rip+...] at entry + 0x194, read by Building Tools 0.34.0 too); kiln-items gives a row it adds for linked stock the same key. A data address. Client 0x152d040",
+      "find": [
+        {
+          "scope": { "symbol": "build/client.MaterialRows", "size": 2876 },
+          "pattern": "44 8B 05 {build/client.NoContainerKey:rel32} 49 8D 8F C8 F9 FF FF 33 C0 89 5C 24 30 45 33 C9 48 89 44 24 34 48 8D 54 24 30 C6 44 24 20 01 E8 {build/client.MaterialRowAdd:rel32}"
+        }
+      ]
+    },
     "build/client.StockRowsRet": {
-      "comment": "the gatherer's base-stock record: {item, the map's u16 count, 0} at [rsp+0x30]; r9b = the value's byte +3, r8d = its u32 +4; rcx = selectorState + group * 0x648; call build/client.MaterialRowAdd. The return address. Client 0x40ee4b",
+      "comment": "the gatherer's base-stock record: {item, the map's u16 count, 0} at [rsp+0x30]; r9b = the value's byte +3, r8d = its u32 +4; rcx = selectorState + group * 0x648; call build/client.MaterialRowAdd. The return address, and kiln-items' mid hook (#148, 7 bytes: mov eax,[r15+0xc]; inc r14): the stock loop's step to the next material, reached on every path of the loop (found, not found, an empty map) and only for a group this call rebuilds; rsi the selector state, r15 the material pool (materials: i32 offset +8 from +8, u32 count +0xc), r14 the material's index, r12b its group, rsp the gatherer's (the same at build/client.MaterialRowsBody and Done). Client 0x40ee4b",
       "find": [
         {
           "scope": {
             "symbol": "build/client.MaterialRows",
             "size": 2876
           },
-          "pattern": "89 44 24 30 48 8D 54 24 30 41 0F B7 00 89 44 24 34 C7 44 24 38 00 00 00 00 45 0F B6 48 03 45 8B 40 04 41 0F B6 C4 48 69 C8 48 06 00 00 C6 44 24 20 00 48 03 CE E8 {build/client.MaterialRowAdd:rel32}",
+          "pattern": "89 44 24 30 48 8D 54 24 30 41 0F B7 00 89 44 24 34 C7 44 24 38 00 00 00 00 45 0F B6 48 03 45 8B 40 04 41 0F B6 C4 48 69 C8 48 06 00 00 C6 44 24 20 00 48 03 CE E8 {build/client.MaterialRowAdd:rel32} 41 8B 47 0C 49 FF C6 4C 3B F0 0F 82",
           "offset": 58
         }
       ]
@@ -63,6 +72,8 @@
         "build/client.MaterialRows",
         "build/client.MaterialRowsBody",
         "build/client.MaterialRowsDone",
+        "@build/client.NoContainerKey.site",
+        "build/client.NoContainerKey",
         "build/client.StockRowsRet",
         "build/client.MaterialRowAdd",
         "build/client.MaterialRowStock"

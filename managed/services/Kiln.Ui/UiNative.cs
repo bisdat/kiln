@@ -892,6 +892,52 @@ internal static unsafe class UiNative
     /// <summary>Tests: a popups slot in place of kiln.ui's.</summary>
     internal static delegate* unmanaged[Cdecl]<Popups*, int> PopupsOverride;
 
+    /// <summary>KilnUiWindowState (kiln_ui.h, GitHub issue 149): a window as Dear ImGui has it now, in the overlay's pixels.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WindowState
+    {
+        public uint Size, Flags;
+        public float X, Y, Width, Height;
+    }
+
+    /// <summary>KILN_UI_WINDOW_STATE_EXISTS / _MOVING / _RESIZING (kiln_ui.h, GitHub issue 149).</summary>
+    public const uint WindowExists = 1, WindowMoving = 2, WindowResizing = 4;
+
+    /// <summary>The tail after popups (GitHub issue 149): window_state at 1088 (the table is 1096 bytes).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TableWindowState
+    {
+        public TablePopups Base;
+        public delegate* unmanaged[Cdecl]<NativeStr, WindowState*, byte> WindowStateFn;
+    }
+
+    /// <summary>kiln.ui's window_state slot, or null on a table without it (a kiln-ui.dll older than the docking of GitHub
+    /// issue 149). Tests: <see cref="WindowStateOverride"/>.</summary>
+    internal static delegate* unmanaged[Cdecl]<NativeStr, WindowState*, byte> WindowStateSlot
+    {
+        get
+        {
+            if (WindowStateOverride != null) return WindowStateOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableWindowState)) return null;
+            return ((TableWindowState*)t)->WindowStateFn;
+        }
+    }
+
+    /// <summary>Tests: a window_state slot in place of kiln.ui's.</summary>
+    internal static delegate* unmanaged[Cdecl]<NativeStr, WindowState*, byte> WindowStateOverride;
+
+    /// <summary>The window <paramref name="name"/> (its ImGui name; empty: the window being drawn) as ImGui has it now; null
+    /// when kiln.ui has no window_state slot, outside a frame, or when ImGui does not know the window.</summary>
+    internal static WindowState? ReadWindowState(string name)
+    {
+        var f = WindowStateSlot;
+        if (f == null) return null;
+        WindowState s = default;
+        s.Size = (uint)sizeof(WindowState);
+        return f(Utf8.Of(name), &s) != 0 && (s.Flags & WindowExists) != 0 ? s : null;
+    }
+
     /// <summary>The game's popup panels now (kiln.ui's popups): null when Kiln does not read them (no kiln.ui, an older
     /// one, feature ui.popups off): then nothing is known to cover the game's UI.</summary>
     internal static Popups? ReadPopups()
@@ -1080,6 +1126,7 @@ internal static unsafe class UiNative
         _input = null;
         LooksOverride = null;
         ImageExOverride = null;
+        WindowStateOverride = null;
 
         SetTextsOverride = null;
         GraphicsOverride = null;

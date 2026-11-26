@@ -1,0 +1,9 @@
+{
+  "id": "dockbook",
+  "name": "Docking sample: spell book",
+  "version": "1.0.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "DockBook.dll",
+  "side": "client",
+  "description": "Window docking sample, the window others dock to: a spell book window (F6) that accepts docks. Load DockNotes too: its notes window sits beside the book and moves with it."
+}

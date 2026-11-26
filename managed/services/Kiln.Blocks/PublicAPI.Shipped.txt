@@ -2693,6 +2693,17 @@ Kiln.NpcPlace.InBase.init -> void
 Kiln.NpcPlace.NpcPlace() -> void
 Kiln.NpcPlace.Once.get -> bool
 Kiln.NpcPlace.Once.init -> void
+Kiln.NpcSpeech
+Kiln.NpcSpeech.Clear() -> void
+Kiln.NpcSpeech.ModId.get -> string!
+Kiln.NpcSpeech.Mode.get -> Kiln.SpeechMode
+Kiln.NpcSpeech.Npc.get -> Kiln.EntityId
+Kiln.NpcSpeech.Priority.get -> int
+Kiln.NpcSpeech.Priority.set -> void
+Kiln.NpcSpeech.Replace(System.Collections.Generic.IEnumerable<Kiln.UiText!>! lines) -> Kiln.SpeechResult!
+Kiln.NpcSpeech.Replace(params string![]! lines) -> Kiln.SpeechResult!
+Kiln.NpcSpeech.Suppress() -> Kiln.SpeechResult!
+Kiln.Npcs
 Kiln.ObjectiveBlock
 Kiln.ObjectiveBlock.<Clone>$() -> Kiln.ObjectiveBlock!
 Kiln.ObjectiveBlock.Build.get -> Kiln.BuildGoal?
@@ -3446,6 +3457,13 @@ Kiln.Sampler.Clamp = 2 -> Kiln.Sampler
 Kiln.Sampler.ClampToZero = 3 -> Kiln.Sampler
 Kiln.Sampler.Mirror = 1 -> Kiln.Sampler
 Kiln.Sampler.Wrap = 0 -> Kiln.Sampler
+Kiln.SayOptions
+Kiln.SayOptions.<Clone>$() -> Kiln.SayOptions!
+Kiln.SayOptions.Deconstruct(out bool Interrupt) -> void
+Kiln.SayOptions.Equals(Kiln.SayOptions? other) -> bool
+Kiln.SayOptions.Interrupt.get -> bool
+Kiln.SayOptions.Interrupt.init -> void
+Kiln.SayOptions.SayOptions(bool Interrupt = true) -> void
 Kiln.ScreenEffectBlock
 Kiln.ScreenEffectBlock.Comment.init -> void
 Kiln.ScreenEffectBlock.Equals(Kiln.ScreenEffectBlock? other) -> bool
@@ -3534,6 +3552,19 @@ Kiln.SpawnShape
 Kiln.SpawnShape.<Clone>$() -> Kiln.SpawnShape!
 Kiln.SpawnShape.Equals(Kiln.SpawnShape? other) -> bool
 Kiln.SpawnShape.SpawnShape() -> void
+Kiln.SpeechMode
+Kiln.SpeechMode.Game = 0 -> Kiln.SpeechMode
+Kiln.SpeechMode.Replace = 2 -> Kiln.SpeechMode
+Kiln.SpeechMode.Suppress = 1 -> Kiln.SpeechMode
+Kiln.SpeechResult
+Kiln.SpeechResult.<Clone>$() -> Kiln.SpeechResult!
+Kiln.SpeechResult.Deconstruct(out bool Ok, out string? Reason) -> void
+Kiln.SpeechResult.Equals(Kiln.SpeechResult? other) -> bool
+Kiln.SpeechResult.Ok.get -> bool
+Kiln.SpeechResult.Ok.init -> void
+Kiln.SpeechResult.Reason.get -> string?
+Kiln.SpeechResult.Reason.init -> void
+Kiln.SpeechResult.SpeechResult(bool Ok, string? Reason) -> void
 Kiln.SpellBlock
 Kiln.SpellBlock.<Clone>$() -> Kiln.SpellBlock!
 Kiln.SpellBlock.Cast.get -> Kiln.CastBlock!
@@ -5934,6 +5965,7 @@ override Kiln.NpcPerceptionStats.ToString() -> string!
 override Kiln.NpcPlace.Equals(object? obj) -> bool
 override Kiln.NpcPlace.GetHashCode() -> int
 override Kiln.NpcPlace.ToString() -> string!
+override Kiln.NpcSpeech.ToString() -> string!
 override Kiln.ObjectiveBlock.Equals(object? obj) -> bool
 override Kiln.ObjectiveBlock.GetHashCode() -> int
 override Kiln.ObjectiveBlock.ToString() -> string!
@@ -6061,6 +6093,9 @@ override Kiln.RuleBlock.ToString() -> string!
 override Kiln.RunningBlock.Equals(object? obj) -> bool
 override Kiln.RunningBlock.GetHashCode() -> int
 override Kiln.RunningBlock.ToString() -> string!
+override Kiln.SayOptions.Equals(object? obj) -> bool
+override Kiln.SayOptions.GetHashCode() -> int
+override Kiln.SayOptions.ToString() -> string!
 override Kiln.ScreenEffectBlock.<Clone>$() -> Kiln.ScreenEffectBlock!
 override Kiln.ScreenEffectBlock.Equals(object? obj) -> bool
 override Kiln.ScreenEffectBlock.GetHashCode() -> int
@@ -6103,6 +6138,9 @@ override Kiln.SpawnBlock.ToString() -> string!
 override Kiln.SpawnShape.Equals(object? obj) -> bool
 override Kiln.SpawnShape.GetHashCode() -> int
 override Kiln.SpawnShape.ToString() -> string!
+override Kiln.SpeechResult.Equals(object? obj) -> bool
+override Kiln.SpeechResult.GetHashCode() -> int
+override Kiln.SpeechResult.ToString() -> string!
 override Kiln.SpellBlock.Equals(object? obj) -> bool
 override Kiln.SpellBlock.GetHashCode() -> int
 override Kiln.SpellBlock.ToString() -> string!
@@ -7049,6 +7087,14 @@ static Kiln.NpcPerceptionStats.operator !=(Kiln.NpcPerceptionStats? left, Kiln.N
 static Kiln.NpcPerceptionStats.operator ==(Kiln.NpcPerceptionStats? left, Kiln.NpcPerceptionStats? right) -> bool
 static Kiln.NpcPlace.operator !=(Kiln.NpcPlace? left, Kiln.NpcPlace? right) -> bool
 static Kiln.NpcPlace.operator ==(Kiln.NpcPlace? left, Kiln.NpcPlace? right) -> bool
+static Kiln.Npcs.Available.get -> bool
+static Kiln.Npcs.CanSpeak(Kiln.EntityId npc) -> bool
+static Kiln.Npcs.IsSaying(Kiln.EntityId npc) -> bool
+static Kiln.Npcs.Say(Kiln.EntityId npc, Kiln.UiText! text, System.TimeSpan duration, Kiln.SayOptions? options = null) -> Kiln.SpeechResult!
+static Kiln.Npcs.Say(Kiln.EntityId npc, string! text, System.TimeSpan duration, Kiln.SayOptions? options = null) -> Kiln.SpeechResult!
+static Kiln.Npcs.Speech(Kiln.EntityId npc) -> Kiln.NpcSpeech!
+static Kiln.Npcs.SpeechOf(Kiln.EntityId npc) -> Kiln.SpeechMode
+static Kiln.Npcs.StopSaying(Kiln.EntityId npc) -> void
 static Kiln.ObjectiveBlock.operator !=(Kiln.ObjectiveBlock? left, Kiln.ObjectiveBlock? right) -> bool
 static Kiln.ObjectiveBlock.operator ==(Kiln.ObjectiveBlock? left, Kiln.ObjectiveBlock? right) -> bool
 static Kiln.OnHitBlock.operator !=(Kiln.OnHitBlock? left, Kiln.OnHitBlock? right) -> bool
@@ -7170,6 +7216,8 @@ static Kiln.RuleBlock.operator !=(Kiln.RuleBlock? left, Kiln.RuleBlock? right) -
 static Kiln.RuleBlock.operator ==(Kiln.RuleBlock? left, Kiln.RuleBlock? right) -> bool
 static Kiln.RunningBlock.operator !=(Kiln.RunningBlock? left, Kiln.RunningBlock? right) -> bool
 static Kiln.RunningBlock.operator ==(Kiln.RunningBlock? left, Kiln.RunningBlock? right) -> bool
+static Kiln.SayOptions.operator !=(Kiln.SayOptions? left, Kiln.SayOptions? right) -> bool
+static Kiln.SayOptions.operator ==(Kiln.SayOptions? left, Kiln.SayOptions? right) -> bool
 static Kiln.ScreenEffectBlock.operator !=(Kiln.ScreenEffectBlock? left, Kiln.ScreenEffectBlock? right) -> bool
 static Kiln.ScreenEffectBlock.operator ==(Kiln.ScreenEffectBlock? left, Kiln.ScreenEffectBlock? right) -> bool
 static Kiln.ScreenRef.implicit operator Kiln.ScreenRef!(Kiln.BlockHandle<Kiln.ScreenEffectBlock!>! handle) -> Kiln.ScreenRef!
@@ -7209,6 +7257,8 @@ static Kiln.SpawnShape.Shell(float radius) -> Kiln.SpawnShape!
 static Kiln.SpawnShape.Sphere(float radius, float? inner = null) -> Kiln.SpawnShape!
 static Kiln.SpawnShape.operator !=(Kiln.SpawnShape? left, Kiln.SpawnShape? right) -> bool
 static Kiln.SpawnShape.operator ==(Kiln.SpawnShape? left, Kiln.SpawnShape? right) -> bool
+static Kiln.SpeechResult.operator !=(Kiln.SpeechResult? left, Kiln.SpeechResult? right) -> bool
+static Kiln.SpeechResult.operator ==(Kiln.SpeechResult? left, Kiln.SpeechResult? right) -> bool
 static Kiln.SpellBlock.operator !=(Kiln.SpellBlock? left, Kiln.SpellBlock? right) -> bool
 static Kiln.SpellBlock.operator ==(Kiln.SpellBlock? left, Kiln.SpellBlock? right) -> bool
 static Kiln.Sphere.Of(double radius) -> Kiln.ColliderBlock!
@@ -7594,6 +7644,8 @@ static readonly Kiln.ItemKind.WateringCan -> Kiln.ItemKind!
 static readonly Kiln.LidBlock.Open -> System.Guid
 static readonly Kiln.LidBlock.Shut -> System.Guid
 static readonly Kiln.MaterialReflectance.FromParams -> Kiln.MaterialReflectance
+static readonly Kiln.Npcs.MaxSay -> System.TimeSpan
+static readonly Kiln.Npcs.MinSay -> System.TimeSpan
 static readonly Kiln.PlayerStateRef.Eaten -> Kiln.PlayerStateRef
 static readonly Kiln.PlayerStateRef.Eating -> Kiln.PlayerStateRef
 static readonly Kiln.ProjectileLook.Fireball -> Kiln.ProjectileLook!

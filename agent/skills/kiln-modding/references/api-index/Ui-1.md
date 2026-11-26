@@ -88,6 +88,9 @@ enum: Right, Left, Bottom
 - `Station { get; init; } -> EntityId` `0.2.7` — On a factory screen, the station's entity: the entity the game's screen is about (play data +0x2c50).
 - `Workshop { get; init; } -> uint` — keen::WorkshopId of the menu (the station's kind, e.g. the Workbench 0x4da88f73; 0 = the player's own crafting).
 
+## DockSide `0.2.23` — Which side of the other window a docked window sits on (`UiWindow.DockTo`).
+enum: Left, Right, Top, Bottom
+
 ## GameLanguage — The game's text language (keen::LanguageId, from the game's reflection; docs/re/content.md 8.1).
 - `static Current { get; } -> string` — "de-de", "en-us", ...; "en-us" when unknown (dedicated server, the game's source strings, an older build).
 - `static KeyOf(uint languageId) -> string` — The key of a keen::LanguageId value.
@@ -506,6 +509,7 @@ enum: End, AfterStats
 ## Ui — Kiln's overlay: windows, per-frame drawing, the Kiln menu; the game's screens (`Screens`), entries in its menus (`Menus`), crafting menus (`Crafting`) and full mod...
 - `static AddConfigPage(string modId, Action<UiDraw> draw) -> IDisposable` — Adds a page to the Kiln menu's config tab for `modId` (the seam for the config registry: a config editor registers...
 - `static Available { get; } -> bool` — The overlay exists in this process (a game client with a supported renderer).
+- `static FindWindow(string modId, string placementId) -> UiWindowHandle?` `0.2.23` — A window of `modId` that accepts docks (`UiWindowOptions.AcceptDock`), by its `UiWindowOptions.PlacementId` (else...
 - `static Frame -> Action<UiDraw>?` — Every overlay frame (render thread).
 - `static ItemIconsAvailable { get; } -> bool` `0.2.7` — Whether `Ui.ItemImage` draws the game's icons here (a game client whose overlay draws, with this Kiln's kiln.ui and...
 - `static ItemImage(ItemId item) -> UiImage?` `0.2.7` — The game's own icon of `item` as an image for `UiDraw.Image`, `UiDraw.ImageButton` and `RenderDraw.Image` (since...
@@ -603,3 +607,12 @@ enum: End, AfterStats
 - `static SubscribeSlots(Action<VisibleSlotsResult> onFrame) -> UiValueRegistration` — Calls `onFrame` once per completed UI frame, on the game client's main thread right after the frame.
 - `const TooltipCapability = "ui.values.tooltip_lines" -> string` — The capability row of the tooltip lines and the details window.
 - `static TooltipLines(ItemId item, UiTooltipProvider provider) -> UiValueRegistration` — Adds lines for `item` (0: every item) to Kiln's "Item details" window.
+
+## Ui.World `0.2.13` — The game's world as this player's client draws it: outlines on entities with the game's own highlight (`World.Outline`).
+- `static ClearOutlines() -> void` — Takes every outline of your mod away (their handles end with `OutlineReason.Removed`).
+- `static DefaultOutlineColor { get; } -> Color` — The colour of an outline whose options name none: gold, (255, 196, 64).
+- `static Outline(EntityId entity, OutlineOptions? options = null) -> WorldOutline` — Outlines `entity`'s model with the game's own highlight, in this player's game, until you dispose the handle, your...
+- `const OutlineCapability = "ui.world_outline" -> string` — The capability row of `World.Outline`: a sigdb feature of the game client (kiln.render's palette hooks); kiln.render...
+- `static OutlinesAvailable { get; } -> bool` — Outlines work in this process: the row `World.OutlineCapability` is on and kiln.render has its outline functions (v2).
+- `static ThroughWallsAvailable { get; } -> bool` `0.2.14` — Kiln draws through-walls silhouettes in this process: the row `World.ThroughWallsCapability` is on.
+- `const ThroughWallsCapability = "ui.world_outline.through_walls" -> string` `0.2.14` — The capability row of `OutlineOptions.ThroughWalls`: `World.OutlineCapability` on, kiln.render v3 (the entity's...
