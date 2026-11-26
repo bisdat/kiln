@@ -791,7 +791,6 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     const RAWKEYBOARD& kb = ri->data.keyboard;
                     const bool down = (kb.Flags & RI_KEY_BREAK) == 0;
                     const uint32_t vk = kb.VKey;
-                    if (down) g_text_field.raw_down(vk, g_sent.take(vk, now_ms()));  // a press a mod sent (text_keep.h)
                     const bool consumed = on_key(vk, kb.MakeCode | ((kb.Flags & RI_KEY_E0) ? 0x100u : 0u), down);
                     if (vk < 256) g_up_kept[vk] = consumed && !down;
                     if ((consumed || cap) && down) {
@@ -880,9 +879,9 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const uint32_t vk = static_cast<uint32_t>(w) & 0xFF;
             bool consumed = false;
             if (g_raw_keyboard_seen && !raw_input::registered_for(6, h)) g_raw_keyboard_seen = false;
-            // a press a mod sent while a Kiln text field had the keyboard: its raw record said so, or with no raw
-            // keyboard input this message is its first sight; it and its characters stay out of the field (text_keep.h)
-            const bool text_kept = g_text_field.key_down(vk, !g_raw_keyboard_seen && g_sent.take(vk, now_ms()));
+            // a press a mod sent while a Kiln text field had the keyboard (the next key message of its key, with a raw
+            // record or without): it and its characters stay out of the field (text_keep.h)
+            const bool text_kept = g_text_field.key_down(vk, g_sent.take(vk, now_ms()));
             if (!g_raw_keyboard_seen)
                 consumed = on_key(vk, (static_cast<uint32_t>(l) >> 16) & 0x1FF, true, false, hold::prev_of_lparam(l));
             else {

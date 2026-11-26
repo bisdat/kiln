@@ -18,17 +18,14 @@ using kui::textkeep::Field;
 using kui::textkeep::Sent;
 constexpr uint32_t T = 'T', B = 'B', A = 'A', Back = 0x08;
 
-// What the field types of one key's messages, as input.cpp hands them over: a raw record (when the window gets raw
-// keyboard input), the key message, its character(s), the release.
+// What the field types of one key's messages, as input.cpp hands them over: the key message (it takes a sent press of
+// its key, whether or not a raw record came for it), its character(s), the release.
 struct Window {
     Sent sent;
     Field field;
-    bool raw = true;
     std::string typed;
     void key(uint32_t vk, char c, uint64_t now) {
-        if (raw) field.raw_down(vk, sent.take(vk, now));
-        const bool kept = field.key_down(vk, !raw && sent.take(vk, now));
-        (void)kept;
+        field.key_down(vk, sent.take(vk, now));
         if (c && !field.character()) typed += c;
         field.key_up(vk);
     }
@@ -64,42 +61,35 @@ int main() {
         check(w.typed == "b", "a sent press whose input never came is forgotten after kSentMs: a later B types");
     }
     {
-        Window w;
-        w.raw = false;  // no raw keyboard: the key message takes the sent press
-        w.key(T, 't', 100);
-        w.sent.add(B, 116);
-        w.key(B, 'b', 130);
-        w.key(T, 't', 400);
-        check(w.typed == "tt", "without raw records the key message is kept out the same way");
+        Window w;  // two Bs in a row: the sent one and the player's (their raw records, if any, ahead of them)
+        w.sent.add(B, 100);
+        w.key(B, 'b', 110);
+        w.key(B, 'b', 111);
+        check(w.typed == "b", "a sent B and the player's B right behind it: one types");
     }
     {
         Window w;
         w.sent.add(Back, 100);  // a sent Backspace (no character) edits nothing either
-        w.field.raw_down(Back, w.sent.take(Back, 110));
-        check(w.field.key_down(Back, false), "a sent key without a character: its key message stays out of the field");
+        check(w.field.key_down(Back, w.sent.take(Back, 110)), "a sent key without a character: its key message stays out of the field");
         w.field.key_up(Back);
-        w.field.raw_down(Back, w.sent.take(Back, 300));
-        check(!w.field.key_down(Back, false), "the player's own Backspace after it edits");
+        check(!w.field.key_down(Back, w.sent.take(Back, 300)), "the player's own Backspace after it edits");
     }
     {
-        Window w;  // two raw records ahead of their key messages (a tap sent as one SendInput call)
+        Window w;  // a tap sent as one SendInput call, a typed T behind it
         w.sent.add(B, 100);
-        w.field.raw_down(B, w.sent.take(B, 110));
-        w.field.raw_down(T, w.sent.take(T, 111));
-        check(w.field.key_down(B, false) && w.field.character(), "the sent B's key message and character stay out");
+        check(w.field.key_down(B, w.sent.take(B, 110)) && w.field.character(), "the sent B's key message and character stay out");
         w.field.key_up(B);
-        check(!w.field.key_down(T, false) && !w.field.character(), "the typed T behind it types");
+        check(!w.field.key_down(T, w.sent.take(T, 111)) && !w.field.character(), "the typed T behind it types");
     }
     {
         Window w;
         w.sent.add(B, 100);
-        w.field.raw_down(B, w.sent.take(B, 110));
-        w.field.forget();  // the window lost the focus
-        check(!w.field.key_down(B, false), "a focus loss forgets what was kept");
+        w.field.key_down(B, w.sent.take(B, 110));
+        w.field.forget();  // the window lost the focus (before the sent B's character)
+        check(!w.field.character(), "a focus loss forgets what was kept");
         w.sent.add(B, 200);
         w.sent.clear();
-        w.field.raw_down(B, w.sent.take(B, 210));
-        check(!w.field.key_down(B, false), "and Sent::clear forgets the sent presses");
+        check(!w.field.key_down(B, w.sent.take(B, 210)), "and Sent::clear forgets the sent presses");
     }
     {
         Sent s;
