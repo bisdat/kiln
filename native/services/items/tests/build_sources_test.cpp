@@ -259,6 +259,25 @@ int main() {
         CHECK(look(0,10,5,40)==45);
         in_base = true; player_placed = false; g_build_dirty.store(true); build_cache_refresh(7);
         CHECK(look(0,10,5,40)==45);                                                     // no position: nothing left out
+        // GitHub #132 (0.2.0-dev.31.17): the FILLS rows leave the base's Magic chests out as well (the station screen's
+        // rows add the bag and those chests themselves, and the item fill pays them first): a fill link to BUILD counts once
+        {
+            const uint64_t f1 = add(BUILD, KILN_CRAFT_SOURCE_FILLS), f2 = add(BUILD2, KILN_CRAFT_SOURCE_FILLS);
+            auto fills = [&] {
+                KilnStationStack out[8] = {}; uint32_t n = 0;
+                std::map<uint32_t, uint32_t> m;
+                if (t_source_stock(PLAYER, KILN_CRAFT_SOURCE_STOCK_FILLS, out, 8, &n) == KILN_OK)
+                    for (uint32_t i = 0; i < n; ++i) m[out[i].item] = out[i].count;
+                return m;
+            };
+            CHECK(f1 && f2 && (fills() == std::map<uint32_t, uint32_t>{{STONE, 35}, {WOOD, 4}}));  // no position: every fill link
+            player_placed = true;
+            CHECK((fills() == std::map<uint32_t, uint32_t>{{STONE, 5}}));                          // in the base: BUILD is the base's
+            in_base = false;
+            CHECK((fills() == std::map<uint32_t, uint32_t>{{STONE, 35}, {WOOD, 4}}));              // in no base: every link again
+            in_base = true; player_placed = false;
+            t_remove_source(10, f1); t_remove_source(10, f2);
+        }
         g_w = nullptr; G.base_at = nullptr; G.bases_count = G.stride = G.stock_items = G.stock_items_count = 0;
         G.stock_water = G.stock_water_count = G.aabb_y = G.zone_mask_rel = 0; std::memset(bases + 0x100, 0, 0x100);
         g_build_dirty.store(true); build_cache_refresh(8);

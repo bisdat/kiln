@@ -19,7 +19,8 @@ internal static unsafe class StationsNative
     public const uint CollectOutputs = 0x10000, CollectLeftovers = 0x20000, CollectToBase = 0x40000;  // native collect's own bits
     // request flags
     public const uint FillAdd = 0x1, FillExact = 0x2, DryRun = 0x4, NoWater = 0x8, AfterCraft = 0x10, KeepStopped = 0x20,
-        AllowLocked = 0x40, FillNoOutputs = 0x80, FillLinked = 0x100;  // FillLinked: 0.2.0-dev.31.12 (GitHub #132)
+        AllowLocked = 0x40, FillNoOutputs = 0x80, FillLinked = 0x100,  // FillLinked: 0.2.0-dev.31.12 (GitHub #132)
+        FillItem = 0x200;  // 0.2.0-dev.31.17 (GitHub #132): the station screen's per-ingredient transfer, only where FillFlags names it
     // event kinds
     public const uint EvState = 1, EvPlaced = 2, EvRemoved = 3, EvBases = 4;
     // KilnStation.flags
@@ -106,7 +107,8 @@ internal static unsafe class StationsNative
         public Choice C0, C1, C2, C3;
         public uint Player, KeepCount;
         public Stack* Keep;
-        public fixed uint Reserved[4];
+        public uint Item;  // FillItem's item (0.2.0-dev.31.17; reserved[0] before, so 0 everywhere else)
+        public fixed uint Reserved[3];
         public uint ChestCount, ChestReserved;
         public uint* Chests;
     }
@@ -226,6 +228,8 @@ internal static unsafe class StationsNative
         public delegate* unmanaged[Cdecl]<uint*, uint, uint*, int> LockAsks;
         // ---- block placements from linked sources (GitHub #132, 0.2.0-dev.31.12). Header.Size tells whether it is here. ----
         public delegate* unmanaged[Cdecl]<uint, Stack*, uint, int> SetBuildStock;
+        // ---- the FILL flags this kiln.stations takes (GitHub #132, 0.2.0-dev.31.17). Header.Size tells whether it is here. ----
+        public delegate* unmanaged[Cdecl]<uint> FillFlags;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -292,6 +296,8 @@ internal static unsafe class StationsNative
     public static readonly int TableLocks = TableDyes + 2 * sizeof(nint);
     /// <summary>The table size through <see cref="Table.SetBuildStock"/>: fills and building from linked sources (0.2.0-dev.31.12).</summary>
     public static readonly int TableBuild = TableLocks + sizeof(nint);
+    /// <summary>The table size through <see cref="Table.FillFlags"/>: item fills (the per-ingredient transfer, 0.2.0-dev.31.17).</summary>
+    public static readonly int TableItemFills = TableBuild + sizeof(nint);
     /// <summary>The plan's size before 0.2.0-dev.29.17 (no <see cref="Plan.Outputs"/>).</summary>
     public static readonly int PlanV1 = sizeof(Plan) - 3 * MaxInputs * sizeof(uint);
     /// <summary>The plan's size with outputs and without <see cref="Plan.Chests"/>.</summary>

@@ -219,6 +219,26 @@
         }
       ]
     },
+    "stations/AutoTransferItem": {
+      "comment": "GitHub #132 (0.2.0-dev.31.17): the station screen's per-ingredient transfer (S 0x198bf0, C 0x3f7950): int (tx, {u32* ids, count}* list A, item, station, u16 amount, player): PayMaterial from the player when set, then each list entity in order; 4 when still short, then the station's add, 2 on a leftover. docs/re/stations.md section 10.9.",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 6C 24 18 48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 81 EC 80 00 00 00 44 0F B7 AC 24 D0 00 00 00 41 8B D8 44 8B 84 24 D8 00 00 00"
+        }
+      ]
+    },
+    "@stations/AutoTransferAction.item": {
+      "comment": "GitHub #132 (0.2.0-dev.31.17): AutoTransferAction's item branch (itemId != 0): AutoTransferItem(tx = rbp+0x3b0, &{list A, count} at rsp+0x40, item [rsi+8], station [rsi], u16 amount [rsi+amount], player [rbp+0x7590]); pins the argument order Kiln's item fill calls it with.",
+      "find": [
+        {
+          "scope": {
+            "symbol": "stations/AutoTransferAction",
+            "size": 1088
+          },
+          "pattern": "44 39 66 08 74 ?? 8B 85 90 75 00 00 48 8D 54 24 40 44 8B 0E 48 8D 8D B0 03 00 00 44 8B 46 08 89 44 24 28 0F B7 46 {stations/action.amount:d8} 66 89 44 24 20 48 89 7C 24 40 4C 89 7C 24 48 E8 {stations/AutoTransferItem:rel32}"
+        }
+      ]
+    },
     "@stations/FactoryStationUpdate.timing": {
       "find": [
         {
@@ -467,6 +487,17 @@
         "stations/stack.item",
         "stations/stack.size",
         "stations/recipe.water_charges"
+      ]
+    },
+    "stations.fill_items": {
+      "comment": "GitHub #132 (0.2.0-dev.31.17): Kiln's item fill (KILN_STATION_FILL_ITEM): the station screen's per-ingredient transfer through the game's own AutoTransferItem, from the bag and the base's Magic chests, then the player's fill-opted links. docs/re/stations.md section 10.9.",
+      "symbols": [
+        "stations/AutoTransferItem",
+        "@stations/AutoTransferAction.item",
+        "stations/AutoTransferAction"
+      ],
+      "constants": [
+        "stations/action.amount"
       ]
     },
     "stations.craft_sources": {
