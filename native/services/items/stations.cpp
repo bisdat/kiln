@@ -989,11 +989,11 @@ thread_local bool t_build_pay = false;
 LogLimit g_log_build_pay{16};
 std::atomic<bool> g_build_dirty{true};  // a registration changed: the server's count of building links is read again
 
-void left_to_game(const char* why, unsigned mode, unsigned err, uint32_t owner) {
+void left_to_game(const char* why, unsigned mode, unsigned err, uint32_t owner, bool build = false) {
     trace(kTraceLeft, 0, why);
-    if (const uint32_t n = g_log_left.take())
-        LOGI("stations: craft payment left to the game (%s; mode %u, stock error %u, payer %u)%s", why, mode, err, owner,
-             n > 1 ? " (more held back)" : "");
+    if (const uint32_t n = (build ? g_log_build_pay : g_log_left).take())
+        LOGI("stations: %s payment left to the game (%s; mode %u, stock error %u, payer %u)%s", build ? "block placement" : "craft",
+             why, mode, err, owner, n > 1 ? " (more held back)" : "");
 }
 
 // 1: this call was paid here (*code is 0 or 4). 0: the game's InventoryPay should run.
@@ -1032,7 +1032,7 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
     unsigned long fault = 0;
     if (!guard(&tx_head_impl, &head, &fault)) {
         CS.skipped.fetch_add(1, std::memory_order_relaxed);
-        left_to_game("the transaction could not be read", 0, 0, owner);
+        left_to_game("the transaction could not be read", 0, 0, owner, build);
         return 0;
     }
     if (head.mode == 0 && registered.empty()) {  // a factory never has player-bound registrations
@@ -1044,15 +1044,22 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
     const uint64_t used = head.bases ? head.bases : head.arg4;  // the bases system BaseStockForPlayer reads (S 0x208281)
     const bool same_bases = srv_bases && (used == reinterpret_cast<uint64_t>(srv_bases) ||
         (head.mode == 0 && !used && !registered.empty()));
-    if (!same_bases || !access_from_tx(tx, &a)) {
+    // GitHub #148: the blueprint program's transaction has no Fuel accessor (player_building_blueprints leaves its setup's
+    // +0x70 zero, S 0xc4a57 / C 0x2d8ab7, which InventoryTxInit copies to the transaction's Fuel word; docs/re/stations.md
+    // section 13), so the full check refused every placement and the game paid from the bag and the base alone. A
+    // placement's payment reads only InventorySetup and Inventory (count_pages, setup_flags) and takes through the game's
+    // PayMaterial: it is checked by those two, as a lock's payment is.
+    const bool accessors = same_bases && (build ? access_from_tx_reads(tx, &a) : access_from_tx(tx, &a));
+    if (!same_bases || !accessors) {
         CS.other_world.fetch_add(1, std::memory_order_relaxed);
         // Another world's transaction (a hosting client's own dry runs) and the server world's transaction whose accessors
         // did not check out are told apart, each with its own lines: the first are many and expected.
         trace(same_bases ? kTraceTxRefused : kTraceOtherWorld);
         if (same_bases) {
             if (const uint32_t n = g_log_tx.take())
-                LOGW("stations: the server world's craft transaction did not check out (its accessors): its payment is the "
-                     "game's, crafting sources not asked (mode %u, payer %u)%s", head.mode, owner, n > 1 ? " (more held back)" : "");
+                LOGW("stations: the server world's %s transaction did not check out (its accessors): its payment is the "
+                     "game's, crafting sources not asked (mode %u, payer %u)%s", build ? "block placement" : "craft", head.mode, owner,
+                     n > 1 ? " (more held back)" : "");
         } else if (const uint32_t n = g_log_dry.take()) {
             TxWords w{static_cast<const uint8_t*>(tx), {}};
             guard(&tx_words_impl, &w, &fault);
@@ -1069,7 +1076,7 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
     StockJob stock{&head, owner, {}, {}};
     if (head.mode != 0 && !guard(&stock_job_impl, &stock, &fault)) {
         CS.skipped.fetch_add(1, std::memory_order_relaxed);
-        left_to_game("the base stock call faulted", head.mode, 0, owner);
+        left_to_game("the base stock call faulted", head.mode, 0, owner, build);
         return 0;
     }
     const int32_t base = base_index_at(srv_bases, KilnVec3{head.pos[0], head.pos[1], head.pos[2]});
@@ -1089,13 +1096,13 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
         if (!lab && registered.empty()) {
             CS.no_access.fetch_add(1, std::memory_order_relaxed);
             left_to_game(stock.err.error == 0x16 ? "the payer may not access the base's inventories" : "the payer stands in no base",
-                         head.mode, stock.err.error, owner);
+                         head.mode, stock.err.error, owner, build);
             return 0;
         }
     }
     auto skip = [&](const char* why) {
         CS.skipped.fetch_add(1, std::memory_order_relaxed);
-        left_to_game(why, head.mode, stock.err.error, owner);
+        left_to_game(why, head.mode, stock.err.error, owner, build);
         return 0;
     };
     if (base < 0 && registered.empty()) return skip("the transaction's position is in no base");

@@ -46,7 +46,7 @@ def main():
         symbols = {}
         for _, part, _ in compose(side):
             symbols.update(part.get('symbols', {}))
-        doc = {'symbols': symbols, 'features': {'build': {'symbols': NAMES}}}
+        doc = {'symbols': symbols, 'features': {'build': {'symbols': NAMES}, 'tx': {'symbols': ['items/InventoryTxInit']}}}
         image = Image(path)
         found, _, features = Resolver(image, doc).run()
         check(features['build'], side + ' crafting.build_sources resolves')
@@ -67,6 +67,24 @@ def main():
         # ApplyMaterials' take in mode 0: InventoryPay(tx, list, [tx+0xe0], 1, 0); the blueprint call passes take = r12b
         check(raw[paid - 17:paid - 5] == bytes.fromhex('448B81E0000000') + bytes.fromhex('48895C2420'), side + ' the take names the operator')
         check(raw[bp_ret - 17:bp_ret - 13] == bytes.fromhex('450FB6C4'), side + ' the blueprint program passes its take flag')
+        # GitHub #148: the blueprint program's transaction has no Fuel accessor. Its setup (rbp+0x290, passed to
+        # items/InventoryTxInit right before the payment) has +0x60..+0xbf stored from zeroed xmm0/xmm1 (+0x70, the Fuel
+        # accessor, by movdqa [rbp+0x300],xmm1), and InventoryTxInit copies setup+0x70 to tx+0x38, the word kiln.items'
+        # access_from_tx reads as Fuel (w[7]); so only access_from_tx_reads (InventorySetup and Inventory) accepts it
+        tx_init = found['items/InventoryTxInit']['rva']
+        init_call = bp_ret - 0x61
+        check(raw[init_call] == 0xE8 and rel(init_call) == tx_init, side + ' the blueprint program opens its transaction with InventoryTxInit')
+        check(raw[init_call - 0x60:init_call].find(bytes.fromhex('488D9590020000')) >= 0, side + ' ... from its setup at rbp+0x290')
+        setup = raw[bp_ret - 0x17e:init_call]
+        check(setup.startswith(bytes.fromhex('0F9485910200')), side + ' the setup\'s stock mode is the sete at rbp+0x291')
+        zero = setup.find(bytes.fromhex('660F7F8D00030000'))
+        before = raw[bp_ret - 0x1a0:bp_ret - 0x17e]  # xorps xmm0,xmm0 / xorps xmm1,xmm1 come right before the sete
+        check(zero > 0 and bytes.fromhex('0F57C9') in before and b'\x0f\x28' not in setup[:zero] and b'\x0f\x10' not in setup[:zero],
+              side + ' setup+0x70 (Fuel) is stored from a zeroed xmm1 (no xmm load in between)')
+        check(setup.count(bytes.fromhex('00030000')) == 1, side + ' nothing else writes setup+0x70 before InventoryTxInit')
+        check(raw[tx_init:tx_init + 0x160].find(bytes.fromhex('488B427048894138')) > 0, side + ' InventoryTxInit copies setup+0x70 to tx+0x38')
+        engine = (ROOT / 'native/services/items/engine.cpp').read_text()
+        check('a->acc[A_FUEL] = reinterpret_cast<uint64_t>(w[7]);' in engine, 'access_from_tx reads Fuel at tx+0x38 (w[7])')
         for at in [cursor_ret - 5, bp_ret - 5]:
             altered = copy.copy(image)
             b = bytearray(raw)
