@@ -813,20 +813,21 @@ struct Renamer {
             });
         if (!error.empty() || !e->contains("field") || !(*e)["field"].is_string()) return;
         const std::string path = (*e)["field"].get<std::string>();
-        const FieldSpec* f = reg.field(path);
-        if (!f) return;
-        // an element edit's op is that element's (or leaf's) value; a whole field's op or list op its own
+        // an element edit's op is that element's (or leaf's) value; a whole field's op or list op its own. review: the list's
+        // spec for an element path ("inputs[0]" names no field of its own, so its whole-element op was skipped)
         const bool element = path.find('[') != std::string::npos;
+        const FieldSpec* f = reg.field(element ? path.substr(0, path.find('[')) : path);
+        if (!f) return;
         const std::string written_list = written.substr(0, written.find('['));
         if (e->contains("op")) {
             json& op = (*e)["op"];
             if (!element) values(reg, *f, written_list, &op);
-            else if (const FieldSpec* list = reg.field(path.substr(0, path.find('['))); list && list->type == FieldType::List) {
+            else if (f->type == FieldType::List) {
                 const size_t dot = path.find("].");
                 if (dot != std::string::npos) {
-                    if (const FieldSpec* leaf = list->element_field(path.substr(dot + 2)); leaf && !leaf->ref.empty()) id(leaf->ref, op.is_object() && op.contains("set") ? &op["set"] : &op);
+                    if (const FieldSpec* leaf = f->element_field(path.substr(dot + 2)); leaf && !leaf->ref.empty()) id(leaf->ref, op.is_object() && op.contains("set") ? &op["set"] : &op);
                 } else {
-                    values(reg, *list, written_list, op.is_object() && op.contains("set") ? &op["set"] : &op);
+                    values(reg, *f, written_list, op.is_object() && op.contains("set") ? &op["set"] : &op);
                 }
             }
         }
