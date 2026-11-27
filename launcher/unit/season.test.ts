@@ -145,10 +145,12 @@ describe("the season's words", () => {
 });
 
 describe("the shaders", () => {
-  test("every other day's fire is the very same text as before the festive season (sha-256)", () => {
+  test("every other day's fire is the very same text as before the festive season, the festive one the reviewed text (sha-256)", () => {
     const sha = (s: string) => new Bun.CryptoHasher("sha256").update(s).digest("hex");
     expect(sha(FRAG)).toBe("feea587170a00be17aede5a03812b18c14b38bf0f7be09d43dd93cffc6a512c3");
     expect(sha(FRAG_TURKEY)).toBe("2fb021eeac902550b4ee46fb5302605ef37d2ebfddc6d3736717207e2e84ce7e");
+    // and the festive fire is the text its review saw (0.2.0-dev.31.20): a change to it is a change to the season's look
+    expect(sha(FRAG_FESTIVE)).toBe("25ad8c48e9af2f45435da92383c78f7dad05857388760f344107555b29db294c");
   });
   test("the festive fire is every day's plus the snow: no turkey in it, and no snow anywhere else", () => {
     for (const word of ["snow(", "melt"]) {

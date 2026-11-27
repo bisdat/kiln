@@ -170,6 +170,53 @@ test("forced off: every day's fire, byte for byte", async ({ page }) => {
   expect(frags[0]).not.toContain("snow(");
 });
 
+// A driver that cannot build the festive fire's shader (the snow makes it bigger; ANGLE's D3D back-end compiles it only at
+// the link) keeps every day's fire, as one that cannot build the turkey's does (thanksgiving.spec.ts): the fire never goes
+// out for the season. The snow is in that shader, so there is none; the rest of the season stays as on any other GPU (the
+// mantel and the threshold's diyas, burning with that fire, the accent, the sheets' garland).
+for (const at of ["compile", "link"] as const) {
+  test(`a GPU that cannot build the festive shader (${at}) keeps every day's fire, without the snow; the mantel burns with it`, async ({ page }) => {
+    await record(page);
+    await page.addInitScript((at: string) => {
+      const P = WebGLRenderingContext.prototype;
+      const texts = new WeakMap<WebGLShader, string>();
+      const parts = new WeakMap<WebGLProgram, WebGLShader[]>();
+      const src = P.shaderSource, attach = P.attachShader, shaderParam = P.getShaderParameter, programParam = P.getProgramParameter;
+      P.shaderSource = function (s: WebGLShader, text: string) { texts.set(s, text); return src.call(this, s, text); };
+      P.attachShader = function (p: WebGLProgram, s: WebGLShader) { parts.set(p, [...(parts.get(p) ?? []), s]); return attach.call(this, p, s); };
+      const snowy = (s: WebGLShader) => texts.get(s)?.includes("snow(") === true;
+      if (at === "compile") {
+        P.getShaderParameter = function (s: WebGLShader, name: number) {
+          return name === this.COMPILE_STATUS && snowy(s) ? false : shaderParam.call(this, s, name);
+        };
+      } else {
+        P.getProgramParameter = function (p: WebGLProgram, name: number) {
+          return name === this.LINK_STATUS && (parts.get(p) ?? []).some(snowy) ? false : programParam.call(this, p, name);
+        };
+      }
+    }, at);
+    await open(page, "?theme=festive");
+    test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire never starts");
+    await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+    await expect(page.locator(".k-app")).toHaveAttribute("data-theme", "festive");
+    const { plain, festive } = await shaders(page);
+    const a = await rec(page);
+    // the festive shader was tried first, then every day's: the one that draws
+    expect([...new Set(a.frags)]).toEqual([festive, plain]);
+    await expect.poll(async () => (await rec(page)).draws - a.draws).toBeGreaterThan(2);
+    await expect(page.locator(".k-fest-mantel").first()).toBeVisible();
+    await expect(page.locator(".k-fest-hearth")).toBeVisible();
+    await expect(page.locator(".kf-greet-a")).toHaveText("Warm wishes for the season");
+    // its flames move on that fire's frames
+    const flame = page.locator(".k-fest-mantel:not(.k-fest-hearth) [data-fl]").first();
+    const first = await flame.getAttribute("transform");
+    await expect.poll(() => flame.getAttribute("transform")).not.toBe(first);
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Servers" }).click();
+    await expect(page.locator(".k-sheet .k-fest-rim")).toBeVisible();
+    await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+  });
+}
+
 test("the turkey wins: never both", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await open(page, "?turkey=1&theme=festive");
