@@ -19,7 +19,8 @@ export const stageInput = { play: true, heat: "idle" as Heat, hover: false, game
 
 /** The festive season's mantel (shell/Festive.tsx) moves on the fire's frames: called after each frame the festive fire
  *  draws, with the fire's clock (s), its flicker (F, 0..1; .5 and the clock at 12 when still) and the mouth's spring (k:
- *  0 Play, 1 the pilot light). Never called by the fire of other days. */
+ *  0 Play, 1 the pilot light). Never called by the fire of other days (in the season, a driver that cannot build
+ *  FRAG_FESTIVE draws FRAG and still calls it). */
 export const stageFrame: { fn: ((t: number, F: number, k: number) => void) | null } = { fn: null };
 
 /** How hot the fire burns for each state (1: the hot idle on hover). */
@@ -273,7 +274,9 @@ export function wakeStage() {
  *  still, writes no flicker and draws only when what it shows changed (wakeStage, a resize), with no timer meanwhile.
  *  `turkey`: Thanksgiving weekend's shader (FRAG_TURKEY; give the canvas a new key to switch); `festive`: the festive
  *  season's (FRAG_FESTIVE, and stageFrame after each frame; turkey wins); otherwise FRAG, as always.
- *  A driver that cannot build FRAG_TURKEY gets FRAG instead (no `data-turkey` on the app, so no greeting). */
+ *  A driver that cannot build FRAG_TURKEY or FRAG_FESTIVE gets FRAG instead: the fire never goes out for a season. For the
+ *  turkey no `data-turkey` on the app, so no greeting; for the festive season no snow (it is in the shader), and the
+ *  rest of the season's look stays, the mantel moving on FRAG's frames (stageFrame) as on the festive fire's. */
 export function Stage({ root, enabled = true, turkey = false, festive = false, onLit }: { root: RefObject<HTMLDivElement>; enabled?: boolean; turkey?: boolean; festive?: boolean; onLit?: (lit: boolean) => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
   // the latest callback, without restarting the fire when the parent renders a new one
@@ -326,12 +329,14 @@ export function Stage({ root, enabled = true, turkey = false, festive = false, o
       gl!.attachShader(p, vs); gl!.attachShader(p, fs); gl!.linkProgram(p);
       return gl!.getProgramParameter(p, gl!.LINK_STATUS) ? p : "link";
     };
-    // Thanksgiving weekend: a driver that cannot build the turkey's bigger shader (ANGLE's D3D back-end compiles it only at
-    // the link) keeps every day's fire, and the greeting stays away with the bird (data-turkey, base.css)
+    // Thanksgiving weekend and the festive season: a driver that cannot build the season's bigger shader (ANGLE's D3D
+    // back-end compiles it only at the link) keeps every day's fire. The turkey's greeting stays away with the bird
+    // (data-turkey, base.css); the festive look keeps its mantel, burning on this fire's frames, without the snow
     let roast = turkey;
-    let prog = build(roast ? FRAG_TURKEY : festive ? FRAG_FESTIVE : FRAG);
-    if (typeof prog === "string" && roast) {
-      console.warn(`Hearth fire: the Thanksgiving turkey's shader did not build (${prog}); every day's fire instead`);
+    const want = roast ? FRAG_TURKEY : festive ? FRAG_FESTIVE : FRAG;
+    let prog = build(want);
+    if (typeof prog === "string" && want !== FRAG) {
+      console.warn(`Hearth fire: the ${roast ? "Thanksgiving turkey's" : "festive season's"} shader did not build (${prog}); every day's fire instead`);
       roast = false;
       prog = build(FRAG);
     }
