@@ -50,13 +50,16 @@ var homes = _cfg.Value.MaxHomes;                    // always the current value 
 - `SoftMin = true` / `SoftMax = true` (mod API 0.2.26, kiln#155) make a side of the range soft: the slider of the
   in-game config page and the launcher still stops there, but a value past it, typed into the number field, read from
   the file, set with `TrySet` or sent by a server, is kept as it is: no refusal, no clamp, no warning, and the file is
-  not corrected. Only the number's own type still bounds it (an `int` entry stays an int, a `byte` 0..255). The other
+  not corrected. Only the number's own type still bounds it (an `int` entry stays an int, a `byte` 0..255, a `decimal`
+  about ±7.9e28). The other
   side stays hard: `[Range(0, 1, 0.1, SoftMax = true)]` refuses a typed -1 (`"costMultiplier" must be in 0..max (got
   -1)`; the soft side shows the type's bound, `max` for a double) and clamps -1 in the file with the usual warning.
   The slider is given the real value and puts its grab at its end; dragging it gives a value of `min..max` again.
   `ConfigEntry.SoftMin` / `SoftMax` and the schemas' `softMin` / `softMax` (written only when true) carry it; the
   file's meta line reads `Range: 0 .. 1 (slider; higher values allowed)`. Durations and lists of numbers follow the
-  same rule, and a command argument has no bound on a soft side. DataAnnotations' `RangeAttribute` has no soft sides.
+  same rule (their meta line names no slider: `Range: 1s .. 1m (higher values allowed)`), a command argument has no
+  bound on a soft side, and a UI block's `set` action or slider may go past it ([ui-blocks.md](modding/ui-blocks.md)).
+  DataAnnotations' `RangeAttribute` has no soft sides.
   A mod that sets them needs mod API 0.2.26 (the SDK writes it; an older Kiln refuses the mod at load instead of
   failing on the attribute). An older launcher ignores the flags and keeps enforcing that side.
 
