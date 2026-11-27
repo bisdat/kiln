@@ -174,7 +174,14 @@ bool parse_hash(const std::string& s, HashK* out) {
 
 std::string blob_hash_refusal(const std::string& file, const std::string* text, const std::string& shown, HashK* out) {
     if (text && parse_hash(*text, out)) return {};
-    return "blob " + file + ": bad hash " + (shown.size() > 80 ? shown.substr(0, 77) + "..." : shown) +
+    // a long value: its first 77 bytes and "...", cut between two characters (the text is UTF-8 in kiln.log, the report and
+    // boot's issue), never after the lead byte of one
+    size_t keep = shown.size();
+    if (keep > 80) {
+        keep = 77;
+        while (keep > 0 && (static_cast<unsigned char>(shown[keep]) & 0xC0) == 0x80) --keep;
+    }
+    return "blob " + file + ": bad hash " + shown.substr(0, keep) + (keep < shown.size() ? "..." : "") +
            " (want <decimal size>-<h0>-<h1>-<h2>)";
 }
 

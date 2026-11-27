@@ -897,6 +897,14 @@ void hash_text() {
           "a blob's hash that is not a string is refused");
     const std::string longer(500, '7');
     check(blob_hash_refusal("a.bin", &longer, "\"" + longer + "\"", &h).size() < 200, "a long bad hash is shortened in the message");
+    // shortened between two characters, never inside one: the message goes to kiln.log, the manifest's report and boot's issue as
+    // UTF-8. Three-byte characters after the quote put byte 77 inside one.
+    std::string euros;
+    for (int i = 0; i < 40; ++i) euros += "\xE2\x82\xAC";
+    const std::string cut = blob_hash_refusal("a.bin", &euros, "\"" + euros + "\"", &h);
+    check(cut.find("\xE2\x82\xAC...") != std::string::npos && cut.find("\xE2\x82...") == std::string::npos &&
+              cut.find("\xE2...") == std::string::npos,
+          "a long bad hash is shortened at a character boundary");
 }
 
 int main() {
