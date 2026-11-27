@@ -343,7 +343,7 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   run on one thread in every session (the record of this build saw the client world on the main thread), and the
   event's delivery to a joined client.
 
-- What moves the cursor between builds, and how the HUD list draws it (since 0.2.0-dev.31.next, the flicker GitHub issue
+- What moves the cursor between builds, and how the HUD list draws it (since 0.2.0-dev.31.23, the flicker GitHub issue
   151 still showed after 0.2.0-dev.31.21; static, same client, read with objdump; test `ammo_sigdb_test.py`
   `test_selection_sync_and_list_draw`, host tests `ammo_hook.cpp`). The report: with Grimoire's `Replace` rows the picker
   moved to the new spell, showed the previous spell for a moment and went back, a little in a hosted world (most in the

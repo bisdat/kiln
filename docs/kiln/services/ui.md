@@ -381,7 +381,7 @@ again when `game_serial` or the session changes, and drains the picks at the sta
 index in the publication) is read against the publication that was up when it was queued, and a key that does not name
 that item there is dropped. An owner's retirement or a world's stop clears its snapshots and queued picks.
 
-The cursor of a pick that `take_picks` returns (since 0.2.0-dev.31.next, GitHub issue 151; no table change): kiln-tools
+The cursor of a pick that `take_picks` returns (since 0.2.0-dev.31.23, GitHub issue 151; no table change): kiln-tools
 holds it on the picked row over the game's selection sync (`client_cycle_inventory_stock`, which would put it back on
 the equipped item because such a pick writes no pending pick of the game's) and at the next builds of the list, until the
 game's own choice is that item, a pick of that list goes to the game, the kind is cleared, its owner retires, the client

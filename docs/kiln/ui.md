@@ -691,7 +691,7 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   half's swap reached the game the cursor went back to the equipped spell (the one before the pick) and then forward to
   the new one when the swap arrived: the picker moved, showed the previous spell for a moment, and came back. That took
   as long as the swap: about 60 to 140 ms in a hosted world in the reporter's measurements (longest in the first
-  switches after a start), a network round trip more on a dedicated server. Since 0.2.0-dev.31.next Kiln holds the
+  switches after a start), a network round trip more on a dedicated server. Since 0.2.0-dev.31.23 Kiln holds the
   cursor on your row from the pick until the game itself names that item (the swap arrived), the player picks a row
   that goes to the game, the list is cleared, the client session, world or player changes, or a second passes (a swap
   that never comes: then the equipped item shows, as before). This applies only while your rows are up, in either mode, and there is nothing
@@ -739,7 +739,7 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
 
 ### Tracing a pick of the list (testers)
 
-Since 0.2.0-dev.31.next `kiln.log` can follow each pick of an arrow or spell row through every step that touches the
+Since 0.2.0-dev.31.23 `kiln.log` can follow each pick of an arrow or spell row through every step that touches the
 cursor, frame by frame (GitHub issue 151). It is off by default. To turn it on, quit the game, open `kiln.json` in the
 `kiln` folder next to the game's `enshrouded.exe`, add `"ammoTrace": true` to its `"ui"` section, save, and start the
 game:
