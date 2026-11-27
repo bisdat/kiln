@@ -3936,7 +3936,7 @@
         },
         {
           "title": "Mod assets with a hash Kiln cannot read",
-          "text": "A mod asset whose hash is not written the way Kiln reads it, or names another size than its file, is now an error in kiln.log that names the file, instead of loading under another hash the game never asks for. kiln lint flags such a hash, and kiln-vfxcook writes the hash the way Kiln reads it.",
+          "text": "A mod asset whose hash is not written the way Kiln reads it is now an error in kiln.log that names the file, instead of loading under another hash the game never asks for, and one whose hash names another size than its file says so. kiln lint flags such a hash, and kiln-vfxcook writes the hash the way Kiln reads it.",
           "area": "tools",
           "kind": "fix"
         }
