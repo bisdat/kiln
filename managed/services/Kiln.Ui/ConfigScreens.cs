@@ -280,8 +280,22 @@ internal static class ConfigScreens
             lock (Lock) Typed.Remove(key);
         }
         ui.Tooltip(KilnText.T("config.type_here"));
-        if (typed is not null)
-            ui.TextDisabled(KilnText.T("config.range", ("min", e.Min?.ToString(CultureInfo.InvariantCulture)), ("max", e.Max?.ToString(CultureInfo.InvariantCulture))));
+        if (typed is not null) ui.TextDisabled(RangeHint(e));
+    }
+
+    /// <summary>What a slider row's number field takes, shown under a text it refused: the hard sides of the range only
+    /// (<see cref="ConfigEntry.SoftMin"/> / <see cref="ConfigEntry.SoftMax"/> end the slider, not the field).</summary>
+    internal static string RangeHint(ConfigEntry e)
+    {
+        var min = e.SoftMin ? null : e.Min?.ToString(CultureInfo.InvariantCulture);
+        var max = e.SoftMax ? null : e.Max?.ToString(CultureInfo.InvariantCulture);
+        return (min, max) switch
+        {
+            (not null, not null) => KilnText.T("config.range", ("min", min), ("max", max)),
+            (not null, null) => KilnText.T("config.range_min", ("min", min)),
+            (null, not null) => KilnText.T("config.range_max", ("max", max)),
+            _ => KilnText.T("config.range_any"),
+        };
     }
 
     /// <summary>The value a slider row's slider sets when dragged to <paramref name="value"/>. With a
@@ -315,12 +329,15 @@ internal static class ConfigScreens
 
     /// <summary>What a text typed into a slider row's number field means: the value to stage (an int for an "int" entry,
     /// a double for a "float" one). False while it is no number of the entry's range: half typed, or outside it (the
-    /// config refuses a value outside its range, it does not clamp). A comma counts as the decimal point when the text
-    /// has no point ("2,5").</summary>
+    /// config refuses a value outside its range, it does not clamp). A soft side of the range (<see cref="ConfigEntry.SoftMin"/>,
+    /// <see cref="ConfigEntry.SoftMax"/>) does not bound the field: only the slider stops there. A comma counts as the
+    /// decimal point when the text has no point ("2,5").</summary>
     internal static bool TryNumber(ConfigEntry e, string text, out object value)
     {
         value = 0;
-        if (e.Min is not { } lo || e.Max is not { } hi) return false;
+        if (e.Min is not { } min || e.Max is not { } max) return false;
+        var lo = e.SoftMin ? double.NegativeInfinity : min;
+        var hi = e.SoftMax ? double.PositiveInfinity : max;
         var t = text.Trim();
         if (e.Type == "int")
         {
@@ -334,7 +351,7 @@ internal static class ConfigScreens
         return true;
     }
 
-    private static string Describe(ConfigEntry e)
+    internal static string Describe(ConfigEntry e)
     {
         var lines = new List<string>();
         if (e.Comment is { Length: > 0 } c) lines.Add(c);
@@ -342,6 +359,8 @@ internal static class ConfigScreens
             ? KilnText.T("config.describe.entry_range", ("path", e.Path), ("type", e.Type), ("default", Show(e, e.Default)),
                 ("min", e.Min?.ToString(CultureInfo.InvariantCulture) ?? "-inf"), ("max", e.Max?.ToString(CultureInfo.InvariantCulture) ?? "inf"))
             : KilnText.T("config.describe.entry", ("path", e.Path), ("type", e.Type), ("default", Show(e, e.Default))));
+        if (e.SoftMin && e.Min is { } softMin) lines.Add(KilnText.T("config.describe.soft_min", ("min", softMin.ToString(CultureInfo.InvariantCulture))));
+        if (e.SoftMax && e.Max is { } softMax) lines.Add(KilnText.T("config.describe.soft_max", ("max", softMax.ToString(CultureInfo.InvariantCulture))));
         if (e.Options.Count > 0) lines.Add(KilnText.T("config.describe.options", ("options", string.Join(", ", e.Options))));
         if (e.Synced) lines.Add(KilnText.T("config.describe.synced"));
         if (e.RequiresRestart) lines.Add(KilnText.T("config.describe.restart"));
