@@ -32,3 +32,11 @@
 /* the nav's gold diamond becomes a small four-pointed star */
 .k-app[data-theme="festive"] .k-nav-dia .k-dia { width: 11px; height: 11px; transform: none; border-radius: 0; background: #ffd77a;
   clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); box-shadow: none; filter: drop-shadow(0 0 4px rgba(255, 205, 110, .9)); }
+
+/* the threshold's diyas (Festive.tsx FestiveHearth) stand on the floor in front of the jambs, the band the Crucible dock's
+   row sits in (PlayPage, crucible.css: 6 px under the mouth, as wide as it): the row's controls keep to the middle 82%
+   of the mouth, clear of the diyas (their flames reach about 8.4% in from each side), so where the row is nearly as wide
+   as the mouth (a small window, a longer language) it wraps sooner instead of running under a lamp; where it fits it
+   stands as always (centred, the same padding on both sides). Not while the fire burns where WebKit composites nothing:
+   no diyas there (AppShell.tsx) */
+.k-app:has(> .k-fest-hearth) .kcr-dock-row { padding-inline: 9%; }
