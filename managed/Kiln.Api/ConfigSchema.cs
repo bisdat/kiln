@@ -681,13 +681,15 @@ internal static class ConfigSchema
             yield break;
         }
         var meta = new List<string> { $"Default: {Format(node, node.Default)}" };
+        // a soft side: the range is where a slider runs (int and float entries; a duration or a list has a text field)
+        var slider = node.Kind is ConfigValueKind.Int or ConfigValueKind.Float ? "slider; " : "";
         if (node.Min is not null || node.Max is not null)
             meta.Add((node.Kind == ConfigValueKind.Duration
                 ? $"Range: {(node.Min is { } a ? Durations.Format(TimeSpan.FromSeconds(a)) : "0s")} .. {(node.Max is { } b ? Durations.Format(TimeSpan.FromSeconds(b)) : "any")}"
                 : $"Range: {(node.Min is { } lo ? Num(lo) : "any")} .. {(node.Max is { } hi ? Num(hi) : "any")}")
-                + (node.SoftMin && node.SoftMax ? " (slider; lower and higher values allowed)"
-                    : node.SoftMin ? " (slider; lower values allowed)"
-                    : node.SoftMax ? " (slider; higher values allowed)" : ""));
+                + (node.SoftMin && node.SoftMax ? $" ({slider}lower and higher values allowed)"
+                    : node.SoftMin ? $" ({slider}lower values allowed)"
+                    : node.SoftMax ? $" ({slider}higher values allowed)" : ""));
         if (node.Options.Length > 0) meta.Add($"One of: {string.Join(", ", node.Options)}");
         if (node.Kind == ConfigValueKind.Duration) meta.Add("e.g. \"90s\", \"5m\", \"1h30m\"");
         if (node.RequiresRestart) meta.Add("Requires a restart");

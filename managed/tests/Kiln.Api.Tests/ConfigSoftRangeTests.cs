@@ -148,7 +148,10 @@ public sealed class ConfigSoftRangeTests : KilnTest
         Assert.Contains("Range: 0 .. 1 (slider; higher values allowed)", text);
         Assert.Contains("Range: 0 .. 10 (slider; lower values allowed)", text);
         Assert.Contains("Range: 0 .. 5 (slider; lower and higher values allowed)", text);
-        Assert.Contains("Range: 1s .. 1m (slider; higher values allowed)", text);
+        // a duration and a list have no slider (a text field in every editor): the meta line does not name one
+        Assert.Contains("Range: 1s .. 1m (higher values allowed)", text);
+        Assert.Contains("Default: [0.5] | Range: 0 .. 1 (higher values allowed)", text);
+        Assert.DoesNotContain("1m (slider", text);
         Assert.Matches(@"Default: 0\.5 \| Range: 0 \.\. 1\r?\n", text);   // the hard one, as before
     }
 
