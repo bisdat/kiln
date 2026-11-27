@@ -355,7 +355,9 @@
       "restart": "Redémarrage requis : un changement s'applique au prochain chargement du mod.",
       "from_server": "A la valeur du serveur pendant la connexion.",
       "soft_min": "Le curseur commence à {min} ; vous pouvez saisir une valeur plus basse.",
-      "soft_max": "Le curseur s'arrête à {max} ; vous pouvez saisir une valeur plus élevée."
+      "soft_max": "Le curseur s'arrête à {max} ; vous pouvez saisir une valeur plus élevée.",
+      "soft_min_any": "Les valeurs inférieures à {min} sont aussi acceptées.",
+      "soft_max_any": "Les valeurs supérieures à {max} sont aussi acceptées."
     },
     "apply": "Appliquer ({count})",
     "undo": "Annuler",

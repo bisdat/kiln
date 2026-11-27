@@ -363,14 +363,28 @@ internal static class ConfigScreens
             ? KilnText.T("config.describe.entry_range", ("path", e.Path), ("type", e.Type), ("default", Show(e, e.Default)),
                 ("min", e.Min?.ToString(CultureInfo.InvariantCulture) ?? "-inf"), ("max", e.Max?.ToString(CultureInfo.InvariantCulture) ?? "inf"))
             : KilnText.T("config.describe.entry", ("path", e.Path), ("type", e.Type), ("default", Show(e, e.Default))));
-        if (e.SoftMin && e.Min is { } softMin) lines.Add(KilnText.T("config.describe.soft_min", ("min", softMin.ToString(CultureInfo.InvariantCulture))));
-        if (e.SoftMax && e.Max is { } softMax) lines.Add(KilnText.T("config.describe.soft_max", ("max", softMax.ToString(CultureInfo.InvariantCulture))));
+        // a soft side: on a slider row it is where the slider stops; a text field row (a duration, a list, a whole number
+        // over a wide span) has no slider, so the line only says that values past it are allowed
+        var slider = SliderRow(e);
+        if (e.SoftMin && e.Min is { } softMin)
+            lines.Add(KilnText.T(slider ? "config.describe.soft_min" : "config.describe.soft_min_any", ("min", Bound(e, softMin))));
+        if (e.SoftMax && e.Max is { } softMax)
+            lines.Add(KilnText.T(slider ? "config.describe.soft_max" : "config.describe.soft_max_any", ("max", Bound(e, softMax))));
         if (e.Options.Count > 0) lines.Add(KilnText.T("config.describe.options", ("options", string.Join(", ", e.Options))));
         if (e.Synced) lines.Add(KilnText.T("config.describe.synced"));
         if (e.RequiresRestart) lines.Add(KilnText.T("config.describe.restart"));
         if (e.FromServer) lines.Add(KilnText.T("config.describe.from_server"));
         return string.Join("\n", lines);
     }
+
+    /// <summary>The entry's row is a slider with a number field (the cases of <see cref="Entry"/>).</summary>
+    private static bool SliderRow(ConfigEntry e) =>
+        e.Min is { } lo && e.Max is { } hi && (e.Type == "float" || e.Type == "int" && hi - lo <= 100_000);
+
+    /// <summary>A range bound as the row shows its values: a duration's as a duration (seconds in the schema).</summary>
+    private static string Bound(ConfigEntry e, double v) =>
+        e.Type == "duration" && v >= 0 && v < TimeSpan.MaxValue.TotalSeconds
+            ? FormatDuration(TimeSpan.FromSeconds(v)) : v.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>What a widget edits for a value: bool, int, double, enum name, or text (durations, lists, strings).</summary>
     private static object Display(ConfigEntry e, object? v) => e.Type switch

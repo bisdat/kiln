@@ -352,7 +352,9 @@
       "restart": "模组重新加载后，更改才会生效。",
       "from_server": "连接服务器期间使用服务器的值。",
       "soft_min": "滑块最小为 {min}，可直接输入更小的值。",
-      "soft_max": "滑块最大为 {max}，可直接输入更大的值。"
+      "soft_max": "滑块最大为 {max}，可直接输入更大的值。",
+      "soft_min_any": "也可以使用小于 {min} 的值。",
+      "soft_max_any": "也可以使用大于 {max} 的值。"
     },
     "apply": "应用（{count}）",
     "undo": "撤销",

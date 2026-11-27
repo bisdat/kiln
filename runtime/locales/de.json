@@ -357,7 +357,9 @@
       "restart": "Braucht einen Neustart: Eine Änderung gilt, wenn die Mod neu lädt.",
       "from_server": "Hat während der Verbindung den Wert des Servers.",
       "soft_min": "Der Regler beginnt bei {min}; einen niedrigeren Wert kannst du eintippen.",
-      "soft_max": "Der Regler endet bei {max}; einen höheren Wert kannst du eintippen."
+      "soft_max": "Der Regler endet bei {max}; einen höheren Wert kannst du eintippen.",
+      "soft_min_any": "Auch Werte unter {min} sind erlaubt.",
+      "soft_max_any": "Auch Werte über {max} sind erlaubt."
     },
     "apply": "Anwenden ({count})",
     "undo": "Rückgängig",

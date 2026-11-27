@@ -194,4 +194,21 @@ public sealed class ConfigScreensSoftRangeTests : IDisposable
         var offset = ConfigScreens.Describe(_file.Entries.Single(e => e.Path == "offset"));
         Assert.Contains("The slider starts at 0; a lower value can be typed.", offset);
     }
+
+    [Fact]
+    public void The_tooltip_of_a_soft_row_without_a_slider_names_no_slider()
+    {
+        // a duration, a list and a whole number over a wide span are text fields on the page: the soft side is said
+        // without a slider, a duration's bound as a duration
+        var wait = new ConfigEntry("wait", "duration", null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5),
+            1, 60, [], false, false) { SoftMax = true };
+        var text = ConfigScreens.Describe(wait);
+        Assert.Contains("Higher values than 1m are allowed too.", text);
+        Assert.DoesNotContain("slider", text);
+        var list = new ConfigEntry("factors", "list<float>", null, null, null, null, 0, 1, [], false, false) { SoftMin = true };
+        Assert.Contains("Lower values than 0 are allowed too.", ConfigScreens.Describe(list));
+        var wide = new ConfigEntry("big", "int", null, 0, 0, 0, 0, 1_000_000, [], false, false) { SoftMax = true };
+        Assert.Contains("Higher values than 1000000 are allowed too.", ConfigScreens.Describe(wide));
+        Assert.DoesNotContain("slider", ConfigScreens.Describe(wide));
+    }
 }

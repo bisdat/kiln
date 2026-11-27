@@ -361,7 +361,9 @@
       "restart": "Wymaga restartu: zmiana działa, gdy mod wczyta się ponownie.",
       "from_server": "Podczas połączenia ma wartość serwera.",
       "soft_min": "Suwak zaczyna się od {min}; niższą wartość możesz wpisać.",
-      "soft_max": "Suwak kończy się na {max}; wyższą wartość możesz wpisać."
+      "soft_max": "Suwak kończy się na {max}; wyższą wartość możesz wpisać.",
+      "soft_min_any": "Dozwolone są też wartości poniżej {min}.",
+      "soft_max_any": "Dozwolone są też wartości powyżej {max}."
     },
     "apply": "Zastosuj ({count})",
     "undo": "Cofnij",
