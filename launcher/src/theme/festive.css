@@ -7,6 +7,9 @@
   left: calc(100% - 48px - var(--kiln)); top: calc(100% - 84px - var(--kiln) * .88); width: var(--kiln); height: calc(var(--kiln) * .88);
   opacity: 1; visibility: visible; transition: opacity .45s, visibility 0s; }
 .is-sheet .k-fest-mantel { opacity: 0; visibility: hidden; transition: opacity .3s, visibility 0s linear .3s; }
+/* its three layers (Festive.tsx): under the garland, the garland (still), what moves; each its own, so a flame's frame
+   never draws the garland's needles again */
+.k-fest-mantel > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; will-change: transform; }
 .k-fest-mantel .kf-light { mix-blend-mode: screen; }
 /* the threshold's diyas stand in front of the Play button (after it, as high): they take no clicks */
 .k-fest-hearth { z-index: 4; }

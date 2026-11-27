@@ -101,6 +101,28 @@ test("behind a sheet nothing festive moves (the mantel and the threshold's diyas
   expect(await sets()).toBeGreaterThan(b);
 });
 
+// The garland's thousands of needles cost the most to draw. In one SVG with the flames, every frame of the fire drew the
+// whole mantel again (Chromium drawing on the CPU, as WebKit does: about 0.9 s of drawing a second on Play at 1280x800,
+// against 0.02-0.1 s with every day's fire). In a still layer of its own it is drawn once.
+test("the garland lies in a still layer of its own: nothing that moves is in it, nothing of it is elsewhere", async ({ page }) => {
+  await open(page, "?theme=festive");
+  const r = await page.evaluate(() => {
+    const mantel = document.querySelector(".k-fest-mantel:not(.k-fest-hearth)")!;
+    const still = mantel.querySelector(":scope > svg.kf-still");
+    const moving = [...mantel.querySelectorAll("[data-fl], [data-gl], [data-bulb], [data-sway], [data-firelit]")];
+    const boughs = [...mantel.querySelectorAll("g[stroke-linecap]")];
+    return {
+      still: !!still,
+      boughs: boughs.length,
+      boughsElsewhere: boughs.filter((g) => !still?.contains(g)).length,
+      movingInStill: moving.filter((e) => still?.contains(e)).length,
+      // each layer its own (will-change: transform)
+      layers: [...mantel.querySelectorAll(":scope > svg")].map((s) => getComputedStyle(s).willChange),
+    };
+  });
+  expect(r).toEqual({ still: true, boughs: 3, boughsElsewhere: 0, movingInStill: 0, layers: ["transform", "transform", "transform"] });
+});
+
 test("forced off: every day's fire, byte for byte", async ({ page }) => {
   await record(page);
   await open(page, "?theme=normal");

@@ -12,7 +12,7 @@
 // would be painted again on the CPU with everything round it. The garland on the sheets never moves (the page under it
 // is never repainted for it).
 // The mantel's drawing is in mouth units: the mouth (the Play button, base.css --kiln) is 1000 wide and 880 tall, its
-// apex at (500, 0); the SVG lies over the mouth's box and draws outside it (overflow visible).
+// apex at (500, 0); the mantel's SVGs lie over the mouth's box and draw outside it (overflow visible).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flatDrawing, stageFrame } from "./Stage";
 import { useT } from "../i18n";
@@ -464,7 +464,7 @@ const GREET_W = 600, GREET_SIZE = 37;
 
 export function FestiveMantel() {
   const t = useT();
-  const root = useRef<SVGSVGElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   const greet = useRef<SVGTextElement>(null);
   const words = t("shell.appShell.festive");
   const boughs = useMemo(() => ({
@@ -507,47 +507,57 @@ export function FestiveMantel() {
     document.fonts?.ready.then(() => { if (!gone) fit(); }).catch(() => {});
     return () => { gone = true; };
   }, [words]);
+  // three layers (festive.css: each its own, will-change), so what moves never draws the garland again: its thousands of
+  // needles cost the most to draw, and in one picture with the flames every frame of the fire drew the whole mantel
+  // again (about 0.9 s of drawing a second where the CPU draws, as in WebKit). Under the garland: the wall's light, the
+  // sun, the lintel and its wish; the garland, still; over it: the lamps, the lights and the lanterns.
   return (
-    <svg ref={root} className="k-fest-mantel" viewBox="0 0 1000 880" aria-hidden focusable="false">
-      <Defs />
-      {/* the wall behind, lit by the candles (a light layer: festive.css blends it) */}
-      <g className="kf-light">
-        <ellipse cx={500} cy={-250} rx={640} ry={170} fill="url(#kf-wallglow)" data-gl={0.15} data-base={0.9} />
-      </g>
-      <Sun x={500} y={-276} />
-      <BoughSvg b={boughs.sun} w={1.9} />
-      {/* the shelf: a stone lintel, its top caught by the candles, its underside by the fire */}
-      <g>
-        <rect x={-112} y={SHELF_TOP} width={1460} height={SHELF_BOT - SHELF_TOP} fill="url(#kf-stone)" />
-        <rect x={-120} y={SHELF_TOP - 9} width={1480} height={11} rx={2} fill="url(#kf-stonetop)" />
-        <rect x={-120} y={SHELF_TOP - 9} width={1480} height={1.5} fill="#c89a72" opacity=".5" />
-        <rect x={-112} y={SHELF_TOP} width={1460} height={SHELF_BOT - SHELF_TOP} fill="url(#kf-underlit)" data-firelit="" />
-        <path d={`M-112 ${SHELF_TOP + 8}H1348M-112 ${SHELF_BOT - 7}H1348`} stroke="#000" strokeOpacity=".35" strokeWidth={1.2} />
-        <path d={`M-112 ${SHELF_TOP + 9}H1348`} stroke="#8a6448" strokeOpacity=".25" strokeWidth={1} />
-        {/* the lintel's blocks and its squared end */}
-        <path d={`M178 ${SHELF_TOP + 1}V${SHELF_BOT}M822 ${SHELF_TOP + 1}V${SHELF_BOT}M1180 ${SHELF_TOP + 1}V${SHELF_BOT}`} stroke="#000" strokeOpacity=".45" strokeWidth={2} />
-        <path d={`M180.5 ${SHELF_TOP + 1}V${SHELF_BOT}M824.5 ${SHELF_TOP + 1}V${SHELF_BOT}M1182.5 ${SHELF_TOP + 1}V${SHELF_BOT}`} stroke="#9a7050" strokeOpacity=".18" strokeWidth={1} />
-        <rect x={-112} y={SHELF_TOP} width={4} height={SHELF_BOT - SHELF_TOP} fill="#000" opacity=".35" />
-      </g>
-      {/* the greeting, cut into the lintel and gilded */}
-      <g className="kf-greet" textAnchor="middle">
-        <text ref={greet} className="kf-greet-a" x={500} y={SHELF_BOT - 19}>{words}</text>
-      </g>
-      <BoughSvg b={boughs.shelf} />
-      <Kinara x={130} y={SHELF_TOP - 6} />
-      <Diya x={300} y={SHELF_TOP - 5} ph={0.71} s={1.4} />
-      <Diya x={372} y={SHELF_TOP - 5} ph={0.27} s={1.4} />
-      <Diya x={628} y={SHELF_TOP - 5} ph={0.47} flip s={1.4} />
-      <Diya x={700} y={SHELF_TOP - 5} ph={0.83} flip s={1.4} />
-      <Menorah x={868} y={SHELF_TOP - 6} />
-      {/* the wire and its bulbs, over the garland's front */}
-      <path d={wire.d} stroke="#120a06" strokeWidth={1.6} fill="none" opacity=".9" />
-      <Lights pts={wire.pts} />
-      {/* hung from the lintel: the paper lantern over the left shoulder, the fanous over the right */}
-      <PaperLantern x={20} y={SHELF_BOT} cord={50} ph={0.4} s={1.15} />
-      <BoughSvg b={boughs.left} />
-      <Fanous x={978} y={SHELF_BOT} chain={30} ph={2.1} s={1.05} />
-    </svg>
+    <div ref={root} className="k-fest-mantel" aria-hidden>
+      <svg viewBox="0 0 1000 880" focusable="false">
+        <Defs />
+        {/* the wall behind, lit by the candles (a light layer: festive.css blends it) */}
+        <g className="kf-light">
+          <ellipse cx={500} cy={-250} rx={640} ry={170} fill="url(#kf-wallglow)" data-gl={0.15} data-base={0.9} />
+        </g>
+        <Sun x={500} y={-276} />
+        {/* the shelf: a stone lintel, its top caught by the candles, its underside by the fire */}
+        <g>
+          <rect x={-112} y={SHELF_TOP} width={1460} height={SHELF_BOT - SHELF_TOP} fill="url(#kf-stone)" />
+          <rect x={-120} y={SHELF_TOP - 9} width={1480} height={11} rx={2} fill="url(#kf-stonetop)" />
+          <rect x={-120} y={SHELF_TOP - 9} width={1480} height={1.5} fill="#c89a72" opacity=".5" />
+          <rect x={-112} y={SHELF_TOP} width={1460} height={SHELF_BOT - SHELF_TOP} fill="url(#kf-underlit)" data-firelit="" />
+          <path d={`M-112 ${SHELF_TOP + 8}H1348M-112 ${SHELF_BOT - 7}H1348`} stroke="#000" strokeOpacity=".35" strokeWidth={1.2} />
+          <path d={`M-112 ${SHELF_TOP + 9}H1348`} stroke="#8a6448" strokeOpacity=".25" strokeWidth={1} />
+          {/* the lintel's blocks and its squared end */}
+          <path d={`M178 ${SHELF_TOP + 1}V${SHELF_BOT}M822 ${SHELF_TOP + 1}V${SHELF_BOT}M1180 ${SHELF_TOP + 1}V${SHELF_BOT}`} stroke="#000" strokeOpacity=".45" strokeWidth={2} />
+          <path d={`M180.5 ${SHELF_TOP + 1}V${SHELF_BOT}M824.5 ${SHELF_TOP + 1}V${SHELF_BOT}M1182.5 ${SHELF_TOP + 1}V${SHELF_BOT}`} stroke="#9a7050" strokeOpacity=".18" strokeWidth={1} />
+          <rect x={-112} y={SHELF_TOP} width={4} height={SHELF_BOT - SHELF_TOP} fill="#000" opacity=".35" />
+        </g>
+        {/* the greeting, cut into the lintel and gilded */}
+        <g className="kf-greet" textAnchor="middle">
+          <text ref={greet} className="kf-greet-a" x={500} y={SHELF_BOT - 19}>{words}</text>
+        </g>
+      </svg>
+      <svg className="kf-still" viewBox="0 0 1000 880" focusable="false">
+        <BoughSvg b={boughs.sun} w={1.9} />
+        <BoughSvg b={boughs.shelf} />
+        <BoughSvg b={boughs.left} />
+      </svg>
+      <svg viewBox="0 0 1000 880" focusable="false">
+        <Kinara x={130} y={SHELF_TOP - 6} />
+        <Diya x={300} y={SHELF_TOP - 5} ph={0.71} s={1.4} />
+        <Diya x={372} y={SHELF_TOP - 5} ph={0.27} s={1.4} />
+        <Diya x={628} y={SHELF_TOP - 5} ph={0.47} flip s={1.4} />
+        <Diya x={700} y={SHELF_TOP - 5} ph={0.83} flip s={1.4} />
+        <Menorah x={868} y={SHELF_TOP - 6} />
+        {/* the wire and its bulbs, over the garland's front */}
+        <path d={wire.d} stroke="#120a06" strokeWidth={1.6} fill="none" opacity=".9" />
+        <Lights pts={wire.pts} />
+        {/* hung from the lintel: the paper lantern over the left shoulder, the fanous over the right */}
+        <PaperLantern x={20} y={SHELF_BOT} cord={50} ph={0.4} s={1.15} />
+        <Fanous x={978} y={SHELF_BOT} chain={30} ph={2.1} s={1.05} />
+      </svg>
+    </div>
   );
 }
 
