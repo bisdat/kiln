@@ -3,6 +3,7 @@
 // a season once the player switches it off; ?theme=festive|normal|auto for tests. And the fire of every other day is
 // still the very same shader (FRAG), the festive one only adds the snow.
 import { afterAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { festiveOffered, festiveSeasonOf, isFestiveSeason, seasonNow, themeOverride } from "../src/shell/season";
 import { isThanksgivingWeekend, turkeyTime } from "../src/shell/thanksgiving";
 import { FRAG, FRAG_FESTIVE, FRAG_TURKEY } from "../src/shell/Stage";
@@ -96,6 +97,23 @@ describe("the player's switch", () => {
     expect(player(dec, 2026)).toBeNull();
     expect(player(jan, 2026)).toBeNull();
     expect(player(nextDec, 2026)).toBe("festive");
+  });
+  // 1-7 January belong to the season that began the November before: switched off then, the look comes back at the end
+  // of November of that same calendar year, so the Settings text says the next season, never next year
+  test("switched off in January, it comes back that same year: the Settings text says the next season, not next year", () => {
+    expect(festiveSeasonOf(jan)).toBe(2026);
+    expect(player(jan, festiveSeasonOf(jan))).toBeNull();
+    expect(player(local(2027, 11, 29, 0, 0), festiveSeasonOf(jan))).toBe("festive");
+    const nextYear: Record<string, string> = {
+      en: "next year", de: "nächstes Jahr", es: "año que viene", fr: "an prochain", it: "anno prossimo", ja: "来年", ko: "내년",
+      pl: "przyszłym roku", "pt-BR": "ano que vem", ru: "следующем году", "zh-CN": "明年",
+    };
+    for (const [lang, words] of Object.entries(nextYear)) {
+      const more = JSON.parse(readFileSync(new URL(`../src/i18n/${lang}.json`, import.meta.url), "utf8")).settings.appearance.festiveMore as string;
+      expect(`${lang}: ${more}`).not.toContain(words);
+    }
+    const en = JSON.parse(readFileSync(new URL("../src/i18n/en.json", import.meta.url), "utf8"));
+    expect(en.settings.appearance.festiveMore).toEndWith("it comes back next season.");
   });
   test("the switch moved in this run wins at once; outside the season on does nothing", () => {
     expect(seasonNow(dec, "", false, 2026, true)).toBe("festive");
