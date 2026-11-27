@@ -83,7 +83,8 @@ Notes:
   player hosting, can change the world's blocks, in ShroudForge as with Kiln. Such a mod has to run there; in a game you
   joined it does nothing. Kiln says so once per joined game: a Kiln message over the game ("A ShroudForge mod tried to
   change blocks, but in a joined game only the server or host can. Run that mod there.") and a `kiln.log` line that
-  names the mod (0.2.0-dev.31.next). See [World edits in multiplayer](#world-edits-in-multiplayer) for mod authors.
+  names the mod when its own log line shows which one (0.2.0-dev.31.next). See
+  [World edits in multiplayer](#world-edits-in-multiplayer) for mod authors.
 - **Updates:** the bundled runtime updates with Kiln. While Kiln hosts your installed copy, ShroudForge does not update
   itself at game start, so its updater cannot replace Kiln's `dinput8.dll`. To update your own ShroudForge, run its
   updater (`shroudforge/shroudforge.exe`) with the game closed. If it puts its own `dinput8.dll` back, reinstall Kiln
@@ -164,9 +165,15 @@ In a joined game:
   the world"` (outcome 1, nothing changed).
 
 These answers are ShroudForge's own and Kiln leaves them as they are. What Kiln adds (0.2.0-dev.31.next): the first
-time in a joined game that a mod gets one of them, or that Kiln's voxel writer refuses its write, `kiln.log` has one
-line naming the mod (from the mod's own ShroudForge log line of it) and why, and the player sees one Kiln message. It
-says so once per joined game, however often the mod retries.
+time in a joined game that a mod logs one of them (Kiln reads ShroudForge's log), or that Kiln's voxel writer refuses
+its write, `kiln.log` has one line naming the mod (from the mod's own ShroudForge log line of it; unnamed when none
+follows) and why, and the player sees one Kiln message. It says so once per joined game, however often the mod
+retries. A mod that gets the grid answer and never logs it is told only when it writes; a mod that only reads the grid
+in a joined game, or changes blocks through its server half and also logs the grid answer, is told the same.
+
+In kiln mode (Kiln's interpreter for ShroudForge mods, [shroudforge-kiln-mode.md](shroudforge-kiln-mode.md)) there is
+no voxel write yet, hosted or joined; its `get_grid_spec` gives a joined game ShroudForge's same answer, without the
+Kiln message.
 
 The way to change the world from a joined game is ShroudForge's own, and it is the mod's to write: the same mod on both
 sides, the joined game asks, the server checks and changes the world.
@@ -183,13 +190,15 @@ sides, the joined game asks, the server checks and changes the world.
 5. Make the change on the server (`runtime.world.voxel.write` works there) and answer with `send_mod` back to the peer.
 ShroudForge's own World Editor works this way (`mods/world-editor/src/p2p.lua` in ShroudForge's source).
 
-Under Kiln, both sides run ShroudForge's own runtime and its own Steam transport; Kiln adds nothing between them. What
+Under Kiln's hosted ShroudForge (bundled or installed; kiln mode aside), both sides run ShroudForge's own runtime and
+its own Steam transport; Kiln adds nothing between them. What
 has been checked: ShroudForge's network service starts under Kiln in a game client (`[network] Network service is
 ready ... role=client`, netjunk's report from a client joined to a dedicated server, Kiln 0.2.0-dev.31.19) and on a Kiln
 dedicated server (a Linux lab server, 0.2.0-dev.31.19: role `server`, `available`, the server's Steam ID, and
 `send_mod`, `receive_mod`, `connected_peers` and `player_permissions` answering, with no player joined). A message from a joined game to a Kiln
 dedicated server has not been seen yet: that needs a real game client. Kiln's repository has a test mod for it,
 `mods/tests/sf-net-probe` (`kiln-sf-net-probe`, MIT): install it on the server and in the game, join, and both sides
-log `net-probe:` lines in kiln.log (the joined game a `send ping N` every 10 s; the server `got ping N from <id>:
-permissions ...` and its answer; the joined game `got pong for ping N`).
+log `net-probe:` lines in kiln.log (the joined game a `send ping N` every 10 s; the server `got ping N from <id> (...):
+permissions ...` and its answer; the joined game `got pong for ping N`). It sends only to the server it finds (the game
+it joined, a server on this PC, or the one ShroudForge's Network setting names) and answers those who message it.
 

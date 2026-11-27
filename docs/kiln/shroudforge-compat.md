@@ -1164,8 +1164,12 @@ line or, when none comes within two log-mirror polls, unnamed; and `shroudforge.
 at}`, from which Kiln.Ui (`ShroudForgeJoinedNotice.cs`) shows one toast. The log mirror also fires it on a mod's line
 with ShroudForge's grid answer in a joined game ("original registered voxel grid contract is unavailable", status 5 of
 `KfcRuntimeWorldGridGetSpecForSession`: the entity session guard takes only a LocalAuthority world), so a mod that stops
-at the grid is told as well; a mod that never logs that answer is told only when it writes. ShroudForge's texts to the
-mod are unchanged. Tests: `tests/test-joined-notice.sh` (Linux) and `test-host-chain.sh`'s joined-game case (Wine).
+at the grid is told as well; a mod that never logs that answer is told only when it writes, and one that only reads the
+grid (or edits through its server half) and logs the answer is told too. "Joined" is a client world and no server world
+in kiln-core's session answer, the client world counted only while the session state says a world runs (without the
+core's world destroy hook a left joined game's pointer stays behind at the main menu). Kiln mode has no voxel write yet
+and no notice. ShroudForge's texts to the mod are unchanged. Tests: `tests/test-joined-notice.sh` (Linux) and
+`test-host-chain.sh`'s joined-game cases (Wine).
 
 Tests: `native/plugins/shroudforge/tests/test-voxel-write.sh` (the core over a fake `kiln.build`, Linux),
 `test-host-chain.sh` section "the voxel writer" (posting, the wait and the cancel, the grid's bounds, a changed world,
