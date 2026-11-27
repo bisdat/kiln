@@ -59,7 +59,7 @@ test("when the panel's own address failed the check, it opened on this computer 
   expect(webPanelLines(panel(), t).join(" ")).not.toContain("own address");
 });
 
-// (0.2.0-dev.31.19) "Always open the web panel on this computer", per server (web-panel-settings.json)
+// (0.2.0-dev.31.20) "Always open the web panel on this computer", per server (web-panel-settings.json)
 test("Open on this computer instead is offered after a hosted open, unless the server always opens here", () => {
   const hosted = panel({ via: "hosted", origin: "https://alpha.kiln.nexus", public: "https://alpha.kiln.nexus/", idleCloseS: 0, connections: 0 });
   expect(offerHere(hosted, false)).toBe(true);

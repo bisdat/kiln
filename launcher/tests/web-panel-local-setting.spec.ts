@@ -1,4 +1,4 @@
-// "Always open the web panel on this computer" (0.2.0-dev.31.19), per server, beside its Open web panel button: while it
+// "Always open the web panel on this computer" (0.2.0-dev.31.20), per server, beside its Open web panel button: while it
 // is on, Open web panel opens the panel on this computer and never checks or uses the panel's own address on the internet
 // (Kilnwarden's launcher-endpoint.json `public`); off, the hosted address when it works, as before. The setting is kept
 // in the launcher's data folder (web-panel-settings.json), so it is still on after a restart.

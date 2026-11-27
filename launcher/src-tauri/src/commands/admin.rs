@@ -58,19 +58,19 @@ pub async fn admin_web_panels() -> Result<Vec<WebPanelInfo>, Error> {
     blocking(move || Ok(web_panels()?.lock().unwrap_or_else(|p| p.into_inner()).list())).await
 }
 
-/// (0.2.0-dev.31.19) The data folder's web-panel-settings.json, beside web-panel-origins.json (where [`WebPanels`]
+/// (0.2.0-dev.31.20) The data folder's web-panel-settings.json, beside web-panel-origins.json (where [`WebPanels`]
 /// reads it). The commands below don't take the web panels' lock, so a change never waits for an open's check.
 fn web_panel_settings_file() -> Result<std::path::PathBuf, Error> {
     Ok(crate::state::dirs()?.root.join(web_panel_settings::FILE))
 }
 
-/// (0.2.0-dev.31.19) The server's web panel settings: "Always open the web panel on this computer" (`alwaysLocal`).
+/// (0.2.0-dev.31.20) The server's web panel settings: "Always open the web panel on this computer" (`alwaysLocal`).
 #[tauri::command]
 pub async fn admin_web_panel_settings(server_id: String) -> Result<WebPanelSettings, Error> {
     blocking(move || Ok(web_panel_settings::get(&web_panel_settings_file()?, &server_id))).await
 }
 
-/// (0.2.0-dev.31.19) Saves the server's web panel settings (a known server's only); what they are now.
+/// (0.2.0-dev.31.20) Saves the server's web panel settings (a known server's only); what they are now.
 #[tauri::command]
 pub async fn admin_web_panel_settings_set(server_id: String, settings: WebPanelSettings) -> Result<WebPanelSettings, Error> {
     blocking(move || {

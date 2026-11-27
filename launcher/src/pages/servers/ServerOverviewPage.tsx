@@ -197,9 +197,9 @@ function Steady({ id }: { id: string }) {
  *  then says where it is open and offers to close it (it also closes by itself after its last tab).
  *  (0.2.0-dev.31.19) When the panel's file names its own address on the internet and the launcher's check of it passes,
  *  it opens there instead (no gateway), with "Open on this computer instead" one click away; when the check fails, the
- *  status says why it opened on this computer. The server's "Always open the web panel on this computer" switch sits
- *  under the buttons (kept in the launcher's data folder): while it is on, the launcher opens the panel here and never
- *  checks the address on the internet. */
+ *  status says why it opened on this computer. (0.2.0-dev.31.20) The server's "Always open the web panel on this
+ *  computer" switch sits under the buttons (kept in the launcher's data folder): while it is on, the launcher opens the
+ *  panel here and never checks the address on the internet. */
 function OpenWebPanel({ id }: { id: string }) {
   const t = useT();
   const qc = useQueryClient();

@@ -1,4 +1,4 @@
-//! (0.2.0-dev.31.19) Each server's web panel settings, on the launcher's side: `web-panel-settings.json` in the
+//! (0.2.0-dev.31.20) Each server's web panel settings, on the launcher's side: `web-panel-settings.json` in the
 //! launcher's data folder, beside [`super::origins::FILE`] (`{"format": 1, "servers": {"<server id>": {...}}}`; a server
 //! with every setting at its default has no entry).
 //!

@@ -22,8 +22,8 @@
 //! ([`gateway::offer_once`]); no gateway is started. If the check fails, the panel opens on this computer as before, and
 //! [`WebPanelInfo::fallback`] says why. [`Route::Local`] ("Open on this computer instead") always opens it here. Remote
 //! servers work the same: the file comes over ssh, the check goes straight to the public address, the login is minted
-//! through the ssh tunnel. A server's "Always open the web panel on this computer" ([`settings`], kept in the launcher's
-//! data folder) makes [`Route::Auto`] [`Route::Local`] for it, with no check at all.
+//! through the ssh tunnel. (0.2.0-dev.31.20) A server's "Always open the web panel on this computer" ([`settings`],
+//! kept in the launcher's data folder) makes [`Route::Auto`] [`Route::Local`] for it, with no check at all.
 
 pub mod endpoint;
 pub mod gateway;
@@ -105,7 +105,7 @@ struct Open {
 /// The launcher's open panels, one gateway per server.
 pub struct WebPanels {
     registry: PathBuf,
-    /// (0.2.0-dev.31.19) `web-panel-settings.json`, beside the registry ([`settings::FILE`]).
+    /// (0.2.0-dev.31.20) `web-panel-settings.json`, beside the registry ([`settings::FILE`]).
     settings: PathBuf,
     limits: Limits,
     open: HashMap<String, Open>,
@@ -146,7 +146,7 @@ impl WebPanels {
 
     /// Opens the server's panel: at its address on the internet when `route` allows it, the file names one and its
     /// check passes; else through the server's gateway (opened or reused), with the panel's certificate checked through
-    /// it. Mints the one-time login and returns the bootstrap address for the browser. (0.2.0-dev.31.19) While the
+    /// it. Mints the one-time login and returns the bootstrap address for the browser. (0.2.0-dev.31.20) While the
     /// server's "Always open the web panel on this computer" is on ([`settings`]), [`Route::Auto`] is [`Route::Local`]:
     /// the address on the internet is not even checked.
     pub fn open_via(&mut self, server: &ServerInstance, route: Route) -> Result<Opened> {
@@ -219,12 +219,12 @@ impl WebPanels {
         Ok(Opened { url, info: self.info(&server.id, o) })
     }
 
-    /// (0.2.0-dev.31.19) The server's web panel settings ([`settings::get`]).
+    /// (0.2.0-dev.31.20) The server's web panel settings ([`settings::get`]).
     pub fn settings(&self, server_id: &str) -> settings::WebPanelSettings {
         settings::get(&self.settings, server_id)
     }
 
-    /// (0.2.0-dev.31.19) Changes the server's web panel settings ([`settings::set`]); what they are now.
+    /// (0.2.0-dev.31.20) Changes the server's web panel settings ([`settings::set`]); what they are now.
     pub fn set_settings(&self, server_id: &str, s: settings::WebPanelSettings) -> Result<settings::WebPanelSettings> {
         settings::set(&self.settings, server_id, s)
     }

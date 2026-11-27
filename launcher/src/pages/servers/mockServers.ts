@@ -100,7 +100,7 @@ let webVia: "local" | "ssh" = "local";
 // launcher's check of it goes (kiln_manage::admin::web_panel::public); every open, with its route and where it went
 let webPublic: { url: string; check: "ok" | "unreachable" | "refused" } | null = null;
 const webOpens: { serverId: string; route: string; via: string }[] = [];
-// (0.2.0-dev.31.19) each check of the public address (the server's id), and each server's web panel settings
+// (0.2.0-dev.31.20) each check of the public address (the server's id), and each server's web panel settings
 // (kiln_manage::admin::web_panel::settings), kept in local storage as the launcher keeps web-panel-settings.json
 const webChecks: string[] = [];
 const WEB_SETTINGS = "kiln.mock.webPanelSettings";
@@ -127,7 +127,7 @@ export const webPanelMockHooks = {
   setPublic: (url: string | null, check: "ok" | "unreachable" | "refused" = "ok") => { webPublic = url ? { url, check } : null; },
   /** (0.2.0-dev.31.19) Each admin_open_web_panel: its route ("auto", "local") and where the panel opened. */
   opens: () => webOpens.map((o) => ({ ...o })),
-  /** (0.2.0-dev.31.19) Each check of a panel's public address, by server id. */
+  /** (0.2.0-dev.31.20) Each check of a panel's public address, by server id. */
   checks: () => [...webChecks],
 };
 
@@ -138,7 +138,7 @@ export const serverMockHandlers: Record<string, (args: Args) => unknown> = {
     const mod = listeningPanel();
     if (!mod) throw { code: "admin_unavailable", message: "Kilnwarden is not listening. Check that the current mod is loaded." };
     panelOpens.push({ serverId: id, mod, consumer: mod });
-    // (0.2.0-dev.31.19) "Always open the web panel on this computer": auto is local, with no check
+    // (0.2.0-dev.31.20) "Always open the web panel on this computer": auto is local, with no check
     const checked = route === "auto" && !webAlwaysLocal(id) && webPublic !== null;
     if (checked) webChecks.push(id);
     // (0.2.0-dev.31.19) the panel's own address when its check passes: the browser goes there, no gateway
