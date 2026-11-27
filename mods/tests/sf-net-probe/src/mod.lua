@@ -9,7 +9,7 @@ local MOD = "kiln-sf-net-probe"
 local net = runtime.network
 local function say(fmt, ...) shroudforge.log.warn("net-probe: " .. string.format(fmt, ...)) end
 
-local last_status, last_peers, waited, sent, told_lab = nil, nil, 0, 0, false
+local last_status, last_peers, waited, sent, told_lab, told_alone = nil, nil, 0, 0, false, false
 local send_results = {}
 
 local function text(v) return v == nil and "-" or tostring(v) end
@@ -62,14 +62,15 @@ local function report_peers()
     say("connected peers: %s", key)
 end
 
--- what a lab with no player can show: each call answers, nothing raises (once)
+-- what a lab with no player can show: each call answers, nothing raises (once). Nothing goes to a Steam account outside
+-- this game: send_mod gets peer "0", which ShroudForge refuses before Steam, and player_permissions (which only reads
+-- this game's own log) asks for the lowest individual Steam ID, account 0, which is nobody's.
 local function lab_calls()
     if told_lab then return end
     told_lab = true
-    local fake = "76561197960287930"
-    local ok, why = net.send_mod(fake, MOD, "lab ping")
-    say("lab: send_mod to an unknown peer: ok=%s reason=%s", text(ok), text(why))
-    say("lab: player_permissions of an unknown peer: %s", permissions(fake))
+    local ok, why = net.send_mod("0", MOD, "lab ping")
+    say("lab: send_mod to peer 0 (refused before Steam): ok=%s reason=%s", text(ok), text(why))
+    say("lab: player_permissions of a player not in this game: %s", permissions("76561197960265728"))
     local got, rwhy = net.receive_mod(4)
     say("lab: receive_mod answers %s (%s), reason=%s", type(got), type(got) == "table" and #got or 0, text(rwhy))
     say("NET PROBE READY")
@@ -122,7 +123,12 @@ local function on_update()
         return
     end
     local peer, from = target(s)
-    if not peer then say("no server to send to yet (no session host, no server probe)") return end
+    if not peer then
+        if not told_alone then say("no server to send to yet (no session host, no server probe)") end
+        told_alone = true
+        return
+    end
+    told_alone = false
     sent = sent + 1
     local ok, swhy = net.send_mod(peer, MOD, "ping " .. sent)
     local key = text(ok) .. text(swhy)
