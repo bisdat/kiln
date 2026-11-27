@@ -31,10 +31,12 @@ Observation observations[2];
 std::shared_ptr<const Publication> publications[2];
 // GitHub issue 151: a Replace publication stays up over the game's newer builds of its list (the same client session,
 // generation, player and held weapon) until Kiln.Ui publishes for them, at most keep_limit from the first such build.
-// Replace rows do not depend on how the game composes its own, so the HUD keeps the mods' rows and Kiln's cursor instead
-// of flashing the game's rows and its selection (the equipped item) for the frame or, on a dedicated server, the round
-// trip before the publication. Past the limit the game's own rows show, as before, until the next publication; the
-// post tick logs that once. Append is never kept: its rows go in around the game's and its room follows them.
+// Replace takes nothing from the game's rows but a matching row's source, read from the build the rows are composed over,
+// so the HUD keeps the mods' rows and Kiln's cursor instead of the game's rows and its selection (the equipped item) for
+// the frame before the publication: a flash, and on a dedicated server, where a swap's build comes a round trip after
+// the pick, the cursor put back on the equipped item after the player scrolled on. Past the limit the game's own rows
+// show, as before, until the next publication; the post tick logs that once. Append is never kept: its rows go in
+// around the game's and its room follows them.
 constexpr auto keep_limit=std::chrono::milliseconds(1000);
 struct Keep {std::chrono::steady_clock::time_point since{};uint64_t first{},game{};bool started{},expired{},report{};};
 Keep keeps[2]; // reset by every publish and clear of that kind
