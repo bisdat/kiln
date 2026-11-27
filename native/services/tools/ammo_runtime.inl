@@ -155,8 +155,7 @@ bool keep(unsigned i,const Publication& p,const Observation& next) {
     auto& k=keeps[i];const auto now=std::chrono::steady_clock::now();
     if(!k.started)k={now,next.value.game_serial,next.value.game_serial,true,false,false};
     if(k.expired)return false;
-    k.game=next.value.game_serial;
-    if(now-k.since<=keep_limit)return true;
+    if(now-k.since<=keep_limit){k.game=next.value.game_serial;return true;} // the last revision the rows were kept over
     k.expired=k.report=true;keep_report_pending.store(true,std::memory_order_release);return false;
 }
 // One line per expired keep, from the client Post tick (never from the selector hook).

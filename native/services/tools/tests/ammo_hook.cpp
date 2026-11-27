@@ -368,6 +368,15 @@ int main() {
         c=spell_context();spells.serial=c.game_serial;CHECK(ammo::publish(7,&spells)==KILN_OK);selector(groups,acc,0);
         CHECK(groups[1].count==3&&groups[1].data[0].item==556);
         spell_swapped=true;selector(groups,acc,0);CHECK(groups[1].count==3&&groups[1].data[0].item==556); // a new window
+        // The line names the revisions the rows were kept over, not a build that ended the keep with rows of its own.
+        {
+            const auto kept=spell_context().game_serial;spell_swapped=false;ammo::keeps[1].since-=std::chrono::seconds(2);
+            selector(groups,acc,0);CHECK(groups[1].count==2&&groups[1].data[0].item==999&&spell_context().game_serial>kept);
+            log_lines.clear();ammo::report_post(nullptr,nullptr);CHECK(infos()==1);
+            const auto range="(revisions "+std::to_string(kept)+" to "+std::to_string(kept)+")";
+            CHECK(std::any_of(log_lines.begin(),log_lines.end(),[&](const auto& l){return l.second.find(range)!=std::string::npos;}));
+            log_lines.clear();
+        }
         // Not kept: another held weapon, another client generation, an Append publication, a cleared list.
         auto replace_current=[&](uint32_t mode) {
             selector(groups,acc,0);c=spell_context();spells.mode=mode;spells.serial=c.game_serial;
