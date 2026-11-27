@@ -16,6 +16,11 @@ public sealed class SoftRangeConfig
     [Range(0, 100, SoftMax = true)] public byte Small { get; set; } = 10;
 }
 
+public sealed class SoftDecimalConfig
+{
+    [Range(0, 1, SoftMax = true)] public decimal Price { get; set; } = 1;
+}
+
 public sealed class SoftRangeCommands
 {
     [Command("softcost")]
@@ -98,6 +103,23 @@ public sealed class ConfigSoftRangeTests : KilnTest
         Assert.Contains(cfg.Warnings, w => w.Contains("\"costMultiplier\" = -2 is outside 0..max; using 0"));
         Assert.Contains(cfg.Warnings, w => w.Contains("\"offset\" = 12 is outside -2147483648..10; using 10"));
         Assert.Contains(cfg.Warnings, w => w.Contains("\"hard\" = 2 is outside 0..1; using 1"));
+    }
+
+    [Fact]
+    public void A_decimal_past_a_soft_side_is_bounded_by_the_decimal_type_not_an_overflow()
+    {
+        // past a soft side only the number's own type bounds it: for a decimal that is about 7.9e28, which a double
+        // passes easily (1e30); the hard range used to keep such values away from the decimal conversion
+        var cfg = As(NewMod("softdecimal"), () => Config.Register<SoftDecimalConfig>());
+        Assert.True(cfg.TrySet("price", 5, out var error), error);
+        Assert.Equal(5m, cfg.Value.Price);
+        Assert.False(cfg.TrySet("price", 1e30, out error));
+        Assert.StartsWith("\"price\" must be in 0..max", error);
+        Assert.Equal(5m, cfg.Value.Price);
+        File.WriteAllText(cfg.FilePath, "{\"price\": 1e30}");
+        cfg.Reload();
+        Assert.Equal((decimal)7.9e28, cfg.Value.Price);
+        Assert.Contains(cfg.Warnings, w => w.StartsWith("\"price\" = ") && w.EndsWith("is outside 0..max; using max"));
     }
 
     [Fact]

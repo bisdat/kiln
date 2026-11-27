@@ -597,6 +597,8 @@ internal static class ConfigSchema
         : t == typeof(uint) ? (0, uint.MaxValue)
         : t == typeof(ulong) ? (0, 1.8e19)
         : t == typeof(float) ? (float.MinValue, float.MaxValue)
+        // decimal.MaxValue is 7.92e28: past a soft side (or with no range) a larger double must not reach the cast
+        : t == typeof(decimal) ? (-7.9e28, 7.9e28)
         : (double.MinValue, double.MaxValue);
 
     private static object MakeList(ConfigNode node, List<object?> items)
