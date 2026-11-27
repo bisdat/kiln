@@ -397,6 +397,7 @@ uintptr_t g_server_world = 0;
 uint32_t g_server_session = 1;  // kiln-core's count of server worlds since boot (KilnSessionInfo.sessions)
 uintptr_t g_client_world = 0;    // a game client's own world (a joined game: this one and no server world)
 uint32_t g_client_session = 0;
+bool g_client_stale = false;    // the client world's pointer outlived it (no destroy hook): the core's state says none
 std::vector<ksf::joined::Worlds> g_joined_calls;  // host_voxels_on_joined's callback
 thread_local bool t_world_thread = false;
 bool g_post_refuses = false;
@@ -519,7 +520,10 @@ int main() {
         out->sessions[KILN_WORLD_SERVER] = g_server_session;
         out->worlds[KILN_WORLD_CLIENT] = g_client_world;
         out->sessions[KILN_WORLD_CLIENT] = g_client_session;
-        out->state = g_server_world ? KILN_SESSION_DEDICATED : KILN_SESSION_NONE;
+        // as kiln-core's session(): a server world, else a client world alone (a joined game), else none
+        out->state = g_server_world                     ? KILN_SESSION_DEDICATED
+                     : g_client_world && !g_client_stale ? KILN_SESSION_REMOTE
+                                                         : KILN_SESSION_NONE;
         return KILN_OK;
     };
     api.post = [](KilnOwner, KilnTaskFn fn, void* user) -> KilnResult {
@@ -808,8 +812,12 @@ int main() {
                                                   l.find(ksf::joined::kReason) != std::string::npos;
             check(said, "kiln.log gives the joined reason");
         }
-        g_client_world = 0;
         g_joined_calls.clear();
+        g_client_stale = true;  // back at the main menu without the core's world destroy hook: the pointer is still there
+        check(!g_host->voxel_write(at, box, want, 4, &outcome) && outcome == 1 && g_joined_calls.empty(),
+              "the main menu after a joined game, the client world's pointer stale: refused, no joined notice");
+        g_client_stale = false;
+        g_client_world = 0;
         check(!g_host->voxel_write(at, box, want, 4, &outcome) && outcome == 1 && g_joined_calls.empty(),
               "no world at all (the main menu): refused, no joined notice");
         ksf::host_voxels_on_joined(nullptr);

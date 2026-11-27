@@ -47,6 +47,32 @@ int main() {
         check(refusal_reason(menu) == kNoWorld && !has(kNoWorld, "joined"), "no world at all: not the joined reason");
         check(joined(joined_1) && !joined(hosting) && !joined(menu), "joined = a client world and no server world");
     }
+    {  // kiln-core's session answer (host_voxels.cpp's session_worlds)
+        const auto session = [](uint32_t side, uintptr_t server, uintptr_t client, uint32_t state, uint32_t lifecycle) {
+            KilnSessionInfo s{};
+            s.size = sizeof s;
+            s.side = side;
+            s.state = state;
+            s.lifecycle = lifecycle;
+            s.worlds[KILN_WORLD_SERVER] = server;
+            s.worlds[KILN_WORLD_CLIENT] = client;
+            s.sessions[KILN_WORLD_SERVER] = 2;
+            s.sessions[KILN_WORLD_CLIENT] = 4;
+            return from_session(s);
+        };
+        const Worlds remote = session(KILN_SIDE_CLIENT, 0, 0x10, KILN_SESSION_REMOTE, 1);
+        check(joined(remote) && remote.client_session == 4, "a joined game, with the client world's session");
+        check(!joined(session(KILN_SIDE_CLIENT, 0x20, 0x10, KILN_SESSION_HOST, 1)), "a game this client hosts");
+        check(!joined(session(KILN_SIDE_CLIENT, 0, 0, KILN_SESSION_NONE, 1)), "the main menu");
+        check(!joined(session(KILN_SIDE_SERVER, 0x20, 0, KILN_SESSION_DEDICATED, 1)), "a dedicated server");
+        // Without the core's world destroy hook (lifecycle 0) a world's pointer outlives the world, and the core's state
+        // counts a world only while it stepped in the last 3 s (tick.cpp session()).
+        check(!joined(session(KILN_SIDE_CLIENT, 0, 0x10, KILN_SESSION_NONE, 0)),
+              "back at the main menu after a joined game, without the destroy hook: not joined (the stale client world)");
+        check(joined(session(KILN_SIDE_CLIENT, 0, 0x10, KILN_SESSION_REMOTE, 0)), "a joined game without the destroy hook");
+        check(!joined(session(KILN_SIDE_CLIENT, 0x20, 0x10, KILN_SESSION_REMOTE, 0)),
+              "a hosted world's stale pointer (no destroy hook, or a host's world that stalls 3 s): never called joined");
+    }
     {  // ShroudForge's line: its source is the mod, its message the rest
         check(line_source(kGridLine) == "altar-cleanup", "the mod of a ShroudForge line");
         check(line_source(kNetwork) == "network", "a runtime line's source");

@@ -294,10 +294,7 @@ joined::Worlds session_worlds(const KilnApi* api) {
     KilnSessionInfo s{};
     s.size = sizeof s;
     if (api->session(&s) != KILN_OK) return w;
-    w.server = s.worlds[KILN_WORLD_SERVER] != 0;
-    w.client = s.worlds[KILN_WORLD_CLIENT] != 0;
-    w.client_session = s.sessions[KILN_WORLD_CLIENT];
-    return w;
+    return joined::from_session(s);
 }
 
 void host_voxels_on_joined(JoinedRefusalFn fn) { v_on_joined.store(fn, std::memory_order_release); }

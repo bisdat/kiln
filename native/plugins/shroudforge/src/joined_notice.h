@@ -20,6 +20,8 @@
 #include <string>
 #include <string_view>
 
+#include "kiln_api.h"
+
 namespace ksf::joined {
 
 // kiln.log's reason for a joined client (host_voxels.cpp's refusal, and the notice line)
@@ -37,6 +39,18 @@ struct Worlds {
 };
 inline bool joined(const Worlds& w) { return w.client && !w.server; }
 inline const char* refusal_reason(const Worlds& w) { return joined(w) ? kReason : kNoWorld; }
+
+// The worlds of kiln-core's session answer (host_voxels.cpp's session_worlds). Without the core's world destroy hook
+// (lifecycle 0) a world's pointer outlives the world; the core's state counts a world only while it stepped in the last
+// 3 s. So the client world counts while the state says a world runs (back at the main menu after a joined game it says
+// none), and any server world pointer, live or not, keeps the game from being called joined: never a wrong notice.
+inline Worlds from_session(const KilnSessionInfo& s) {
+    Worlds w;
+    w.server = s.worlds[KILN_WORLD_SERVER] != 0;
+    w.client = s.worlds[KILN_WORLD_CLIENT] != 0 && s.state != KILN_SESSION_NONE;
+    w.client_session = s.sessions[KILN_WORLD_CLIENT];
+    return w;
+}
 
 // One line of ShroudForge's log: "[<L> <date> <time> UTC] [<source>] <message>" (log_level.h). The source of a mod's
 // line is the mod's id. Empty for a line of another shape.
