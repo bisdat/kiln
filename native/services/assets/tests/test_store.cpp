@@ -886,6 +886,17 @@ void hash_text() {
         HashK keep{9, 9, 9, 9};
         check(!parse_hash(bad, &keep) && keep == HashK{9, 9, 9, 9}, std::string("parse_hash refuses \"") + bad + "\" and leaves its output");
     }
+    // the manifest's rule for a blob entry's "hash"
+    std::string text = "7170-f308b489-d7bff57f-264db8de";
+    check(blob_hash_refusal("terrain/l6.bin", &text, "\"" + text + "\"", &h).empty() && h.size == 7170, "a blob's hash that reads is served under");
+    text = "1c02-f308b489-d7bff57f-264db8de";  // kfc before afa1bece: the size in hex
+    const std::string why = blob_hash_refusal("terrain/l6.bin", &text, "\"" + text + "\"", &h);
+    check(why == "blob terrain/l6.bin: bad hash \"1c02-f308b489-d7bff57f-264db8de\" (want <decimal size>-<h0>-<h1>-<h2>)",
+          "a blob's hash with a hex size is refused, naming the file and the form (" + why + ")");
+    check(blob_hash_refusal("a.bin", nullptr, "7170", &h) == "blob a.bin: bad hash 7170 (want <decimal size>-<h0>-<h1>-<h2>)",
+          "a blob's hash that is not a string is refused");
+    const std::string longer(500, '7');
+    check(blob_hash_refusal("a.bin", &longer, "\"" + longer + "\"", &h).size() < 200, "a long bad hash is shortened in the message");
 }
 
 int main() {

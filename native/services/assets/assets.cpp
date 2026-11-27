@@ -433,12 +433,22 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
                 ++tex;  // counted as accepted; a flush failure is logged then
             }
         } else if (kind == "blob") {
+            // "hash": the key the game reads the bytes by. One that is not <decimal size>-<h0>-<h1>-<h2> refuses the entry; it
+            // never falls back to a key kiln.assets derives, which the game would not ask for
+            HashK fixed{};
+            const bool has_hash = e.contains("hash");
+            if (has_hash) {
+                const json& hv = e["hash"];
+                const std::string text = hv.is_string() ? hv.get<std::string>() : std::string();
+                const std::string bad = blob_hash_refusal(file, hv.is_string() ? &text : nullptr,
+                                                          hv.dump(-1, ' ', false, json::error_handler_t::replace), &fixed);
+                if (!bad.empty()) { fail(bad); continue; }
+            }
             std::vector<uint8_t> bytes;
             if (!read(fp, &bytes, &why)) { fail("blob " + file + ": " + why); continue; }
             if (!made_here(fp, bytes)) continue;
-            HashK fixed;
             KilnResult r;
-            if (e.contains("hash") && parse_hash(e["hash"].get<std::string>(), &fixed)) {
+            if (has_hash) {
                 KilnContentHash ch{fixed.size, fixed.h0, fixed.h1, fixed.h2};
                 r = op_blob_override(owner, &ch, bytes.data(), bytes.size());
             } else {

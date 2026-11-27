@@ -172,6 +172,12 @@ bool parse_hash(const std::string& s, HashK* out) {
     return true;
 }
 
+std::string blob_hash_refusal(const std::string& file, const std::string* text, const std::string& shown, HashK* out) {
+    if (text && parse_hash(*text, out)) return {};
+    return "blob " + file + ": bad hash " + (shown.size() > 80 ? shown.substr(0, 77) + "..." : shown) +
+           " (want <decimal size>-<h0>-<h1>-<h2>)";
+}
+
 std::wstring widen(const std::string& s) {
     if (s.empty()) return {};
     const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
