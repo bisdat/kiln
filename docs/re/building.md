@@ -255,9 +255,12 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   0.2.0-dev.31.12 `Ui.AmmoList` in `Append` publishes a mod's row of an item the game lists (with stock or at 0) behind the
   game's row, which `compose_ammo` keeps in its place (game rows win duplicates in `Append`, and take the room), so
   these reads and decisions cover its rows too (one walk per new set of rows, so one per arrow shot while a mod lists
-  that arrow, as in `Replace` since 0.2.0-dev.31.10). When the game's rows change, Kiln binds nothing until the provider publishes for the new serial, so the
-  game's own rows show for that interval; a pick of a provided item there is decided by its row as the group shows it at
-  the pick: with stock the game's, at count 0 as for a bound one. `0x40ca70` (equip reconciliation) returns the
+  that arrow, as in `Replace` since 0.2.0-dev.31.10). When the game's rows change, Kiln binds an `Append` publication only once the provider publishes for the new serial,
+  so the game's own rows show for that interval; a pick of a provided item there is decided by its row as the group
+  shows it at the pick: with stock the game's, at count 0 as for a bound one. A `Replace` publication is bound over the
+  newer build in the same client session, generation, player and held item until the next publication (since
+  0.2.0-dev.31.next, GitHub issue 151), with the backpack read of that build's rows and Kiln's selection, at most 1 s
+  from the first such build; past that the game's own rows show and are decided as above. `0x40ca70` (equip reconciliation) returns the
   pending item `+0x63c` while its version `+0x640` differs from the input's, else the equipped stack's item via
   `0x3853c0`. Which pick emptied the reporter's slot, and the server's order of the mod's swap and the game's wish, are
   runtime facts not established here.
