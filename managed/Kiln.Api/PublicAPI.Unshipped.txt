@@ -1,9 +1,1 @@
 #nullable enable
-Kiln.ConfigEntry.SoftMax.get -> bool
-Kiln.ConfigEntry.SoftMax.init -> void
-Kiln.ConfigEntry.SoftMin.get -> bool
-Kiln.ConfigEntry.SoftMin.init -> void
-Kiln.RangeAttribute.SoftMax.get -> bool
-Kiln.RangeAttribute.SoftMax.set -> void
-Kiln.RangeAttribute.SoftMin.get -> bool
-Kiln.RangeAttribute.SoftMin.set -> void
