@@ -74,4 +74,27 @@ public sealed class ShroudForgeJoinedNoticeTests
     [InlineData("""{"mode": "hosted", "menu": "off"}""", false)]  // no menu shortcut: the runtime still runs mods
     public void Watching_ends_when_shroudforge_cannot_run_hosted_any_more(string json, bool final) =>
         Assert.Equal(final, ShroudForgeJoinedNotice.Final(Doc(json)));
+
+    // The watcher reads the file every 2 s; 60 looks are its first two minutes. kiln-shroudforge writes its status at
+    // Kiln's plugin step, before Kiln.Ui starts, so a start with none of this start's by then hosts no ShroudForge:
+    // nothing to watch for the rest of the session.
+    [Fact]
+    public void Watching_ends_when_no_status_of_this_start_comes()
+    {
+        var other = new ModCatalog.StateFile(Doc(Hosted), Exists: true, Current: false, Error: null);  // an earlier start's
+        var none = new ModCatalog.StateFile(null, Exists: false, Current: false, Error: null);
+        Assert.False(ShroudForgeJoinedNotice.Done(other, 10));
+        Assert.True(ShroudForgeJoinedNotice.Done(other, 61));  // was: read every 2 s for the whole session
+        Assert.False(ShroudForgeJoinedNotice.Done(none, 10));
+        Assert.True(ShroudForgeJoinedNotice.Done(none, 61));
+    }
+
+    [Fact]
+    public void Watching_goes_on_while_this_start_hosts_shroudforge_or_the_file_is_unreadable_a_moment()
+    {
+        Assert.False(ShroudForgeJoinedNotice.Done(new ModCatalog.StateFile(Doc(Hosted), true, true, null), 10_000));
+        // a read that failed (shared while kiln-shroudforge replaces it, cut short): the next look reads it again
+        Assert.False(ShroudForgeJoinedNotice.Done(new ModCatalog.StateFile(null, true, false, "unreadable"), 10_000));
+        Assert.True(ShroudForgeJoinedNotice.Done(new ModCatalog.StateFile(Doc("""{"mode": "off"}"""), true, true, null), 0));
+    }
 }

@@ -9,9 +9,9 @@
 //
 // kiln-shroudforge sees it (native/plugins/shroudforge/src/joined_notice.h: its writer's refusal, and the mod's own
 // ShroudForge log line), writes one kiln.log line naming the mod, and puts {session, mod, at} under "joinedWorldEdit" in
-// kiln/state/shroudforge.json. This watcher reads that file every 2 s (it is a few hundred bytes) on its own thread
-// while ShroudForge runs hosted, and toasts once for each new joined session. ShroudForge's own texts reach the mod
-// unchanged.
+// kiln/state/shroudforge.json. This watcher reads that file every 2 s (a few KB) on its own thread while ShroudForge
+// runs hosted, and toasts once for each new joined session; in a start without a status of its own it stops after two
+// minutes. ShroudForge's own texts reach the mod unchanged.
 using System.Text.Json;
 
 namespace Kiln;
@@ -44,6 +44,13 @@ internal static class ShroudForgeJoinedNotice
         string? S(string k) => d.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         return S("mode") is "self-hosted" or "off" or "not-installed" or "failed" || S("side") == "server" || S("runtime") == "stopped";
     }
+
+    /// <summary>Whether the watcher is done after this look (pure: tests): the status can no longer show a joined world
+    /// edit, or no status of this start came in its first two minutes (no file, or an earlier start's: kiln-shroudforge
+    /// writes its own at Kiln's plugin step, before Kiln.Ui starts, so it does not run here). A read that failed (the file
+    /// shared while it is replaced) is looked at again.</summary>
+    internal static bool Done(ModCatalog.StateFile f, int polls) =>
+        Final(f.Current ? f.Doc : null) || (polls > 60 && !f.Current && f.Error is null);
 
     /// <summary>The toast, in Kiln's language.</summary>
     internal static string Text() => KilnText.T("shroudforge.joined_world_edit");
@@ -84,9 +91,7 @@ internal static class ShroudForgeJoinedNotice
                 var f = ModCatalog.ReadState(src, "shroudforge.json");
                 var doc = f.Current ? f.Doc : null;
                 Check(gate, doc, UiEngine.AddToast);
-                if (Final(doc)) return;
-                // no ShroudForge status in this start after its first minutes: it does not run here
-                if (!f.Exists && i > 60) return;
+                if (Done(f, i)) return;
                 Thread.Sleep(2000);
             }
         }
