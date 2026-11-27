@@ -390,9 +390,10 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   `0x40cf00`) puts the pick back after the action while the action's choice is another item, and a build's entry uses it
   over what the group shows, from the pick until the action itself chooses it (result 4), a pick of that list goes to the
   game, the kind is cleared, its owner retires, the session changes, or 1 s passes; only while a binding of the group
-  exists. sigdb feature `ui.ammo.cursor`. Not established statically: the order of `client_cycle_inventory_stock`,
-  player_ui's build, the input handler (`0x3af670`, called from the client frame at `0x87a94d`) and the HUD draw within
-  one frame, and so whether the previous spell was drawn for every frame of the window.
+  exists. `ui/AmmoListDraw` is hooked only by the opt-in pick trace (docs/kiln/ui.md). sigdb features `ui.ammo.cursor`,
+  `ui.ammo.trace`. Not established statically: the order of `client_cycle_inventory_stock`, player_ui's build, the input
+  handler (`0x3af670`, called from the client frame at `0x87a94d`) and the HUD draw within one frame, and so whether
+  the previous spell was drawn for every frame of the window; the trace's `sync`, `build` and `draw` lines settle it.
 
 Real menu behaviour, the server half of a swap and controller cycling remain the owner's in-game check.
 

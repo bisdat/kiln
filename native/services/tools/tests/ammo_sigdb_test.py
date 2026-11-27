@@ -22,8 +22,8 @@ EXPECTED = {"tools/MaterialSelector":0x40e5d0,"ui/AmmoFinalizer":0x40dfe0,"ui/Am
             "ui/AmmoCycle":0x40c320,"ui/AmmoCycleReturn":0x3afb07,"ui/AmmoSelectReturn":0x3afa7a,
             "ui/AmmoEventWishReturn":0x2bce29,"ui/AmmoCycleEventCount":0x2bd19a,"ui/AmmoCycleWatch":0xb35d7d,
             "ui/AmmoListRevealRead":0xbe603f,
-            # GitHub issue 151 (the flicker 31.21 left): the game's selection sync.
-            "ui/AmmoSelectAction":0x40cf00}
+            # GitHub issue 151 (the flicker 31.21 left): the game's selection sync and the HUD list draw.
+            "ui/AmmoSelectAction":0x40cf00,"ui/AmmoListDraw":0xbe5150}
 CONSTANTS = {"ui/ammo.groups":0x14fd0,"ui/ammo.cycle_count":0x2fe8,"ui/ammo.reveal_time":0x31b48}
 class AmmoQualification(unittest.TestCase):
     @classmethod
@@ -46,7 +46,7 @@ class AmmoQualification(unittest.TestCase):
             self.assertTrue(constants[name]["ok"],name)
             self.assertEqual(constants[name]["value"],value,name)
         self.assertTrue(features["ui.ammo.list"] and features["ui.ammo.pick"] and features["ui.ammo.reveal"])
-        self.assertTrue(features["ui.ammo.cursor"])
+        self.assertTrue(features["ui.ammo.cursor"] and features["ui.ammo.trace"])
         source=(ROOT/"native/services/tools/ammo_runtime.inl").read_text()
         for name,rva in EXPECTED.items():
             if name=="tools/MaterialSelector": continue
@@ -54,8 +54,8 @@ class AmmoQualification(unittest.TestCase):
                 pattern=source.split(',"'+name+'","',1)[1].split('"',1)[0]
                 rx,_,length=parse(pattern)
                 self.assertIsNotNone(rx.fullmatch(self.image.img[rva:rva+length]))
-        # The selection sync's hook qualifies the same bytes sigdb declares (its pattern is a constant in the runtime).
-        for name,constant in (("ui/AmmoSelectAction","action_pattern"),):
+        # The two new hooks qualify the same bytes sigdb declares (their patterns are constants in the runtime).
+        for name,constant in (("ui/AmmoSelectAction","action_pattern"),("ui/AmmoListDraw","draw_pattern")):
             text=source.split("constexpr char "+constant+"[]=",1)[1].split(";",1)[0]
             pattern="".join(re.findall(r'"([^"]*)"',text))
             self.assertEqual(pattern,self.doc["symbols"][name]["find"][0]["pattern"],name)

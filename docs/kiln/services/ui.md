@@ -387,7 +387,9 @@ the equipped item because such a pick writes no pending pick of the game's) and 
 game's own choice is that item, a pick of that list goes to the game, the kind is cleared, its owner retires, the session
 changes, or 1 s passes. Only while the owner's rows are up. A build whose cursor item the new rows do not list takes the
 game's own selection instead of none. On a game build where `ui/AmmoSelectAction` does not resolve only the builds hold
-it, and `kiln.log` says so once at the start.
+it, and `kiln.log` says so once at the start. The opt-in pick trace (`kiln.json` `"ui": {"ammoTrace": true}` or
+`KILN_AMMO_TRACE=1`, read at the start; lines `ui.ammo trace: ...`) is described in
+[../ui.md](../ui.md#tracing-a-pick-of-the-list-testers); off, the HUD draw is not hooked at all.
 
 ## Captured item detail (Since 0.2.0-dev.30.5)
 

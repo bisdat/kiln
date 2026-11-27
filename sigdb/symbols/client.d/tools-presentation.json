@@ -82,6 +82,14 @@
         }
       ]
     },
+    "ui/AmmoListDraw": {
+      "comment": "GitHub issue 151: the HUD's list draw of the active group (called at 0xbed05b with the play data's group of +0x17bc8, null for none). It draws index = the group's selection (+0x628) when the selection-valid flag (+0x630) is set, else its remembered index (widget state +0x10, which it then sets: 0xbe6234..0xbe6269), and scrolls toward that row with exponential damping (rate 20/s, 0xbe69e6). Hooked only while kiln.ui.ammo's pick trace is on. Client 0xbe5150",
+      "find": [
+        {
+          "pattern": "48 89 4C 24 08 55 56 57 41 54 48 8D AC 24 68 F6 FF FF 48 81 EC 98 0A 00 00 48 8B 05 ?? ?? ?? ?? 33 FF 4C 8B E1 48 8B 90 D0 00 00 00 48 8B 32 48 85 F6 75 04 8B F7 EB 04 48 8B 76 38 C7 45 80 06 00 0A 00"
+        }
+      ]
+    },
     "ui/AmmoItemLookup": {
       "find": [
         {
@@ -205,6 +213,11 @@
     "ui.ammo.cursor": {
       "symbols": [
         "ui/AmmoSelectAction"
+      ]
+    },
+    "ui.ammo.trace": {
+      "symbols": [
+        "ui/AmmoListDraw"
       ]
     },
     "ui.ammo.reveal": {

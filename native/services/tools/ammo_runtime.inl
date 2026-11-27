@@ -63,7 +63,10 @@ uint32_t held(unsigned i,uintptr_t group) {
     if(std::chrono::steady_clock::now()-h.since>hold_limit){drop_hold(i);return 0;}
     return h.item;
 }
-kiln::RawHook action_hook;
+kiln::RawHook action_hook,draw_hook;
+AmmoTrace trace; // the pick trace (ammo_trace.h): off unless kiln.json or KILN_AMMO_TRACE turns it on at the start
+std::atomic<uintptr_t> trace_groups{}; // the play data's groups the HUD draws one of (set by full builds while tracing)
+uint64_t drawn_index{}; // the draw's remembered index as Kiln reckons it: the last index it drew (its widget state +0x10)
 // An address is only an identity token. Never dereference one kept here: engine views are read only from the
 // current hook's argument, and are copied into owned arrays before leaving that invocation.
 std::map<uintptr_t,Binding> bindings;
@@ -103,6 +106,15 @@ uint32_t selection(const SelectorGroup* group) {
        !head.has_selected||head.selected>=head.count||head.count>4096||!head.data)return 0;
     uint32_t item=0;return read(item,&head.data[head.selected].item)?item:0;
 }
+// The trace's view of a group's selection: the valid flag, the index, the row count and that row's item (guarded reads).
+AmmoCursor cursor(const SelectorGroup* group) {
+    AmmoCursor c{};SelectorGroup head{};uint8_t valid=0;
+    if(!group||!copy_game_value(&head,group,24)||!read(head.selected,&group->selected)||!read(valid,&group->has_selected)||
+       head.count>4096||(head.count&&!head.data))return c;
+    c.readable=true;c.valid=valid!=0;c.index=head.selected;c.count=head.count;
+    if(c.index<c.count&&!read(c.item,&head.data[c.index].item))c.readable=false;
+    return c;
+}
 bool write_rows(SelectorGroup* group,const SelectorRow* rows,uint32_t count,uint32_t selected) {
     SelectorRow* data=nullptr;uint64_t capacity=0;
     if(!group||!read(data,&group->data)||!read(capacity,&group->capacity)||count>capacity||count>KUA_CAPACITY||(!data&&count))return false;
@@ -127,9 +139,15 @@ KilnHandle lifecycle_handle{},report_tick{};
 std::atomic<bool> fault_reported{};
 void publish_handoffs();
 void publish_keep_reports();
+// The pick trace's lines (ammo_trace.h), from the client Post tick: one load while there are none.
+void publish_trace() {
+    if(!trace.pending()||!api||!api->log)return;
+    try {for(const auto& line:trace.take(std::chrono::steady_clock::now()))api->log(parent_owner,KILN_LOG_INFO,{line.data(),line.size()});}
+    catch(...) {}
+}
 void KILN_CALL report_post(const KilnTickInfo*,void*) {
     if(failed()&&!fault_reported.exchange(true))report_caps();
-    publish_handoffs();publish_keep_reports();
+    publish_handoffs();publish_keep_reports();publish_trace();
 }
 // The exact ItemRegistry lookup at Ce94470 uses map+0x38; Ce86770 gives these map field offsets. Copy only
 // validated ammunition identities/categories, never a borrowed ItemInfo pointer. Refresh on each new client session.
@@ -158,9 +176,12 @@ bool copy_catalog(void* access,uint32_t session) {
 Frame::Frame(SelectorGroup* groups,void*,uint8_t only) {
     ++builder_depth;
     uint8_t active=7;if(groups&&only)read(active,reinterpret_cast<const uint8_t*>(groups)+0x2bf8);
+    const bool tracing=trace.on();
+    if(tracing&&groups&&!only)trace_groups.store(reinterpret_cast<uintptr_t>(groups),std::memory_order_relaxed);
     std::lock_guard lock(mutex);
     for(unsigned i=0;i<2;++i) {
         rebuild[i]=groups&&(!only||active==i);if(!rebuild[i])continue;
+        if(tracing)entry[i]=cursor(groups+i);
         publication[i]=publications[i];
         const auto old=bindings.find(reinterpret_cast<uintptr_t>(groups+i));
         if(publication[i]||old!=bindings.end())selected[i]=selection(groups+i);
@@ -214,6 +235,11 @@ void after(Frame& frame,SelectorGroup* groups,void* access) try {
     if(catalog_session&&catalog_session!=before.client_session)clear_session();
     const bool known=copy_catalog(access,before.client_session);
     for(unsigned i=0;i<2;++i)if(frame.rebuild[i]) {
+        // The pick trace's line of this build: armed once the game's rows are read, recorded however the iteration ends.
+        struct BuildNote {
+            AmmoTraceEvent e{};SelectorGroup* group{};bool armed{};
+            ~BuildNote() {if(armed)try{e.at[2]=cursor(group);trace.record(e,std::chrono::steady_clock::now());}catch(...){}}
+        } note;
         Observation next{};next.value.size=sizeof next.value;next.value.kind=i?KUA_KIND_SPELL:KUA_KIND_ARROW;
         next.value.session=before.client_session;next.value.local_player=before.local_player;next.value.held_item=held;next.generation=before.generation;
         SelectorRow* data=nullptr;uint64_t count=0,capacity=0;
@@ -234,17 +260,27 @@ void after(Frame& frame,SelectorGroup* groups,void* access) try {
         if(equal)next.seen=previous.seen;
         for(uint32_t r=0;r<next.value.game_count;++r)next.value.game_rows[r]={next.rows[r].item,uint32_t(std::min<uint64_t>(next.rows[r].count,UINT32_MAX)),0,r};
         previous=next;
+        if(trace.on()) {
+            note.armed=true;note.group=groups+i;note.e.stage=AmmoTraceStage::Build;note.e.kind=uint8_t(i);note.e.at[0]=frame.entry[i];
+            note.e.at[1]=cursor(groups+i);note.e.revision=next.value.game_serial;note.e.rows=AmmoTraceRows::Game;
+        }
         const auto& p=frame.publication[i];
-        if(!known||!p||p!=publications[i]||p->session!=next.value.session)continue;
+        if(!known||!p||p!=publications[i]||p->session!=next.value.session) {
+            note.e.why=!known?AmmoRowsWhy::Catalog:!p||p!=publications[i]?AmmoRowsWhy::NoPublication:AmmoRowsWhy::OtherSession;continue;
+        }
         // A Replace publication of an earlier build is composed over this one, as if made for it, until the next
         // publication or keep_limit (GitHub issue 151). Its rows' picks are decided against these rows, as any binding's.
-        if(p->serial!=next.value.game_serial&&!keep(i,*p,next))continue;
+        if(p->serial!=next.value.game_serial&&!keep(i,*p,next)) {
+            note.e.why=p->mode!=KUA_MODE_REPLACE?AmmoRowsWhy::AppendWaits:p->generation!=next.generation||p->local_player!=next.value.local_player||
+                p->held!=next.value.held_item||p->serial>next.value.game_serial?AmmoRowsWhy::Context:AmmoRowsWhy::KeepEnded;
+            continue;
+        }
         auto composed=compose_ammo(next.rows.data(),next.value.game_count,p->rows.data(),p->count,p->mode,frame.selected[i]?frame.selected[i]:selection(groups+i));
         if(composed.count>capacity){composed.count=uint32_t(std::min<uint64_t>(capacity,KUA_CAPACITY));composed.truncated=true;}
         if(bindings.size()>=16) {
             // Only an earlier session's binding may make room; a current one still guards rows drawn this session.
             const auto stale=std::find_if(bindings.begin(),bindings.end(),[&](const auto& b){return b.second.original.value.session!=before.client_session;});
-            if(stale==bindings.end()){previous.value.reason=KUA_REASON_LIMIT;continue;}
+            if(stale==bindings.end()){previous.value.reason=KUA_REASON_LIMIT;note.e.why=AmmoRowsWhy::Full;continue;}
             bindings.erase(stale);
         }
         // Once per set of rows, for each game row with stock whose item this publication provides (no other row's pick
@@ -261,7 +297,7 @@ void after(Frame& frame,SelectorGroup* groups,void* access) try {
         // Reserve suppression bookkeeping before the first game write. Allocation failure must leave vanilla
         // rows, never a synthetic row whose later equip request has no binding to intercept.
         const auto [bound,inserted]=bindings.emplace(reinterpret_cast<uintptr_t>(groups+i),Binding{previous,p,std::move(composed)});
-        if(!inserted){fault(nullptr);continue;}
+        if(!inserted){fault(nullptr);note.e.why=AmmoRowsWhy::Fault;continue;}
         const auto& output=bound->second.composed;
         uint32_t want=frame.selected[i]?frame.selected[i]:selection(groups+i);
         // A cursor whose item these rows no longer list (another publication, a held pick it dropped) takes the game's own
@@ -270,8 +306,10 @@ void after(Frame& frame,SelectorGroup* groups,void* access) try {
             if(holds[i].item==want&&holds[i].group==reinterpret_cast<uintptr_t>(groups+i))drop_hold(i);
             want=selection(groups+i);
         }
-        if(!write_rows(groups+i,output.rows.data(),output.count,want)){fault(groups+i);continue;}
+        if(!write_rows(groups+i,output.rows.data(),output.count,want)){fault(groups+i);note.e.why=AmmoRowsWhy::Fault;continue;}
         if(output.truncated)previous.value.reason=KUA_REASON_LIMIT;
+        note.e.rows=p->serial==next.value.game_serial?AmmoTraceRows::Current:AmmoTraceRows::Kept;note.e.shown=p->serial;
+        if(note.e.rows==AmmoTraceRows::Kept)note.e.kept_ms=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-keeps[i].since).count();
     }
 }
 catch(...) {fault(nullptr);}
@@ -415,8 +453,21 @@ void reveal(SelectorGroup* groups,uint8_t category) {
 }
 void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t item,uint32_t version) try {
     kt::ToolPolicyScope no_impact_policy(nullptr);
-    // Read before any call: caller() is the game's call site only until the handler calls on.
-    const uintptr_t from=reveal_ready.load(std::memory_order_acquire)?pick_hook.caller():0;
+    const bool tracing=trace.on()&&groups&&category<2;
+    // Read before any call: caller() is the game's call site only until the handler calls on. The trace reads it too
+    // where kiln.hooks answers it (reveal_setup requires it as well).
+    const bool callers=hooks&&hooks->header.size>=offsetof(KilnHooksApi,caller)+sizeof(hooks->caller)&&hooks->caller;
+    const uintptr_t from=(tracing&&callers)||reveal_ready.load(std::memory_order_acquire)?pick_hook.caller():0;
+    // The pick trace's line: who took the pick and the cursor after it, recorded however this call ends.
+    struct PickNote {
+        AmmoTraceEvent e{};SelectorGroup* group{};bool armed{};
+        ~PickNote() {if(armed)try{e.at[0]=cursor(group);trace.pick(e,std::chrono::steady_clock::now());}catch(...){}}
+    } note;
+    if(tracing) {
+        note.armed=true;note.group=groups+category;note.e.kind=category;note.e.item=item;note.e.route=AmmoPickRoute::Dropped;
+        note.e.site=!from||!reveal_sites.cycle?AmmoPickSite::Unknown:from==reveal_sites.cycle?AmmoPickSite::Cycle:
+            from==reveal_sites.select?AmmoPickSite::Select:AmmoPickSite::Game;
+    }
     std::shared_ptr<const Publication> p;Observation original{};KilnUiAmmoRow picked{};
     bool provided=false,bound=false;int stocked=-1; // stocked: the index of the bound game row of the item with stock
     uint64_t stock=0; // the game's count of the item: the bound row's, or without a binding the row the group shows now
@@ -443,11 +494,11 @@ void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t 
     // A pick that goes to the game ends a held pick of that list: the game's own pending pick holds the cursor now.
     if(!provided) {
         if(groups&&category<2&&holding.load(std::memory_order_acquire)){std::lock_guard lock(mutex);drop_hold(category);}
-        pick_hook.call<void>(groups,input,category,item,version);return;
+        note.e.route=AmmoPickRoute::NotProvided;pick_hook.call<void>(groups,input,category,item,version);return;
     }
     const auto vanilla=[&](uint32_t count,uint64_t step,Backpack why) {
         {std::lock_guard lock(mutex);note_handoff(*p,item,count,original,step,why);drop_hold(category);}
-        pick_hook.call<void>(groups,input,category,item,version);
+        note.e.route=AmmoPickRoute::Game;pick_hook.call<void>(groups,input,category,item,version);
     };
     const uint32_t count=uint32_t(std::min<uint64_t>(stock,UINT32_MAX));
     KilnClientState before{};const bool live=state(before)&&same(before,original);
@@ -476,6 +527,7 @@ void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t 
     if(publications[category]!=p||!available()||!select_identity(groups+category,item))return;
     if(pending.size()==KUA_CAPACITY)pending.pop_front();
     pending.emplace_back(p->owner,KilnUiAmmoPick{sizeof(KilnUiAmmoPick),p->kind,item,picked.count,picked.row,before.client_session,before.client_steps});
+    note.e.route=AmmoPickRoute::Mod;
     // Kiln holds this pick's cursor over the game's selection sync until the mod's swap reaches the game (holds above). A
     // repeat of the held item keeps its start, so the game's own automatic picks of it cannot hold it longer.
     {
@@ -492,30 +544,71 @@ catch(...) {fault(nullptr);}
 void KILN_CALL finalizer(SelectorGroup* groups,void* a,void* b,void* c,void* d,void* e) {
     kt::ToolPolicyScope no_impact_policy(nullptr);
     uint32_t selected[2]{};
-    if(groups&&!builder_depth) {std::lock_guard lock(mutex);for(unsigned i=0;i<2;++i)if(bindings.contains(reinterpret_cast<uintptr_t>(groups+i)))selected[i]=selection(groups+i);}
+    const bool tracing=trace.on()&&groups&&!builder_depth;AmmoTraceEvent notes[2]{};
+    if(groups&&!builder_depth) {
+        std::lock_guard lock(mutex);
+        for(unsigned i=0;i<2;++i)if(bindings.contains(reinterpret_cast<uintptr_t>(groups+i))) {
+            selected[i]=selection(groups+i);
+            if(tracing){notes[i].stage=AmmoTraceStage::Final;notes[i].kind=uint8_t(i);notes[i].at[0]=cursor(groups+i);}
+        }
+    }
     finalizer_hook.call<void>(groups,a,b,c,d,e);
     if(groups)for(unsigned i=0;i<2;++i)if(selected[i]) {
-        std::lock_guard lock(mutex);const auto at=bindings.find(reinterpret_cast<uintptr_t>(groups+i));
-        if(at==bindings.end())continue;
-        select_identity(groups+i,selected[i]);
+        if(tracing)notes[i].at[1]=cursor(groups+i);
+        {
+            std::lock_guard lock(mutex);const auto at=bindings.find(reinterpret_cast<uintptr_t>(groups+i));
+            if(at==bindings.end())continue;
+            select_identity(groups+i,selected[i]);
+        }
+        if(tracing){notes[i].at[2]=cursor(groups+i);trace.record(notes[i],std::chrono::steady_clock::now());}
     }
 }
 // ui/AmmoSelectAction (0x40cf00, out, group, category, ...): client_cycle_inventory_stock's selection sync of the HUD's
 // active group (holds above). Its result's first byte is 4 when it selected the item the game's reconciliation named.
 void* KILN_CALL select_action(void* out,SelectorGroup* group,uint8_t category,void* context,void* a5,void* a6,void* a7,void* a8) {
     kt::ToolPolicyScope no_impact_policy(nullptr);
+    const bool tracing=trace.on()&&group&&category<2;
+    AmmoTraceEvent e{};e.stage=AmmoTraceStage::Sync;e.kind=category;
+    if(tracing)e.at[0]=cursor(group);
     void* result=action_hook.call<void*>(out,group,category,context,a5,a6,a7,a8);
-    if(!group||category>=2||!holding.load(std::memory_order_acquire))return result;
+    if(!group||category>=2||(!tracing&&!holding.load(std::memory_order_acquire)))return result;
     try {
-        std::lock_guard lock(mutex);const auto g=reinterpret_cast<uintptr_t>(group);
-        if(const uint32_t item=available()&&bindings.contains(g)?held(category,g):0) {
-            KilnClientState s{};uint8_t code=0;
-            if(!state(s)||s.client_session!=holds[category].session)drop_hold(category);
-            else if(selection(group)==item){if(read(code,out)&&code==4)drop_hold(category);} // the swap arrived
-            else if(!select_identity(group,item))drop_hold(category); // no longer listed: nothing to hold
+        if(tracing)e.at[1]=cursor(group);
+        {
+            std::lock_guard lock(mutex);const auto g=reinterpret_cast<uintptr_t>(group);
+            if(const uint32_t item=available()&&bindings.contains(g)?held(category,g):0) {
+                KilnClientState s{};uint8_t code=0;
+                if(!state(s)||s.client_session!=holds[category].session)drop_hold(category);
+                else if(selection(group)==item){if(read(code,out)&&code==4){drop_hold(category);e.landed=true;}} // the swap arrived
+                else {
+                    e.held_ms=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-holds[category].since).count();
+                    if(select_identity(group,item))e.held=true;else drop_hold(category); // no longer listed: nothing to hold
+                }
+            }
         }
+        if(tracing){e.at[2]=cursor(group);trace.record(e,std::chrono::steady_clock::now());}
     } catch(...) {fault(nullptr);}
     return result;
+}
+// ui/AmmoListDraw (0xbe5150, the HUD's list of the active group; hooked only while the pick trace is on). It draws the
+// group's selection when its selection-valid flag is set, else its remembered index, the index it drew last (its widget
+// state +0x10, which each draw sets; docs/re/building.md). Kiln reckons that index the same way, from the first draw on.
+void KILN_CALL draw(SelectorGroup* group) {
+    if(trace.on()&&group)try {
+        trace.next_frame();
+        AmmoTraceEvent e{};e.stage=AmmoTraceStage::Draw;
+        const auto c=cursor(group);
+        if(c.readable) {
+            const uint64_t index=c.valid?c.index:drawn_index;drawn_index=index;
+            e.at[0]={0,index,c.count,c.valid,true};e.remembered=!c.valid;
+            SelectorRow* data=nullptr;if(index<c.count&&read(data,&group->data)&&data)read(e.at[0].item,&data[index].item);
+        }
+        const auto base=trace_groups.load(std::memory_order_relaxed),at=reinterpret_cast<uintptr_t>(group);
+        if(base&&at>=base&&(at-base)%sizeof(SelectorGroup)==0&&(at-base)/sizeof(SelectorGroup)<2) {
+            e.kind=uint8_t((at-base)/sizeof(SelectorGroup));trace.record(e,std::chrono::steady_clock::now());
+        }
+    } catch(...) {}
+    draw_hook.call<void>(group);
 }
 KilnResult KILN_CALL publish(KilnOwner owner,const KilnUiAmmoPublish* value) {
     if(!value||value->size<sizeof *value||index(value->kind)>1||value->mode>KUA_MODE_REPLACE||value->reserved||value->count>KUA_CAPACITY||(!value->rows&&value->count))return KILN_ERR_INVALID_ARGUMENT;
@@ -578,6 +671,8 @@ constexpr char action_pattern[]="48 89 5C 24 08 57 48 83 EC 50 48 8B 84 24 98 00
     "48 8B D9 4C 8B 84 24 88 00 00 00 49 8B CA 48 89 54 24 28 48 8B 94 24 80 00 00 00 48 89 44 24 20 E8 ?? ?? ?? ?? 85 C0 74 4A 44 8B C0 "
     "48 8D 4C 24 40 48 8B D7 E8 ?? ?? ?? ?? 80 7C 24 40 00 75 33 80 BF 30 06 00 00 00 75 07 C6 87 30 06 00 00 01 48 8B 44 24 48 48 89 87 "
     "28 06 00 00 33 C0 48 89 43 04 48 8B C3 C6 03 04";
+constexpr char draw_pattern[]="48 89 4C 24 08 55 56 57 41 54 48 8D AC 24 68 F6 FF FF 48 81 EC 98 0A 00 00 48 8B 05 ?? ?? ?? ?? 33 FF 4C 8B E1 "
+    "48 8B 90 D0 00 00 00 48 8B 32 48 85 F6 75 04 8B F7 EB 04 48 8B 76 38 C7 45 80 06 00 0A 00";
 bool start() {
     client=static_cast<const KilnClientApi*>(api->service({KILN_CLIENT_SERVICE,sizeof(KILN_CLIENT_SERVICE)-1},KILN_CLIENT_VERSION));
     world_api=static_cast<const KilnWorldApi*>(api->service({KILN_WORLD_SERVICE,sizeof(KILN_WORLD_SERVICE)-1},KILN_WORLD_VERSION));
@@ -604,6 +699,13 @@ bool start() {
         constexpr char line[]="ui.ammo: after a pick of a mod row the HUD list can show the equipped item again until the mod's swap arrives on "
             "this game build (the game's selection sync, ui/AmmoSelectAction, is not qualified)";
         api->log(parent_owner,KILN_LOG_INFO,{line,sizeof line-1});
+    }
+    if(final&&pick_ok&&trace.on()&&api->log) {
+        const bool drawn=install(draw_hook,"ui/AmmoListDraw",draw_pattern,reinterpret_cast<void*>(&draw));
+        const std::string line=std::string("ui.ammo: the pick trace is on (kiln.json \"ui\": {\"ammoTrace\": true} or KILN_AMMO_TRACE=1): ")+
+            "\"ui.ammo trace:\" lines for 2 s after each pick of an arrow or spell row"+(drawn?"":
+            "; the HUD list draw is not traced on this game build (ui/AmmoListDraw is not qualified), so every frame number is 0");
+        api->log(parent_owner,KILN_LOG_INFO,{line.data(),line.size()});
     }
     ready.store(final&&pick_ok,std::memory_order_release);return available();
 }

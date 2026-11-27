@@ -737,6 +737,48 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   rows, `SetGameRows`, `NewSession`, `KnownItems`), shows what the HUD would (`Shown`, `Provided`, `ModeOf`, `Selected`)
   and picks a row (`Pick`, raised at the next `Step`).
 
+### Tracing a pick of the list (testers)
+
+Since 0.2.0-dev.31.next `kiln.log` can follow each pick of an arrow or spell row through every step that touches the
+cursor, frame by frame (GitHub issue 151). It is off by default. To turn it on, put this in `kiln.json` in the `kiln`
+folder next to the game's executable (at the top level, not in a `client` section) and start the game:
+
+```json
+{ "ui": { "ammoTrace": true } }
+```
+
+Keep any keys the file already has. You can also set the environment variable `KILN_AMMO_TRACE=1`, for example in
+Steam's launch options on Linux: `KILN_AMMO_TRACE=1 %command%`. The variable wins over kiln.json, and `KILN_AMMO_TRACE=0`
+turns the trace off. Kiln reads the switch once, at the game's start, and `kiln.log` confirms it with
+`ui.ammo: the pick trace is on (...)`. Remove the setting afterwards.
+
+For 2 s after each pick, each step writes a line when what it saw changed. Every line has the list, the pick's number
+(`#7`), the time since that pick, and the frame (how many times the HUD list has been drawn since the start):
+
+```text
+ui.ammo trace: spell #7 +0.0 ms frame 4031: pick 0x1a2b3c4d from a scroll (the game's cycle): the mod's (Picked; the game's equip kept back); cursor 0x1a2b3c4d index 3 of 9
+ui.ammo trace: spell #7 +0.4 ms frame 4032: draw: index 3 of 9, 0x1a2b3c4d (the selection)
+ui.ammo trace: spell #7 +16.6 ms frame 4032: sync: before 0x1a2b3c4d index 3 of 9; the game's 0x11111111 index 5 of 9; after 0x1a2b3c4d index 3 of 9 (Kiln held its pick of 16 ms ago)
+ui.ammo trace: spell #7 +16.9 ms frame 4032: build: entry 0x1a2b3c4d index 3 of 9; the game's 0x11111111 index 0 of 6; exit 0x1a2b3c4d index 3 of 9; rows: the mods' of revision 40 kept over revision 41 (since 16 ms)
+ui.ammo trace: spell #7 +17.0 ms frame 4032: final: before 0x1a2b3c4d index 3 of 9; the game's 0x11111111 index 5 of 9; after 0x1a2b3c4d index 3 of 9
+ui.ammo trace: spell #7 +94.1 ms frame 4037: sync: before 0x1a2b3c4d index 3 of 9; the game's 0x1a2b3c4d index 3 of 9; after 0x1a2b3c4d index 3 of 9 (the game's choice is Kiln's pick: the hold ends)
+```
+
+A cursor is the item, its index (from 0) and the number of rows; `no selection (index n of m)` means the list's
+selection-valid flag is off.
+
+| Step | What it says |
+|---|---|
+| `pick` | The requested item; where the pick came from (`a scroll (the game's cycle)`, `a direct selection`, or `the game (its own selection)`); who took it: `the mod's (Picked ...)`, `the game's (its own equip)`, `the game's (no mod lists it)`, or `nobody's` (stale or unreadable rows); then the cursor after it. |
+| `sync` | The game's selection sync: the cursor before it, the item the game chose, and the cursor after Kiln. `Kiln held its pick` means the game chose another item and Kiln put its pick back; `the hold ends` means the game chose Kiln's pick itself (the swap arrived). |
+| `build` | One build of the list: the cursor at its `entry`; `the game's` own selection on its own rows after its build; the cursor at its `exit`; and which rows show: `the mods' (revision n)` (the current publication), `the mods' of revision p kept over revision n` (since 0.2.0-dev.31.21, at most 1 s), or `the game's own` with the reason. |
+| `final` | The game's finalizer after the build: the cursor before it, the game's choice, then the cursor after Kiln. |
+| `draw` | The HUD list's draw: the index it drew and that row's item; `(the selection)` or `(the remembered index: no selection)`. Without a valid selection the game draws the index it drew last, and Kiln reckons that index the same way. |
+
+The first line where `draw` shows another item than the pick (and than the `sync` or `build` just before it) is where
+the picture leaves the pick. At most 100 lines a second are written; when more wait, a line says how many were dropped.
+On a game build where the HUD draw cannot be traced, `kiln.log` says so at the start and every frame number is 0.
+
 ## Outlines on entities in the world (0.2.0-dev.30.3)
 
 `Ui.World.Outline(entity, options)` (client only, any thread) lights an entity's model with the game's own highlight:
