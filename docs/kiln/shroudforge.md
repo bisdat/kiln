@@ -201,4 +201,3 @@ dedicated server has not been seen yet: that needs a real game client. Kiln's re
 log `net-probe:` lines in kiln.log (the joined game a `send ping N` every 10 s; the server `got ping N from <id> (...):
 permissions ...` and its answer; the joined game `got pong for ping N`). It sends only to the server it finds (the game
 it joined, a server on this PC, or the one ShroudForge's Network setting names) and answers those who message it.
-
