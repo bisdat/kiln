@@ -685,6 +685,18 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   publication, and `kiln.log` says so once (`ui.ammo: the spell list shows the game's own rows: ...`). Nothing stays
   over another weapon, player, client session or world, or once the list is cleared. An `Append` list shows the game's
   own rows in that frame, as before (its rows go in around the game's).
+- **The cursor after a pick of your row.** Whenever its selection sync runs (`client_cycle_inventory_stock`, most
+  frames), the game puts the cursor on the item it expects in the slot: its own pick while the server has not answered
+  it, else the equipped arrow or spell. A pick Kiln takes for your row is not the game's own pick, so until your server
+  half's swap reached the game the cursor went back to the equipped spell (the one before the pick) and then forward to
+  the new one when the swap arrived: the picker moved, showed the previous spell for a moment, and came back. That took
+  as long as the swap: about 60 to 140 ms in a hosted world in the reporter's measurements (longest in the first
+  switches after a start), a network round trip more on a dedicated server. Since 0.2.0-dev.31.next Kiln holds the
+  cursor on your row from the pick until the game itself names that item (the swap arrived), the player picks a row
+  that goes to the game, the list is cleared, the session changes, or a second passes (a swap that never comes: then
+  the equipped item shows, as before). This applies only while your rows are up, in either mode, and there is nothing
+  to call (GitHub issue 151, thanks Fuzen777). When your new rows no longer list the item under the cursor, the list
+  takes the game's own selection instead of none (with none, the HUD draws the index it drew last).
 - **Picks.** A row whose item the game lists itself with stock (in `Replace` too) or the player carries is the game's
   own: it equips it as always. The row the game keeps at count 0 for a stack the player used up is not stock: since
   0.2.0-dev.30.7 a mod row of that item raises `Picked` unless the player carries it, in either mode (GitHub issue 131,

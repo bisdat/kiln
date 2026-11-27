@@ -41,6 +41,29 @@ constexpr auto keep_limit=std::chrono::milliseconds(1000);
 struct Keep {std::chrono::steady_clock::time_point since{};uint64_t first{},game{};bool started{},expired{},report{};};
 Keep keeps[2]; // reset by every publish and clear of that kind
 std::atomic<bool> keep_report_pending{};
+// GitHub issue 151, the flicker 31.21 left: the game's selection sync client_cycle_inventory_stock (0x2b4390) calls the
+// selection action 0x40cf00 on the HUD's active group whenever it runs, outside any list build. The action selects the
+// item the game's reconciliation 0x40ca70 names: the group's pending pick (+0x63c) while its version (+0x640) is not the
+// one the server last consumed (CspHackInventoryStockSelection.versions), else the equipped stack. A pick Kiln takes for
+// a mod writes no pending pick (the game's equip is kept back), so until the mod's swap reached the game the sync put the
+// cursor back on the equipped item, the spell before the pick; the next build kept it (Frame takes the group's selection),
+// and the swap's arrival moved it to the new spell again. Kiln now holds its pick as the game's pending pick holds the
+// game's own: right after the sync (select_action) and at a build's entry, from the pick until the sync's choice is that
+// item (the swap arrived), a pick of that list goes to the game, its publication ends, the session changes, or
+// hold_limit passes (then the equipped item shows, as before). Only while Kiln's rows are up (a binding of the group).
+constexpr auto hold_limit=std::chrono::milliseconds(1000);
+struct Hold {uintptr_t group{};uint32_t item{},session{};KilnOwner owner{};std::chrono::steady_clock::time_point since{};};
+Hold holds[2];
+std::atomic<bool> holding{}; // any hold: the sync hook's one load while none is
+void drop_hold(unsigned i) {holds[i]={};holding.store(holds[0].item||holds[1].item,std::memory_order_release);}
+// Caller holds the mutex. The item Kiln holds list i's cursor on in group, or 0; an expired hold ends here.
+uint32_t held(unsigned i,uintptr_t group) {
+    auto& h=holds[i];
+    if(!h.item||h.group!=group)return 0;
+    if(std::chrono::steady_clock::now()-h.since>hold_limit){drop_hold(i);return 0;}
+    return h.item;
+}
+kiln::RawHook action_hook;
 // An address is only an identity token. Never dereference one kept here: engine views are read only from the
 // current hook's argument, and are copied into owned arrays before leaving that invocation.
 std::map<uintptr_t,Binding> bindings;
@@ -94,7 +117,7 @@ void fault(SelectorGroup* group) {
 // Bindings outlive the session: vanilla enumeration keeps unmatched rows (count zeroed), so a synthetic row stays in
 // its group until that group's next build removes it, and its pick stays suppressed (stale: no event) until then.
 void clear_session() {
-    for(auto& o:observations)o={};for(auto& p:publications)p.reset();for(auto& k:keeps)k={};pending.clear();
+    for(auto& o:observations)o={};for(auto& p:publications)p.reset();for(auto& k:keeps)k={};pending.clear();drop_hold(0);drop_hold(1);
     catalog[0].clear();catalog[1].clear();catalog_session=0;
 }
 void KILN_CALL lifecycle(const KilnWorldEvent* e,void*) {
@@ -141,6 +164,8 @@ Frame::Frame(SelectorGroup* groups,void*,uint8_t only) {
         publication[i]=publications[i];
         const auto old=bindings.find(reinterpret_cast<uintptr_t>(groups+i));
         if(publication[i]||old!=bindings.end())selected[i]=selection(groups+i);
+        // A pick Kiln holds (holds above) wins over what the game's selection sync left in the group since the last build.
+        if(old!=bindings.end())if(const uint32_t h=held(i,reinterpret_cast<uintptr_t>(groups+i)))selected[i]=h;
         if(old!=bindings.end()) {
             // Remove last frame's injected rows before vanilla enumeration can accumulate them as stock.
             if(!write_rows(groups+i,old->second.original.rows.data(),old->second.original.value.game_count,selected[i]))fault(groups+i);
@@ -238,7 +263,14 @@ void after(Frame& frame,SelectorGroup* groups,void* access) try {
         const auto [bound,inserted]=bindings.emplace(reinterpret_cast<uintptr_t>(groups+i),Binding{previous,p,std::move(composed)});
         if(!inserted){fault(nullptr);continue;}
         const auto& output=bound->second.composed;
-        if(!write_rows(groups+i,output.rows.data(),output.count,frame.selected[i]?frame.selected[i]:selection(groups+i))){fault(groups+i);continue;}
+        uint32_t want=frame.selected[i]?frame.selected[i]:selection(groups+i);
+        // A cursor whose item these rows no longer list (another publication, a held pick it dropped) takes the game's own
+        // selection, not none: without a valid selection the HUD draws its remembered index (docs/re/building.md).
+        if(want&&std::none_of(output.rows.begin(),output.rows.begin()+output.count,[&](const SelectorRow& r){return r.item==want;})) {
+            if(holds[i].item==want&&holds[i].group==reinterpret_cast<uintptr_t>(groups+i))drop_hold(i);
+            want=selection(groups+i);
+        }
+        if(!write_rows(groups+i,output.rows.data(),output.count,want)){fault(groups+i);continue;}
         if(output.truncated)previous.value.reason=KUA_REASON_LIMIT;
     }
 }
@@ -408,9 +440,13 @@ void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t 
             if(!shown_count(groups+category,item,stock))provided=false;
         }
     }
-    if(!provided){pick_hook.call<void>(groups,input,category,item,version);return;}
+    // A pick that goes to the game ends a held pick of that list: the game's own pending pick holds the cursor now.
+    if(!provided) {
+        if(groups&&category<2&&holding.load(std::memory_order_acquire)){std::lock_guard lock(mutex);drop_hold(category);}
+        pick_hook.call<void>(groups,input,category,item,version);return;
+    }
     const auto vanilla=[&](uint32_t count,uint64_t step,Backpack why) {
-        {std::lock_guard lock(mutex);note_handoff(*p,item,count,original,step,why);}
+        {std::lock_guard lock(mutex);note_handoff(*p,item,count,original,step,why);drop_hold(category);}
         pick_hook.call<void>(groups,input,category,item,version);
     };
     const uint32_t count=uint32_t(std::min<uint64_t>(stock,UINT32_MAX));
@@ -440,6 +476,13 @@ void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t 
     if(publications[category]!=p||!available()||!select_identity(groups+category,item))return;
     if(pending.size()==KUA_CAPACITY)pending.pop_front();
     pending.emplace_back(p->owner,KilnUiAmmoPick{sizeof(KilnUiAmmoPick),p->kind,item,picked.count,picked.row,before.client_session,before.client_steps});
+    // Kiln holds this pick's cursor over the game's selection sync until the mod's swap reaches the game (holds above). A
+    // repeat of the held item keeps its start, so the game's own automatic picks of it cannot hold it longer.
+    {
+        auto& h=holds[category];const auto g=reinterpret_cast<uintptr_t>(groups+category);
+        if(h.item!=item||h.group!=g||h.session!=before.client_session)h={g,item,before.client_session,p->owner,std::chrono::steady_clock::now()};
+        holding.store(true,std::memory_order_release);
+    }
     // Deliberately do not call the continuation: no inventoryStockCycleAction version/item or pending native
     // selection at group+0x63c/+0x640 is written for a non-backpack row. The server half alone performs a swap.
     // The game's own automatic selections (other call sites) never show the list.
@@ -457,6 +500,23 @@ void KILN_CALL finalizer(SelectorGroup* groups,void* a,void* b,void* c,void* d,v
         select_identity(groups+i,selected[i]);
     }
 }
+// ui/AmmoSelectAction (0x40cf00, out, group, category, ...): client_cycle_inventory_stock's selection sync of the HUD's
+// active group (holds above). Its result's first byte is 4 when it selected the item the game's reconciliation named.
+void* KILN_CALL select_action(void* out,SelectorGroup* group,uint8_t category,void* context,void* a5,void* a6,void* a7,void* a8) {
+    kt::ToolPolicyScope no_impact_policy(nullptr);
+    void* result=action_hook.call<void*>(out,group,category,context,a5,a6,a7,a8);
+    if(!group||category>=2||!holding.load(std::memory_order_acquire))return result;
+    try {
+        std::lock_guard lock(mutex);const auto g=reinterpret_cast<uintptr_t>(group);
+        if(const uint32_t item=available()&&bindings.contains(g)?held(category,g):0) {
+            KilnClientState s{};uint8_t code=0;
+            if(!state(s)||s.client_session!=holds[category].session)drop_hold(category);
+            else if(selection(group)==item){if(read(code,out)&&code==4)drop_hold(category);} // the swap arrived
+            else if(!select_identity(group,item))drop_hold(category); // no longer listed: nothing to hold
+        }
+    } catch(...) {fault(nullptr);}
+    return result;
+}
 KilnResult KILN_CALL publish(KilnOwner owner,const KilnUiAmmoPublish* value) {
     if(!value||value->size<sizeof *value||index(value->kind)>1||value->mode>KUA_MODE_REPLACE||value->reserved||value->count>KUA_CAPACITY||(!value->rows&&value->count))return KILN_ERR_INVALID_ARGUMENT;
     if(!live_owner(owner))return owner?KILN_ERR_REVOKED:KILN_ERR_INVALID_ARGUMENT;
@@ -468,7 +528,7 @@ KilnResult KILN_CALL publish(KilnOwner owner,const KilnUiAmmoPublish* value) {
         std::lock_guard lock(mutex);
         if(!live_owner(owner))return KILN_ERR_REVOKED;
         if(publications[i]&&publications[i]->owner!=owner)return KUA_ERR_BUSY;
-        if(value->mode==KUA_MODE_GAME){publications[i].reset();keeps[i]={};pending.erase(std::remove_if(pending.begin(),pending.end(),[&](const auto& e){return e.first==owner&&e.second.kind==value->kind;}),pending.end());return KILN_OK;}
+        if(value->mode==KUA_MODE_GAME){publications[i].reset();keeps[i]={};drop_hold(i);pending.erase(std::remove_if(pending.begin(),pending.end(),[&](const auto& e){return e.first==owner&&e.second.kind==value->kind;}),pending.end());return KILN_OK;}
         KilnClientState s{};const auto& context=observations[i];
         if(!context.value.game_serial)return KILN_ERR_NOT_FOUND;
         if(!state(s)||!same(s,context)||value->session!=s.client_session||value->serial!=context.value.game_serial)return KILN_ERR_INVALID_ARGUMENT;
@@ -510,8 +570,14 @@ KilnResult KILN_CALL take_picks(KilnOwner owner,KilnUiAmmoPick* out,uint32_t cap
 void retire(KilnOwner owner) {
     std::lock_guard lock(mutex);
     for(unsigned i=0;i<2;++i)if(publications[i]&&publications[i]->owner==owner){publications[i].reset();keeps[i]={};}
+    for(unsigned i=0;i<2;++i)if(holds[i].item&&holds[i].owner==owner)drop_hold(i);
     pending.erase(std::remove_if(pending.begin(),pending.end(),[&](const auto& p){return p.first==owner;}),pending.end());
 }
+// The selection action's whole body as the game wrote it: reconciliation, the row lookup, the selection write, result 4.
+constexpr char action_pattern[]="48 89 5C 24 08 57 48 83 EC 50 48 8B 84 24 98 00 00 00 4D 8B D1 4C 8B 8C 24 90 00 00 00 48 8B FA 44 88 44 24 30 "
+    "48 8B D9 4C 8B 84 24 88 00 00 00 49 8B CA 48 89 54 24 28 48 8B 94 24 80 00 00 00 48 89 44 24 20 E8 ?? ?? ?? ?? 85 C0 74 4A 44 8B C0 "
+    "48 8D 4C 24 40 48 8B D7 E8 ?? ?? ?? ?? 80 7C 24 40 00 75 33 80 BF 30 06 00 00 00 75 07 C6 87 30 06 00 00 01 48 8B 44 24 48 48 89 87 "
+    "28 06 00 00 33 C0 48 89 43 04 48 8B C3 C6 03 04";
 bool start() {
     client=static_cast<const KilnClientApi*>(api->service({KILN_CLIENT_SERVICE,sizeof(KILN_CLIENT_SERVICE)-1},KILN_CLIENT_VERSION));
     world_api=static_cast<const KilnWorldApi*>(api->service({KILN_WORLD_SERVICE,sizeof(KILN_WORLD_SERVICE)-1},KILN_WORLD_VERSION));
@@ -530,6 +596,13 @@ bool start() {
     uintptr_t pick_at=0;
     if(final&&pick_ok&&api->symbol({"ui/AmmoPick",11},&pick_at)==KILN_OK&&!reveal_setup(pick_at)&&api->log) {
         constexpr char line[]="ui.ammo: picks of mod rows do not show the HUD list again on this game build (the stock-cycle reveal is not qualified)";
+        api->log(parent_owner,KILN_LOG_INFO,{line,sizeof line-1});
+    }
+    // The game's selection sync (holds above). Without it only a build puts a held pick back, so the HUD can show the
+    // equipped item between the sync and the next build, as before.
+    if(final&&pick_ok&&!install(action_hook,"ui/AmmoSelectAction",action_pattern,reinterpret_cast<void*>(&select_action))&&api->log) {
+        constexpr char line[]="ui.ammo: after a pick of a mod row the HUD list can show the equipped item again until the mod's swap arrives on "
+            "this game build (the game's selection sync, ui/AmmoSelectAction, is not qualified)";
         api->log(parent_owner,KILN_LOG_INFO,{line,sizeof line-1});
     }
     ready.store(final&&pick_ok,std::memory_order_release);return available();
