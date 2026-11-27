@@ -693,8 +693,8 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   as long as the swap: about 60 to 140 ms in a hosted world in the reporter's measurements (longest in the first
   switches after a start), a network round trip more on a dedicated server. Since 0.2.0-dev.31.next Kiln holds the
   cursor on your row from the pick until the game itself names that item (the swap arrived), the player picks a row
-  that goes to the game, the list is cleared, the session changes, or a second passes (a swap that never comes: then
-  the equipped item shows, as before). This applies only while your rows are up, in either mode, and there is nothing
+  that goes to the game, the list is cleared, the client session, world or player changes, or a second passes (a swap
+  that never comes: then the equipped item shows, as before). This applies only while your rows are up, in either mode, and there is nothing
   to call (GitHub issue 151, thanks Fuzen777). When your new rows no longer list the item under the cursor, the list
   takes the game's own selection instead of none (with none, the HUD draws the index it drew last).
 - **Picks.** A row whose item the game lists itself with stock (in `Replace` too) or the player carries is the game's
@@ -740,17 +740,30 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
 ### Tracing a pick of the list (testers)
 
 Since 0.2.0-dev.31.next `kiln.log` can follow each pick of an arrow or spell row through every step that touches the
-cursor, frame by frame (GitHub issue 151). It is off by default. To turn it on, put this in `kiln.json` in the `kiln`
-folder next to the game's executable (at the top level, not in a `client` section) and start the game:
+cursor, frame by frame (GitHub issue 151). It is off by default. To turn it on, quit the game, open `kiln.json` in the
+`kiln` folder next to the game's `enshrouded.exe`, add `"ammoTrace": true` to its `"ui"` section, save, and start the
+game:
+
+- **Windows:** `<Steam library>\steamapps\common\Enshrouded\kiln\kiln.json`, for example
+  `C:\Program Files (x86)\Steam\steamapps\common\Enshrouded\kiln\kiln.json` (Steam: Enshrouded, Manage, Browse local
+  files, then the `kiln` folder). Steam's launch options cannot set an environment variable on Windows, so use the file.
+- **Linux (Steam with Proton):** the same file in the Linux Steam library, for example
+  `~/.local/share/Steam/steamapps/common/Enshrouded/kiln/kiln.json`. Instead of the file you can put
+  `KILN_AMMO_TRACE=1 %command%` in the game's launch options in Steam (Properties, General).
+
+The section is at the top level of the file, not inside a `client` section. If the file has no `"ui"` section yet, add
+one; a file with nothing else in it reads:
 
 ```json
 { "ui": { "ammoTrace": true } }
 ```
 
-Keep any keys the file already has. You can also set the environment variable `KILN_AMMO_TRACE=1`, for example in
-Steam's launch options on Linux: `KILN_AMMO_TRACE=1 %command%`. The variable wins over kiln.json, and `KILN_AMMO_TRACE=0`
-turns the trace off. Kiln reads the switch once, at the game's start, and `kiln.log` confirms it with
-`ui.ammo: the pick trace is on (...)`. Remove the setting afterwards.
+If it has one already (the launcher's Settings and Kiln's in-game Look write it), put the key inside it, for example
+`"ui": { "look": "game", "ammoTrace": true }`, and keep everything else: a second `"ui"` section would replace the first.
+The environment variable wins over kiln.json, and `KILN_AMMO_TRACE=0` turns the trace off. Kiln reads the switch once, at
+the game's start, and `kiln/logs/kiln.log` confirms it near the top with `ui.ammo: the pick trace is on (...)`; without
+that line the trace is off. The lines are info lines, so a `"log_level"` in kiln.json must stay `"info"` (the default) or
+`"debug"`. Remove the key afterwards.
 
 For 2 s after each pick, each step writes a line when what it saw changed. Every line has the list, the pick's number
 (`#7`), the time since that pick, and the frame (how many times the HUD list has been drawn since the start):
