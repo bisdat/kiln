@@ -4,7 +4,9 @@
 // environment variable KILN_AMMO_TRACE=1 (=0 turns it off; it wins over kiln.json), read once at the game's start
 // (ammo_trace_setting.h, tools.cpp). For each pick of an arrow or spell row, under that pick's number, with the HUD
 // list's frame number (its draws so far) and the time since the pick, it records:
-//   pick   the requested item, where it came from, who took it (the mod, the game, nobody) and the cursor after it;
+//   pick   the requested item, where it came from (the scroll and the direct selection by their return addresses; any
+//          other call, such as the input handler's third pick 0x3afcce or the selection sync's own pick of the cursor's
+//          row 0x2b4846, is "elsewhere"), who took it (the mod, the game, nobody) and the cursor after it;
 //   build  the game's list build: the cursor at its entry (before Kiln puts the game's rows back), the game's own
 //          selection after its build, the cursor at its exit and the rows it shows (the current publication, one kept
 //          over a newer build, or the game's own and why);
@@ -14,8 +16,8 @@
 //   draw   the HUD list draw: the index it drew, its item, and whether it drew its remembered index (no selection).
 // Bounded: only for 2 s after a pick of that list; a stage records again only when what it records changed (the build,
 // the sync and the draw run every frame), and a repeat of the window's pick is not a new pick; a ring of 256 events; the
-// client Post tick writes at most 100 lines a second and says how many it dropped. Recording takes a small lock and never logs; off, every call site is one relaxed load
-// and the draw is not hooked at all. Host test: tests/ammo_trace.cpp.
+// client Post tick writes at most 100 lines a second and says how many it dropped. Recording takes a small lock and never
+// logs; off, every call site is one relaxed load and the draw is not hooked at all. Host test: tests/ammo_trace.cpp.
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -84,7 +86,7 @@ inline std::string ammo_trace_line(const AmmoTraceEvent& e) {
     case AmmoTraceStage::Pick: {
         s+="pick "+ammo_hex(e.item);
         s+=e.site==AmmoPickSite::Cycle?" from a scroll (the game's cycle)":e.site==AmmoPickSite::Select?" from a direct selection":
-            e.site==AmmoPickSite::Game?" from the game (its own selection)":"";
+            e.site==AmmoPickSite::Game?" from elsewhere in the game (not its scroll or direct selection)":"";
         s+=e.route==AmmoPickRoute::Mod?": the mod's (Picked; the game's equip kept back)":e.route==AmmoPickRoute::Game?
             ": the game's (its own equip)":e.route==AmmoPickRoute::NotProvided?": the game's (no mod lists it)":
             ": nobody's (stale or unreadable rows: no equip, no event)";

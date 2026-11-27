@@ -769,7 +769,7 @@ selection-valid flag is off.
 
 | Step | What it says |
 |---|---|
-| `pick` | The requested item; where the pick came from (`a scroll (the game's cycle)`, `a direct selection`, or `the game (its own selection)`); who took it: `the mod's (Picked ...)`, `the game's (its own equip)`, `the game's (no mod lists it)`, or `nobody's` (stale or unreadable rows); then the cursor after it. |
+| `pick` | The requested item; where the pick came from (`a scroll (the game's cycle)`, `a direct selection`, or `elsewhere in the game (not its scroll or direct selection)`: another input, or the game's own pick of the cursor's row); who took it: `the mod's (Picked ...)`, `the game's (its own equip)`, `the game's (no mod lists it)`, or `nobody's` (stale or unreadable rows); then the cursor after it. |
 | `sync` | The game's selection sync: the cursor before it, the item the game chose, and the cursor after Kiln. `Kiln held its pick` means the game chose another item and Kiln put its pick back; `the hold ends` means the game chose Kiln's pick itself (the swap arrived). |
 | `build` | One build of the list: the cursor at its `entry`; `the game's` own selection on its own rows after its build; the cursor at its `exit`; and which rows show: `the mods' (revision n)` (the current publication), `the mods' of revision p kept over revision n` (since 0.2.0-dev.31.21, at most 1 s), or `the game's own` with the reason. |
 | `final` | The game's finalizer after the build: the cursor before it, the game's choice, then the cursor after Kiln. |

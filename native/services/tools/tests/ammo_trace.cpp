@@ -61,7 +61,7 @@ int main() {
         AmmoTraceEvent nosel{};nosel.stage=AmmoTraceStage::Final;nosel.kind=0;nosel.at[0]={0,5,4,true,true};nosel.at[1]={0,2,4,false,true};
         t.record(nosel,t0+3s+3ms);
         const auto more=t.take(t0+3s+10ms);CHECK(more.size()==4);
-        CHECK(more[0].rfind("ui.ammo trace: arrow #2 +0.0 ms frame 4: pick 0x00000022 from the game (its own selection): the game's (its own "
+        CHECK(more[0].rfind("ui.ammo trace: arrow #2 +0.0 ms frame 4: pick 0x00000022 from elsewhere in the game (not its scroll or direct selection): the game's (its own "
             "equip); cursor 0x00000022 index 1 of 2",0)==0);
         CHECK(more[2].find("sync: before unreadable; the game's unreadable; after unreadable")!=std::string::npos);
         CHECK(more[3].find("final: before index 5 of 4 (past the rows); the game's no selection (index 2 of 4); after unreadable")!=std::string::npos);

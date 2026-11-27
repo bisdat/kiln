@@ -524,7 +524,7 @@ int main() {
             ammo::report_post(nullptr,nullptr);
             std::vector<std::string> trace;for(const auto& l:log_lines)if(l.second.rfind("ui.ammo trace:",0)==0)trace.push_back(l.second);
             CHECK(trace.size()==6);
-            CHECK(trace[0].rfind("ui.ammo trace: spell #1 +0.0 ms frame 1: pick 0x0000022b from the game (its own selection): the mod's "
+            CHECK(trace[0].rfind("ui.ammo trace: spell #1 +0.0 ms frame 1: pick 0x0000022b from elsewhere in the game (not its scroll or direct selection): the mod's "
                 "(Picked; the game's equip kept back); cursor 0x0000022b index 0 of 3",0)==0);
             CHECK(trace[1].find(" frame 1: sync: before 0x0000022b index 0 of 3; the game's 0x000003e7 index 2 of 3; after 0x0000022b "
                 "index 0 of 3 (Kiln held its pick of ")!=std::string::npos);
