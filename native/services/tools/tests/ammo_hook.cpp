@@ -474,11 +474,19 @@ int main() {
         bind();ammo::pick(groups,nullptr,1,556,910);ammo::retire(7);CHECK(ammo::holds[1].item==0);
         bind();ammo::pick(groups,nullptr,1,556,911);ammo::lifecycle(&world_event,nullptr);CHECK(ammo::holds[1].item==0&&!ammo::holding.load());
         ammo::catalog[0]={999,1257792166u,555};ammo::catalog[1]={999,1257792166u,555,556};ammo::catalog_session=9;
+        // Nor another world or player in the same client session (review of 0.2.0-dev.31.23).
+        bind();ammo::pick(groups,nullptr,1,556,9111);CHECK(ammo::holds[1].item==556);++ammo_client_state.generation;
+        CHECK(sync()==999&&ammo::holds[1].item==0&&!ammo::holding.load());--ammo_client_state.generation;
+        bind();ammo::pick(groups,nullptr,1,556,9112);CHECK(ammo::holds[1].item==556);++ammo_client_state.local_player;
+        CHECK(sync()==999&&ammo::holds[1].item==0&&!ammo::holding.load());--ammo_client_state.local_player;
         // Only while Kiln's rows are up: over the game's own rows (no binding) the sync's choice is the game's.
         bind();ammo::pick(groups,nullptr,1,556,912);spell_swapped=true;selector(groups,acc,0); // kept over the swap's build
         ammo::keeps[1].since-=std::chrono::seconds(2);selector(groups,acc,0);
         CHECK(groups[1].count==3&&groups[1].data[2].item==556); // past keep_limit: the game's rows
-        CHECK(sync()==999);spell_swapped=false;
+        CHECK(sync()==999);
+        // A hold whose rows are gone still ends at hold_limit: the sync goes back to one load (review of 0.2.0-dev.31.23).
+        CHECK(ammo::holds[1].item==556&&ammo::holding.load());ammo::holds[1].since-=std::chrono::seconds(2);
+        CHECK(sync()==999&&ammo::holds[1].item==0&&!ammo::holding.load());spell_swapped=false;
         // The other list: an arrow pick is held the same way, and a spell sync never touches it.
         {
             KilnUiAmmoRow quiver[]={{555,30,0,0},{999,9,0,1}};

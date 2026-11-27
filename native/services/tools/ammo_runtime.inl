@@ -49,19 +49,24 @@ std::atomic<bool> keep_report_pending{};
 // cursor back on the equipped item, the spell before the pick; the next build kept it (Frame takes the group's selection),
 // and the swap's arrival moved it to the new spell again. Kiln now holds its pick as the game's pending pick holds the
 // game's own: right after the sync (select_action) and at a build's entry, from the pick until the sync's choice is that
-// item (the swap arrived), a pick of that list goes to the game, its publication ends, the session changes, or
-// hold_limit passes (then the equipped item shows, as before). Only while Kiln's rows are up (a binding of the group).
+// item (the swap arrived), a pick of that list goes to the game, its publication ends, the client session, world or
+// player changes, or hold_limit passes (then the equipped item shows, as before). Only while Kiln's rows are up (a
+// binding of the group). Another held weapon does not end it: the reconciliation's slot is the player's (0xe + category,
+// 0x40c980), not the weapon's, as the game's own pending pick, which stays in the group, holds over a weapon change too.
 constexpr auto hold_limit=std::chrono::milliseconds(1000);
-struct Hold {uintptr_t group{};uint32_t item{},session{};KilnOwner owner{};std::chrono::steady_clock::time_point since{};};
+struct Hold {uintptr_t group{};uint32_t item{},session{},generation{},player{};KilnOwner owner{};std::chrono::steady_clock::time_point since{};};
 Hold holds[2];
 std::atomic<bool> holding{}; // any hold: the sync hook's one load while none is
+bool state(KilnClientState& out);
 void drop_hold(unsigned i) {holds[i]={};holding.store(holds[0].item||holds[1].item,std::memory_order_release);}
-// Caller holds the mutex. The item Kiln holds list i's cursor on in group, or 0; an expired hold ends here.
+// Caller holds the mutex. The item Kiln holds list i's cursor on in group, or 0. A hold past hold_limit or of another
+// client session, world or player than the game's now ends here, whichever group asks.
 uint32_t held(unsigned i,uintptr_t group) {
-    auto& h=holds[i];
-    if(!h.item||h.group!=group)return 0;
-    if(std::chrono::steady_clock::now()-h.since>hold_limit){drop_hold(i);return 0;}
-    return h.item;
+    auto& h=holds[i];KilnClientState s{};
+    if(!h.item)return 0;
+    if(std::chrono::steady_clock::now()-h.since>hold_limit||!state(s)||s.client_session!=h.session||s.generation!=h.generation||
+       s.local_player!=h.player){drop_hold(i);return 0;}
+    return h.group==group?h.item:0;
 }
 kiln::RawHook action_hook,draw_hook;
 AmmoTrace trace; // the pick trace (ammo_trace.h): off unless kiln.json or KILN_AMMO_TRACE turns it on at the start
@@ -532,7 +537,8 @@ void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t 
     // repeat of the held item keeps its start, so the game's own automatic picks of it cannot hold it longer.
     {
         auto& h=holds[category];const auto g=reinterpret_cast<uintptr_t>(groups+category);
-        if(h.item!=item||h.group!=g||h.session!=before.client_session)h={g,item,before.client_session,p->owner,std::chrono::steady_clock::now()};
+        if(h.item!=item||h.group!=g||h.session!=before.client_session||h.generation!=before.generation||h.player!=before.local_player)
+            h={g,item,before.client_session,before.generation,before.local_player,p->owner,std::chrono::steady_clock::now()};
         holding.store(true,std::memory_order_release);
     }
     // Deliberately do not call the continuation: no inventoryStockCycleAction version/item or pending native
@@ -576,10 +582,10 @@ void* KILN_CALL select_action(void* out,SelectorGroup* group,uint8_t category,vo
         if(tracing)e.at[1]=cursor(group);
         {
             std::lock_guard lock(mutex);const auto g=reinterpret_cast<uintptr_t>(group);
-            if(const uint32_t item=available()&&bindings.contains(g)?held(category,g):0) {
-                KilnClientState s{};uint8_t code=0;
-                if(!state(s)||s.client_session!=holds[category].session)drop_hold(category);
-                else if(selection(group)==item){if(read(code,out)&&code==4){drop_hold(category);e.landed=true;}} // the swap arrived
+            // held() first: a hold that ended (its time, session, world or player) goes also when the rows are gone.
+            if(const uint32_t item=held(category,g);item&&available()&&bindings.contains(g)) {
+                uint8_t code=0;
+                if(selection(group)==item){if(read(code,out)&&code==4){drop_hold(category);e.landed=true;}} // the swap arrived
                 else {
                     e.held_ms=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-holds[category].since).count();
                     if(select_identity(group,item))e.held=true;else drop_hold(category); // no longer listed: nothing to hold
