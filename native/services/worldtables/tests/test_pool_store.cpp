@@ -15,6 +15,33 @@ int main() {
  check("same process file waits",empty.replay(base,{"p"}).empty());
  PoolBootStore boot;boot.capture(base);check("inactive mod not applied",boot.replay(base,{}).empty());check("an inactive mod's file is not refused as unsafe (the service notes it kept, once)",errors.empty());check("inactive file retained",fs::exists(path));
  auto rows=boot.replay(base,{"p"});check("loaded mod replays exactly one",rows.size()==1 && rows[0].definition==receipt.definition.definition);
+ // kiln#152: a pool kept for the next start is read back at that start (read_mod) from its own section. A
+ // ToolMaterialPoolBlock's envelope ("entries") re-wrapped as buildingMaterialPools was refused there ("unknown field
+ // entries", "materials takes 1..64 entries") at every start, so it never became Registered and its tool never lowered.
+ {
+  auto start_two=[&](const std::string& mod,const char* doc,const char* label) {
+   errors.clear();
+   ModFile first;first.mod=mod;first.clients="mod";read_blocks(parse_relaxed(doc),&first);
+   PoolRegistrations start1;auto kept=start1.prepare(first.pools.at(0),KILN_DEFINE_ALLOW_NEXT_START,false);
+   auto file=root/"pending"/mod/("@pool-"+kept.definition.guid.text()+".json");
+   check((std::string(label)+": kept for the next start").c_str(),kiln::capacity::pending_store_write(base,root/"pending",file,kept.envelope(),&reason));
+   if(!reason.empty())std::cout<<"  "<<label<<": "<<reason<<'\n';
+   PoolBootStore next;next.capture(base);auto replayed=next.replay(base,{mod});
+   for(const auto& e:errors)std::cout<<"  "<<label<<" store: "<<e<<"\n";
+   check((std::string(label)+": replays one").c_str(),replayed.size()==1 && errors.empty());
+   if(replayed.size()!=1)return;
+   ModFile again;again.mod=mod;again.clients="mod";read_blocks(pool_replay_document(replayed[0]),&again);
+   for(const auto& e:again.errors)std::cout<<"  "<<label<<": "<<e<<'\n';
+   check((std::string(label)+": read back without errors").c_str(),again.errors.empty() && again.pools.size()==1);
+   if(again.pools.size()==1)
+    check((std::string(label)+": same kind, identity and definition as kept (boot == definition, so it registers)").c_str(),
+          again.pools[0].tool==first.pools[0].tool && again.pools[0].valid && again.pools[0].guid==first.pools[0].guid &&
+          again.pools[0].definition==first.pools[0].definition && again.pools[0].entries.size()==first.pools[0].entries.size());
+  };
+  start_two("t1",R"({"toolMaterialPools":{"rubble-pool":{"name":"Rubble","entries":[{"item":"Build_TerrainMaterial_T1_Rubble","terrainMaterial":8,"voxelsPerItem":16}]}}})","tool pool");
+  start_two("t2",R"({"toolMaterialPools":{"renamed":{"name":"Rubble","was":"rubble-pool","entries":[{"item":"Build_TerrainMaterial_T1_Rubble","terrainMaterial":8,"voxelsPerItem":16},{"item":"Build_TerrainMaterial_T1_Dirt","terrainMaterial":2,"voxelsPerItem":8}]}}})","renamed tool pool");
+  start_two("t3",R"({"buildingMaterialPools":{"walls":{"name":"Walls","roof":true,"materials":[{"gameMaterial":"WoodRough"}]}}})","building pool");
+ }
  auto wrong=parse_relaxed(receipt.envelope());wrong["format"]="1";PoolDefinition def;check("wrong envelope type refused",!pool_envelope(wrong,"p",&def,&reason));
  check("oversize refused on write",!kiln::capacity::pending_store_write(base,root/"pending",path,std::string(65537,'x'),&reason));
  auto newer=receipt;newer.definition.definition+=" ";check("changed file write",kiln::capacity::pending_store_write(base,root/"pending",path,newer.envelope()+" ",&reason));
