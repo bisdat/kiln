@@ -3910,7 +3910,7 @@
         },
         {
           "title": "Spell lists stay put while you scroll",
-          "text": "A mod's spell or arrow list in place of the game's no longer flashes the game's own list after a switch, and on a dedicated server the cursor no longer jumps back to the equipped spell (thanks Fuzen777).",
+          "text": "A mod's spell or arrow list in place of the game's keeps its spells and arrows on screen while the game builds the list again: no flash of the game's own list after a switch, and on a dedicated server the cursor no longer jumps back to the equipped spell (thanks Fuzen777).",
           "area": "content",
           "kind": "fix"
         },
