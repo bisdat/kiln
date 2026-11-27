@@ -3931,7 +3931,7 @@
       "features": [
         {
           "title": "Settings past the slider's end",
-          "text": "A mod can let one end of a setting's slider be soft: the number field beside the slider, on the Kiln menu's config page and in the launcher, then takes a value past that end, and the config file keeps it instead of clamping it back (thanks fafawanji).",
+          "text": "A mod can make one end of a setting's range soft: the number field beside its slider, on the Kiln menu's config page and in the launcher, then takes a value past that end, and the config file keeps it instead of clamping it back (thanks fafawanji).",
           "area": "api"
         },
         {
