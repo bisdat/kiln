@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "assets.h"
+#include "blob_hash.h"
 #include "services/kiln_hooks.h"
 
 #ifdef KILN_ASSETS_OMISSION_REPORT_TEST
@@ -905,6 +906,31 @@ void hash_text() {
     check(cut.find("\xE2\x82\xAC...") != std::string::npos && cut.find("\xE2\x82...") == std::string::npos &&
               cut.find("\xE2...") == std::string::npos,
           "a long bad hash is shortened at a character boundary");
+
+    // load_manifest's rule for a blob entry, on the parsed entry (blob_hash.h): no "hash" is a new blob, a "hash" that reads is
+    // that key, and any other "hash" (not a string, or not the text) refuses the entry
+    using nlohmann::json;
+    auto entry = [&](const char* text, bool* named, HashK* out) { return blob_entry_hash(json::parse(text), "a.bin", named, out); };
+    const std::string want = " (want <decimal size>-<h0>-<h1>-<h2>)";
+    bool named = true;
+    h = HashK{9, 9, 9, 9};
+    check(entry(R"({"kind": "blob", "file": "a.bin"})", &named, &h).empty() && !named && h == HashK{9, 9, 9, 9},
+          "a blob entry without a hash is a new blob");
+    check(entry(R"({"kind": "blob", "hash": "7170-f308b489-d7bff57f-264db8de", "file": "a.bin"})", &named, &h).empty() && named &&
+              h == HashK{7170, 0xf308b489u, 0xd7bff57fu, 0x264db8deu},
+          "a blob entry's hash that reads is its key");
+    named = false;
+    check(entry(R"({"hash": "1c02-f308b489-d7bff57f-264db8de"})", &named, &h) == "blob a.bin: bad hash \"1c02-f308b489-d7bff57f-264db8de\"" + want &&
+              named,
+          "a blob entry's hash with a hex size refuses the entry");
+    check(entry(R"({"hash": "7170-1-2-3 "})", &named, &h) == "blob a.bin: bad hash \"7170-1-2-3 \"" + want, "a hash with a trailing space refuses the entry");
+    check(entry(R"({"hash": ""})", &named, &h) == "blob a.bin: bad hash \"\"" + want && named, "an empty hash refuses the entry");
+    check(entry(R"({"hash": 7170})", &named, &h) == "blob a.bin: bad hash 7170" + want && named, "a number refuses the entry");
+    check(entry(R"({"hash": null})", &named, &h) == "blob a.bin: bad hash null" + want && named, "null refuses the entry, as any value but the text");
+    check(entry(R"({"hash": true})", &named, &h) == "blob a.bin: bad hash true" + want, "true refuses the entry");
+    check(entry(R"({"hash": [7170, 1, 2, 3]})", &named, &h) == "blob a.bin: bad hash [...]" + want, "an array refuses the entry, shown by its kind");
+    check(entry(R"({"hash": {"size": 7170}})", &named, &h) == "blob a.bin: bad hash {...}" + want, "an object refuses the entry, shown by its kind");
+    check(entry(R"({"hash": "été"})", &named, &h) == "blob a.bin: bad hash \"\xC3\xA9t\xC3\xA9\"" + want, "a non-ASCII hash is shown as UTF-8");
 }
 
 int main() {

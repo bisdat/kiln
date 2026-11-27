@@ -8,6 +8,7 @@
 #include <type_traits>
 
 #include "assets.h"
+#include "blob_hash.h"
 #include "bootpack_internal.h"
 #include "contained.h"
 #include "kiln_boot_collector.hpp"
@@ -434,16 +435,10 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
             }
         } else if (kind == "blob") {
             // "hash": the key the game reads the bytes by. One that is not <decimal size>-<h0>-<h1>-<h2> refuses the entry; it
-            // never falls back to a key kiln.assets derives, which the game would not ask for
+            // never falls back to a key kiln.assets derives, which the game would not ask for (blob_hash.h, host-tested)
             HashK fixed{};
-            const bool has_hash = e.contains("hash");
-            if (has_hash) {
-                const json& hv = e["hash"];
-                const std::string text = hv.is_string() ? hv.get<std::string>() : std::string();
-                const std::string bad = blob_hash_refusal(file, hv.is_string() ? &text : nullptr,
-                                                          hv.dump(-1, ' ', false, json::error_handler_t::replace), &fixed);
-                if (!bad.empty()) { fail(bad); continue; }
-            }
+            bool has_hash = false;
+            if (const std::string bad = blob_entry_hash(e, file, &has_hash, &fixed); !bad.empty()) { fail(bad); continue; }
             std::vector<uint8_t> bytes;
             if (!read(fp, &bytes, &why)) { fail("blob " + file + ": " + why); continue; }
             if (!made_here(fp, bytes)) continue;
