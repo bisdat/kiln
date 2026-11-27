@@ -45,7 +45,9 @@ the order the tool lists them (its brush list is a fixed 16-row array). Each bru
 tool's programs read), written as the item rule `impactValues.0x5258131e`. The cursor preview is no radius: it is the
 shape item's own `equipment.cursorVfx`, one fixed effect per vanilla size (Small 0.5 m, Medium 1.5 m, Big 2.5 m). A brush
 takes the effect of the vanilla shape nearest its radius (below 1 m Small, below 2 m Medium, from 2 m Big), so the preview
-shows one of those three sizes while the stroke uses the brush's exact radius. `Identity = BlockIdentity.Legacy(guid)` or
+shows one of those three sizes while the stroke uses the brush's exact radius. The effect is only in the brush's
+definition: a mod's own content layer on its brush item's `equipment.cursorVfx` applies over it.
+`Identity = BlockIdentity.Legacy(guid)` or
 `Legacy(itemId)` preserves an existing saved item; `Was` preserves the derived identity after a Kiln key rename.
 An input bound to a Remove does not ask the game's build cursor for a selected building material
 (`equipment.cursorConfig.checkRequiredMaterialsOnPrimaryAction` / `...OnSecondaryAction` false on each brush): the base
@@ -104,17 +106,23 @@ independently of that held observation. Presentation calls mask any outer impact
 restore it on return, including nested vanilla calls. Failed owned-row reads leave an empty presentation, not an
 unchecked pointer or an inherited selection.
 
-The brush adapter is confined to the qualified frame drawer's call instruction. It requires the selected hotbar item
-to be the held family's root or one of its brushes, and the resolved item to be that hotbar item. Picking a row puts
-that brush in the actionbar slot (the game's `CreateBuildingItemAction`, as a vanilla Overgrowth shape takes its tool's
-place), so after the first pick the slot holds a brush, also after a save and reload; the frame stays the family's. The game's brush query scans only the item list
-`ItemRegistryResource.terraformingTools` in the game's data, never the runtime item registry, so a family's brushes
-(runtime items) are never in it, whatever their tags. On admission the adapter writes the family's own rows (item,
-ratio i+1 over 1) into that call's fresh, empty output and replaces its include/ratio GUID values with the family
+The brush adapter is confined to the qualified frame drawer's call instruction. It requires the selected hotbar item to
+be the held family's root or one of its brushes, and the resolved item to be that hotbar item. Picking a row puts that
+brush in the actionbar slot (the game's `CreateBuildingItemAction`, as a vanilla Overgrowth shape takes its tool's
+place), so after the first pick the slot holds a brush, also after a save and reload; the frame stays the family's. The
+host takes the pick from the client's `createBuildingItemAction` and checks only that the picked item exists and, like
+the item it replaces, carries one of four item flags (`IsTerraformer` for a brush): no tag, game list or family. A
+dedicated server therefore puts a family brush in the slot as a single-player host does (read statically on server
+26430253 and client 26430625, [docs/re/building.md](../../re/building.md) 1.2.2). The game's brush query scans only the
+item list `ItemRegistryResource.terraformingTools` in the game's data, never the runtime item registry, so a family's
+brushes (runtime items) are never in it, whatever their tags. On admission the adapter writes the family's own rows
+(item, ratio i+1 over 1) into that call's fresh, empty output and replaces its include/ratio GUID values with the family
 identity, which no listed item carries: the native query appends nothing and sorts the rows by ratio, which keeps the
 declared order. Brushes carry no family tag. Other query sites, vanilla tools, callbacks and nested unrelated frames
-inherit no admission. If this capability is unavailable, the ordinary picker has no established route to the tool's
-own brushes; do not assume that Add/Remove is usable through the normal menu.
+inherit no admission. The query's three other call sites (`0xd180a0`, `0xd20190`, `0xd6aa05`) sit in functions that no
+code reaches on client 26430625, so the frame drawer's list is the only list of brushes the player sees or picks from.
+If this capability is unavailable, the ordinary picker has no established route to the tool's own brushes; do not assume
+that Add/Remove is usable through the normal menu.
 
 ### Reading the brush picker trace
 
