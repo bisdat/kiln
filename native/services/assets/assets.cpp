@@ -556,7 +556,10 @@ KilnResult dump(const std::string& spec, std::string* report) {
     };
     if (spec.rfind("blob:", 0) == 0) {
         HashK hk;
-        if (!parse_hash(spec.substr(5), &hk)) { *report = "bad blob spec"; return KILN_ERR_INVALID_ARGUMENT; }
+        if (!parse_hash(spec.substr(5), &hk)) {
+            *report = "bad blob spec (want blob:<decimal size>-<h0>-<h1>-<h2>, the words in hex)";
+            return KILN_ERR_INVALID_ARGUMENT;
+        }
         std::vector<uint8_t> buf(hk.size);
         size_t n = 0;
         KilnContentHash ch{hk.size, hk.h0, hk.h1, hk.h2};

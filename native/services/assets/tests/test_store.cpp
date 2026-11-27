@@ -869,6 +869,25 @@ void game_blob_range() {
     check(closed, "every container opened is closed again");
 }
 
+// assets.json's blob "hash" and the dump's "blob:" spec: <size>-<h0>-<h1>-<h2>, the size in decimal and the three words in hex
+// (ContentHash.ToString, hash_str). A blob whose hash cannot be read is refused, never served under a key kiln.assets
+// derives: the game then asks for the named hash and finds nothing ("Could not find content ... in kfc!", GT's first lab).
+void hash_text() {
+    HashK h{};
+    check(parse_hash("7170-f308b489-d7bff57f-264db8de", &h) && h == HashK{7170, 0xf308b489u, 0xd7bff57fu, 0x264db8deu},
+          "parse_hash reads <decimal size>-<h0>-<h1>-<h2>");
+    check(parse_hash("4294967295-1-a-FFFFFFFF", &h) && h == HashK{0xffffffffu, 1, 10, 0xffffffffu},
+          "parse_hash: the largest size, 1 to 8 hex digits per word, either case");
+    check(parse_hash(hash_str(HashK{760390, 1, 2, 3}), &h) && h == HashK{760390, 1, 2, 3}, "parse_hash reads hash_str back");
+    for (const char* bad : {"1c02-f308b489-d7bff57f-264db8de", "7170-f308b489-d7bff57f-264db8dex", "7170-f308b489-d7bff57f-264db8de ",
+                            " 7170-1-2-3", "+7170-1-2-3", "-7170-1-2-3", "7170-0x1-2-3", "7170-+1-2-3", "7170--1-2", "7170-1-2",
+                            "7170-1-2-3-4", "4294967296-1-2-3", "99999999999-1-2-3", "7170-100000000-2-3", "7170-1-2-", "", "-",
+                            "7170-1-2-3\n"}) {
+        HashK keep{9, 9, 9, 9};
+        check(!parse_hash(bad, &keep) && keep == HashK{9, 9, 9, 9}, std::string("parse_hash refuses \"") + bad + "\" and leaves its output");
+    }
+}
+
 int main() {
     KilnApi api{};
     api.log = log_line;
@@ -1076,6 +1095,10 @@ int main() {
     // 14. The game's own blob is read from its container alone (inbox 18e, 0.2.0-dev.29.2).
     std::puts("-- 14: a game blob reads its own bytes, not its container");
     game_blob_range();
+
+    // 15. The hash text of assets.json's blob "hash" and the dump's "blob:" spec (dev.32 GT's lab; 31.x patch).
+    std::puts("-- 15: the hash text: decimal size, hex words, nothing else");
+    hash_text();
 
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
