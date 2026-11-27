@@ -89,6 +89,23 @@ int main() {
         lines=t.take(t0+2s);CHECK(lines.size()==57&&!t.pending()&&lines.back().find("pick 0x0000012b")!=std::string::npos);
         t.reset();CHECK(t.size()==0&&t.frame()==0&&!t.pending());
     }
+    {
+        // A repeat of the window's pick (the same item, call site, taker and cursor after it) is not a new pick: the game's
+        // own selection of the cursor's row runs every frame while its sync finds no row of the item it expects, and each
+        // new pick would write every stage again (review of GitHub issue 151).
+        AmmoTrace t;t.enable(true);
+        AmmoTraceEvent pick{};pick.kind=1;pick.item=0x1a2b3c4du;pick.site=AmmoPickSite::Game;pick.route=AmmoPickRoute::Mod;pick.at[0]=nine_3;
+        AmmoTraceEvent sync{};sync.stage=AmmoTraceStage::Sync;sync.kind=1;sync.at={nine_3,nine_0,nine_3};sync.held=true;
+        for(unsigned i=0;i<60;++i){t.pick(pick,t0+i*16ms);t.record(sync,t0+i*16ms+1ms);}
+        CHECK(t.size()==2);
+        // Another call site, item, taker or cursor is a new pick, and so is the same pick once its window closed.
+        pick.site=AmmoPickSite::Cycle;t.pick(pick,t0+1s);CHECK(t.size()==3);t.pick(pick,t0+1s+16ms);CHECK(t.size()==3);
+        pick.item=0x22u;t.pick(pick,t0+1s+32ms);CHECK(t.size()==4);
+        pick.route=AmmoPickRoute::Game;t.pick(pick,t0+1s+48ms);CHECK(t.size()==5);
+        pick.at[0]=nine_0;t.pick(pick,t0+1s+64ms);CHECK(t.size()==6);
+        t.pick(pick,t0+3s+100ms);CHECK(t.size()==7);
+        const auto lines=t.take(t0+4s);CHECK(lines.size()==7&&lines[6].find("spell #6 +0.0 ms")!=std::string::npos);
+    }
     // The switch: KILN_AMMO_TRACE (1 or 0) wins; else kiln.json "ui": {"ammoTrace": true}; comments allowed.
     CHECK(ammo_trace_setting(1,""));CHECK(!ammo_trace_setting(0,R"({"ui":{"ammoTrace":true}})"));
     CHECK(ammo_trace_setting(-1,R"({ // the player's

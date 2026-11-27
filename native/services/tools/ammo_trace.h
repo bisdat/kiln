@@ -13,8 +13,8 @@
 //          the cursor after Kiln (and whether Kiln held its pick there);
 //   draw   the HUD list draw: the index it drew, its item, and whether it drew its remembered index (no selection).
 // Bounded: only for 2 s after a pick of that list; a stage records again only when what it records changed (the build,
-// the sync and the draw run every frame); a ring of 256 events; the client Post tick writes at most 100 lines a second
-// and says how many it dropped. Recording takes a small lock and never logs; off, every call site is one relaxed load
+// the sync and the draw run every frame), and a repeat of the window's pick is not a new pick; a ring of 256 events; the
+// client Post tick writes at most 100 lines a second and says how many it dropped. Recording takes a small lock and never logs; off, every call site is one relaxed load
 // and the draw is not hooked at all. Host test: tests/ammo_trace.cpp.
 #include <algorithm>
 #include <array>
@@ -128,12 +128,16 @@ public:
     // The HUD list's draws so far: every event's frame number. The draw hook counts one before it records.
     uint64_t next_frame() noexcept {return frames_.fetch_add(1,std::memory_order_relaxed)+1;}
     uint64_t frame() const noexcept {return frames_.load(std::memory_order_relaxed);}
-    // A pick of list e.kind: a new pick number, and that list's window starts again (every stage records afresh).
+    // A pick of list e.kind: a new pick number, and that list's window starts again (every stage records afresh). A repeat
+    // of the open window's pick (the same item, call site, taker and cursor after it) is not a new pick: the game's own
+    // selection of the cursor's row runs every frame while its sync finds no row of the item it expects.
     void pick(AmmoTraceEvent e,clock::time_point now) noexcept {
         if(!on()||e.kind>1)return;
         std::lock_guard lock(m_);
-        auto& k=kinds_[e.kind];k.pick=++picks_;k.at=now;k.has.fill(false);
-        e.stage=AmmoTraceStage::Pick;push(e,k,now);
+        auto& k=kinds_[e.kind];e.stage=AmmoTraceStage::Pick;
+        const auto s=size_t(AmmoTraceStage::Pick);const auto& last=k.last[s];
+        if(k.pick&&now-k.at<=window&&k.has[s]&&last.item==e.item&&last.site==e.site&&last.route==e.route&&same_cursor(last.at[0],e.at[0]))return;
+        k.pick=++picks_;k.at=now;k.has.fill(false);k.has[s]=true;k.last[s]=e;push(e,k,now);
     }
     // Any other stage: inside its list's window, and only when it differs from that stage's last event of the window.
     void record(AmmoTraceEvent e,clock::time_point now) noexcept {
