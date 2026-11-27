@@ -72,7 +72,7 @@ std::string type_name(uint32_t hash);                           // known names, 
 bool parse_guid(const std::string& s, uint8_t out[16]);         // .NET Guid.Parse + ToByteArray order
 std::string guid_str(const uint8_t g[16]);
 std::string key_str(const Key& k);
-std::string hash_str(const HashK& h);  // "size-h0-h1-h2" hex
+std::string hash_str(const HashK& h);  // "size-h0-h1-h2": the size in decimal, the words in hex (8 digits)
 bool parse_hash(const std::string& s, HashK* out);  // exactly <decimal size>-<h0>-<h1>-<h2>; *out only when it reads
 // assets.json's "hash" of a blob entry (`text`: the value, nullptr when it is not a string; `shown`: the value as JSON, for the
 // message): "" with *out for a hash that reads, else the reason to refuse the entry. Never a derived key instead: the game
