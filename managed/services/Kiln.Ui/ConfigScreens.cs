@@ -198,13 +198,17 @@ internal static class ConfigScreens
             }
             case "int" when e.Min is { } lo && e.Max is { } hi && hi - lo <= 100_000:
             {
-                var i = shown is int v ? v : Convert.ToInt32(shown, CultureInfo.InvariantCulture);
+                // past a soft side a long (or uint, ulong) entry may hold a value no int holds: the int slider gets the
+                // nearest one, the number field the value itself
+                var real = Convert.ToDecimal(shown, CultureInfo.InvariantCulture);
+                var i = (int)Math.Clamp(real, int.MinValue, int.MaxValue);
                 if (ui.Slider("##v", ref i, (int)Math.Ceiling(lo), (int)Math.Floor(hi)))
                 {
                     i = (int)SliderValue(e, i);
                     Stage(f, e.Path, i);
+                    real = i;
                 }
-                NumberField(ui, f, e, typed, i.ToString(CultureInfo.InvariantCulture));
+                NumberField(ui, f, e, typed, real.ToString(CultureInfo.InvariantCulture));
                 break;
             }
             case "float" when e.Min is { } lo && e.Max is { } hi:
@@ -372,11 +376,15 @@ internal static class ConfigScreens
     private static object Display(ConfigEntry e, object? v) => e.Type switch
     {
         "bool" => v is true,
-        "int" when e.Min is not null && e.Max is not null && e.Max - e.Min <= 100_000 => Convert.ToInt32(v ?? 0, CultureInfo.InvariantCulture),
+        "int" when e.Min is not null && e.Max is not null && e.Max - e.Min <= 100_000 => IntValue(v),
         "float" when e.Min is not null && e.Max is not null => Convert.ToDouble(v ?? 0.0, CultureInfo.InvariantCulture),
         "enum" => v?.ToString() ?? "",
         _ => Show(e, v),
     };
+
+    /// <summary>An "int" slider row's value as an int, or as it is when no int holds it (a long entry past a soft side).</summary>
+    private static object IntValue(object? v) =>
+        Convert.ToDecimal(v ?? 0, CultureInfo.InvariantCulture) is var d && d >= int.MinValue && d <= int.MaxValue ? (int)d : v!;
 
     private static string Show(ConfigEntry e, object? v) => v switch
     {

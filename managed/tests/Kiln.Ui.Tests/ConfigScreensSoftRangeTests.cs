@@ -15,6 +15,12 @@ public sealed class SoftPageConfig
     public int Offset { get; set; } = 2;
 }
 
+public sealed class SoftPageLongConfig
+{
+    [Range(0, 100, SoftMax = true)]
+    public long Coins { get; set; } = 5;
+}
+
 [Collection(UiSerial.Name)]
 public sealed class ConfigScreensSoftRangeTests : IDisposable
 {
@@ -128,6 +134,36 @@ public sealed class ConfigScreensSoftRangeTests : IDisposable
         Draw();
         Assert.Equal(0.4, Draw()[0], 6);
         Assert.Equal("0.4", FakeUiTable.Fields[0].Text);
+    }
+
+    [Fact]
+    public void A_long_entry_past_the_int_range_beside_a_soft_side_shows_its_real_value()
+    {
+        // [Range(0, 100, SoftMax = true)] long: the file or TrySet may hold 5000000000, which no int holds; the row's
+        // slider is an int slider, so it gets the nearest value it can, and the number field the real one
+        var owner = HostAccess.CreateContext(new ModInfo("softlongmod", "softlongmod", "1.0.0", _root), 0, _root);
+        var previous = HostAccess.Current;
+        HostAccess.Current = owner;
+        try { Config.Register<SoftPageLongConfig>(); }
+        finally { HostAccess.Current = previous; }
+        try
+        {
+            var file = Config.All.Single(f => f.ModId == "softlongmod");
+            file.Set("coins", 5_000_000_000L);
+            FakeUiTable.Values.Clear();
+            FakeUiTable.Fields.Clear();
+            ConfigScreens.Draw(_ui, "softlongmod");
+            Assert.Equal([int.MaxValue], FakeUiTable.Values);
+            Assert.Equal(["5000000000"], FakeUiTable.Fields.Select(f => f.Text));
+            Assert.Equal(5_000_000_000L, file.Get("coins"));
+            // dragged: a value of the slider's span, as any int row
+            FakeUiTable.Set = (0, 40);
+            FakeUiTable.Values.Clear();
+            FakeUiTable.Fields.Clear();
+            ConfigScreens.Draw(_ui, "softlongmod");
+            Assert.Equal(["40"], FakeUiTable.Fields.Select(f => f.Text));
+        }
+        finally { owner.Retire(); }
     }
 
     [Theory]
