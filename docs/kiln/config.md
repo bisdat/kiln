@@ -61,7 +61,9 @@ var homes = _cfg.Value.MaxHomes;                    // always the current value 
   bound on a soft side, and a UI block's `set` action or slider may go past it ([ui-blocks.md](modding/ui-blocks.md)).
   DataAnnotations' `RangeAttribute` has no soft sides.
   A mod that sets them needs mod API 0.2.26 (the SDK writes it; an older Kiln refuses the mod at load instead of
-  failing on the attribute). An older launcher ignores the flags and keeps enforcing that side.
+  failing on the attribute). An older launcher ignores the flags and keeps enforcing that side. A joined client whose
+  copy of the mod still has that side hard keeps its own value for a `[Synced]` entry the server holds past it (the
+  server's value is in `ConfigSyncedEvent.Errors`, docs/kiln/sync.md).
 
 ## The file
 Commented JSONC, written from the schema: each entry has its comment and a meta line (`Default`, `Range`, options,
