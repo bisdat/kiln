@@ -762,8 +762,8 @@ If it has one already (the launcher's Settings and Kiln's in-game Look write it)
 `"ui": { "look": "game", "ammoTrace": true }`, and keep everything else: a second `"ui"` section would replace the first.
 The environment variable wins over kiln.json, and `KILN_AMMO_TRACE=0` turns the trace off. Kiln reads the switch once, at
 the game's start, and `kiln/logs/kiln.log` confirms it near the top with `ui.ammo: the pick trace is on (...)`; without
-that line the trace is off. The lines are info lines, so a `"log_level"` in kiln.json must stay `"info"` (the default) or
-`"debug"`. Remove the key afterwards.
+that line the trace is off. The lines are info lines, so a `"log_level"` in kiln.json must stay `"info"` (the default),
+`"debug"` or `"trace"`. Remove the key afterwards.
 
 For 2 s after each pick, each step writes a line when what it saw changed. Every line has the list, the pick's number
 (`#7`), the time since that pick, and the frame (how many times the HUD list has been drawn since the start):
