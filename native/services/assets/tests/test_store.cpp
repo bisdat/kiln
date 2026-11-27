@@ -931,6 +931,12 @@ void hash_text() {
     check(entry(R"({"hash": [7170, 1, 2, 3]})", &named, &h) == "blob a.bin: bad hash [...]" + want, "an array refuses the entry, shown by its kind");
     check(entry(R"({"hash": {"size": 7170}})", &named, &h) == "blob a.bin: bad hash {...}" + want, "an object refuses the entry, shown by its kind");
     check(entry(R"({"hash": "été"})", &named, &h) == "blob a.bin: bad hash \"\xC3\xA9t\xC3\xA9\"" + want, "a non-ASCII hash is shown as UTF-8");
+    // a hash that reads but names another size than the file's: the entry is refused naming both, not as "failed" (kiln-vfxcook
+    // up to 31.21 wrote the size in hex, and 0x2820 written as 2820 reads)
+    check(blob_size_refusal("a.bin", HashK{10272, 1, 2, 3}, 10272).empty(), "a blob as long as its hash says is served");
+    check(blob_size_refusal("cooked/blob.bin", HashK{2820, 1, 2, 3}, 10272) ==
+              "blob cooked/blob.bin: its hash says 2820 bytes, the file has 10272 (the size is decimal)",
+          "a blob of another length than its hash says is refused naming both");
 }
 
 int main() {

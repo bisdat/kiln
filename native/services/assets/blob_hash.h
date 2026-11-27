@@ -26,4 +26,13 @@ inline std::string blob_entry_hash(const nlohmann::json& entry, const std::strin
     return blob_hash_refusal(file, nullptr, v.is_array() ? "[...]" : v.is_object() ? "{...}" : v.dump(), out);
 }
 
+// A blob under a hash that reads: "" when its file is as long as the hash says, else why the entry is refused, naming both
+// (kiln.assets serves a fixed hash only for bytes of its size). A size written in hex reads when its digits are all decimal
+// (0x2820 as "2820"), and only the length shows it.
+inline std::string blob_size_refusal(const std::string& file, const HashK& fixed, size_t length) {
+    if (fixed.size == length) return {};
+    return "blob " + file + ": its hash says " + std::to_string(fixed.size) + " bytes, the file has " + std::to_string(length) +
+           " (the size is decimal)";
+}
+
 }  // namespace ka

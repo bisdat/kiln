@@ -442,6 +442,10 @@ KilnResult load_manifest(KilnOwner owner, const std::string& mod_dir, std::strin
             std::vector<uint8_t> bytes;
             if (!read(fp, &bytes, &why)) { fail("blob " + file + ": " + why); continue; }
             if (!made_here(fp, bytes)) continue;
+            if (const std::string bad = has_hash ? blob_size_refusal(file, fixed, bytes.size()) : std::string(); !bad.empty()) {
+                fail(bad);
+                continue;
+            }
             KilnResult r;
             if (has_hash) {
                 KilnContentHash ch{fixed.size, fixed.h0, fixed.h1, fixed.h2};
