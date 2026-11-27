@@ -679,7 +679,7 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   one), Kiln asks the providers at the next UI frame. Until it publishes their rows for the new build, a `Replace` list
   keeps showing the rows it showed last, with the selection on them, as if they were made for the new build, rather
   than the game's own rows and the game's selection (the equipped spell); picks of them are decided against the game's
-  new rows, as below. Before 0.2.0-dev.31.next the game's rows flashed for a frame or two in a hosted world, and on a
+  new rows, as below. Before 0.2.0-dev.31.21 the game's rows flashed for a frame or two in a hosted world, and on a
   dedicated server, where a swap comes back a round trip later, the cursor went back to the equipped spell (GitHub issue
   151, thanks Fuzen777). The rows stay up for at most a second; then the game's own rows show until the next
   publication, and `kiln.log` says so once (`ui.ammo: the spell list shows the game's own rows: ...`). Nothing stays

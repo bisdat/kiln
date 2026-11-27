@@ -172,7 +172,7 @@ function-local disassembly) and LLVM disassembly. No client execution was perfor
   tags), `0xd20190` (Overgrowth tags), `0xd6aa05` (zero include, exclude `3c68fe37…` (the rakes' tag), ratio
   `db153a96…`). Only the `0xc3f210` frame drawer's call at **0xc3fe18** is adapted:
   a unique pattern qualifies the instruction and its rel32 target. A checked MID requires the selected hotbar ID
-  `[RBP+0x118]` to be the held family's root or one of its brushes (root only until 0.2.0-dev.31.19: after a pick the
+  `[RBP+0x118]` to be the held family's root or one of its brushes (root only until 0.2.0-dev.31.20: after a pick the
   slot holds the picked brush, see the pick below, kiln#153) and the resolved ItemInfo `[RBP+0xe0]` to name that same
   item. The Overgrowth branch has
   `RBP=RSP+0x100`, output `RCX=RBP+0x690` (fresh empty capacity16 array), include `R9=RSP+0x30`, ratio
@@ -279,7 +279,7 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   so the game's own rows show for that interval; a pick of a provided item there is decided by its row as the group
   shows it at the pick: with stock the game's, at count 0 as for a bound one. A `Replace` publication is bound over the
   newer build in the same client session, generation, player and held item until the next publication (since
-  0.2.0-dev.31.next, GitHub issue 151), with the backpack read of that build's rows and Kiln's selection, at most 1 s
+  0.2.0-dev.31.21, GitHub issue 151), with the backpack read of that build's rows and Kiln's selection, at most 1 s
   from the first such build; past that the game's own rows show and are decided as above. `0x40ca70` (equip reconciliation) returns the
   pending item `+0x63c` while its version `+0x640` differs from the input's, else the equipped stack's item via
   `0x3853c0`. Which pick emptied the reporter's slot, and the server's order of the mod's swap and the game's wish, are

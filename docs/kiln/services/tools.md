@@ -64,7 +64,7 @@ The compiler also emits raw-fill brush entries in the game's blueprint registry,
 Impact programs and action sequences. It does not add terrain entries to `BuildingMaterialPoolBlock`. New table
 metadata and brush definitions can be pending until the next game start. A pending definition is not proof that the
 game has ingested or drawn it. A tool pool kept for the next start is read back at that start as a tool pool (until
-0.2.0-dev.31.19 it was read as a building pool and refused, so a tool with an Add action never registered: kiln#152).
+0.2.0-dev.31.20 it was read as a building pool and refused, so a tool with an Add action never registered: kiln#152).
 
 ## Execution and safety
 
@@ -263,7 +263,7 @@ selection after leaving/rejoining a world, paid placement/removal and the game's
 
 ## Changelog
 
-- **0.2.0-dev.31.next:** picking another brush in the picker keeps the tool's own brushes. The picked brush takes the
+- **0.2.0-dev.31.21:** picking another brush in the picker keeps the tool's own brushes. The picked brush takes the
   actionbar slot, and the adapter admitted only the root there, so every later frame listed the vanilla Overgrowth shapes
   and the next pick handed the player the vanilla Overgrowth Tool (`not selected`, then `no held family` in the trace).
   Each brush previews at the vanilla size nearest its radius (every brush kept the small shape's preview). A tool pool

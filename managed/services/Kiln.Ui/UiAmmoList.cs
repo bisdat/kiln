@@ -34,7 +34,7 @@ public enum AmmoListMode
     /// whole list is replaced (the rows of every provider of it, in registration order). When the game builds the list
     /// again (a swap changed the backpack), the rows shown last and the selection on them stay up until Kiln has the
     /// providers' rows for the new build, at most a second, rather than the game's own rows and its selection (since
-    /// 0.2.0-dev.31.next, GitHub issue 151).</summary>
+    /// 0.2.0-dev.31.21, GitHub issue 151).</summary>
     Replace = 2,
 }
 
@@ -173,7 +173,7 @@ public static partial class Ui
         /// returns, so the HUD may show the rows of the previous context for one frame. Keep it a lookup. In Replace the
         /// rows shown last stay up over the game's new build, with the selection on them, until Kiln has published the
         /// rows for it (at most a second; then the game's own rows show until it does): a pick in that time is decided
-        /// against the game's new rows (since 0.2.0-dev.31.next, GitHub issue 151). In Append the game's own rows show in
+        /// against the game's new rows (since 0.2.0-dev.31.21, GitHub issue 151). In Append the game's own rows show in
         /// that frame.</para>
         /// <para>Rows show in the order returned. Every provider of a list is composed in registration order; the first row
         /// of an item wins (a later row of the same item is left out), rows of item 0 are left out, a negative count shows

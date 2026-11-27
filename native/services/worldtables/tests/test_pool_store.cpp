@@ -41,7 +41,7 @@ int main() {
   start_two("t1",R"({"toolMaterialPools":{"rubble-pool":{"name":"Rubble","entries":[{"item":"Build_TerrainMaterial_T1_Rubble","terrainMaterial":8,"voxelsPerItem":16}]}}})","tool pool");
   start_two("t2",R"({"toolMaterialPools":{"renamed":{"name":"Rubble","was":"rubble-pool","entries":[{"item":"Build_TerrainMaterial_T1_Rubble","terrainMaterial":8,"voxelsPerItem":16},{"item":"Build_TerrainMaterial_T1_Dirt","terrainMaterial":2,"voxelsPerItem":8}]}}})","renamed tool pool");
   start_two("t3",R"({"buildingMaterialPools":{"walls":{"name":"Walls","roof":true,"materials":[{"gameMaterial":"WoodRough"}]}}})","building pool");
-  // A tool pool kept by 0.2.0-dev.31.14 to 31.19, byte for byte as c38729f1 writes it (kiln#152's file name): the first
+  // A tool pool kept by 0.2.0-dev.31.14 to 31.20, byte for byte as c38729f1 writes it (kiln#152's file name): the first
   // start after the update reads that file as it is, so the tool registers without the mod defining the pool again.
   {
    errors.clear();const std::string mod="kiln-rubble-tool",name="@pool-6c931340-eb76-5df4-972e-0919e292ecba.json";
