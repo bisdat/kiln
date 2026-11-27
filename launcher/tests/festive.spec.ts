@@ -123,6 +123,41 @@ test("the garland lies in a still layer of its own: nothing that moves is in it,
   expect(r).toEqual({ still: true, boughs: 3, boughsElsewhere: 0, movingInStill: 0, layers: ["transform", "transform", "transform"] });
 });
 
+// WebKit without compositing (WebKitGTK where the DMA-BUF renderer failed: Stage.tsx flatDrawing) paints the whole
+// window again on the CPU for each frame of the fire, and every thing over it: there the still mantel would be drawn
+// 15 times a second (its needles, lamps and glows: about three times the cost of the Play page under it). So while the
+// fire burns there, no mantel and no threshold diyas; the snow, the accent and the sheets' garland stay. With the fire
+// off the mantel is drawn once and stays.
+async function flatWebKit(page: Page) {
+  await page.addInitScript(() => {
+    const mm = window.matchMedia.bind(window);
+    window.matchMedia = (q: string) => (q.includes("-webkit-transform-3d") ? { ...mm("(min-width: 1000000px)"), media: q, matches: false } as MediaQueryList : mm(q));
+  });
+}
+
+test("WebKit without compositing: no mantel while the fire burns (each frame would paint it again), the rest of the season stays", async ({ page }) => {
+  await flatWebKit(page);
+  await record(page);
+  await open(page, "?theme=festive");
+  await expect(page.locator(".k-app")).toHaveAttribute("data-render", "flat");
+  await expect(page.locator(".k-app")).toHaveAttribute("data-theme", "festive");
+  test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire never starts");
+  await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
+  await page.waitForTimeout(300);
+  await expect(page.locator(".k-fest-mantel")).toHaveCount(0);
+  expect([...new Set((await rec(page)).frags)]).toEqual([(await shaders(page)).festive]);
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Servers" }).click();
+  await expect(page.locator(".k-sheet .k-fest-rim")).toBeVisible();
+});
+
+test("WebKit without compositing, the fire off: the mantel drawn once", async ({ page }) => {
+  await flatWebKit(page);
+  await open(page, "?theme=festive&render=software");
+  await expect(page.locator(".k-app")).not.toHaveAttribute("data-gl", "1");
+  await expect(page.locator(".k-fest-mantel").first()).toBeVisible();
+  await expect(page.locator(".k-fest-hearth")).toBeVisible();
+});
+
 test("forced off: every day's fire, byte for byte", async ({ page }) => {
   await record(page);
   await open(page, "?theme=normal");

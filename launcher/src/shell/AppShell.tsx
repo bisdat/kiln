@@ -252,6 +252,9 @@ export function AppShell() {
   // the CPU, about 24 ms a move in a 2560 x 1440 window; it stands still there, as without the GPU
   const [flat] = useState(flatDrawing);
   const torchOn = lit && !still && !flat;
+  // the festive mantel and the threshold's diyas: not there while the fire burns (each of its frames would paint them
+  // again on the CPU, about three times the Play page's own cost); with the fire off they are drawn once
+  const mantel = festive && !(flat && lit);
   // what the page sees of WebKit's drawing, into launcher.log (renderReport.ts): the facts once the splash is gone (the
   // fire decided by then), a frame sample on Play while the window is visible (tried again when it comes back)
   const litNow = useRef(lit);
@@ -299,7 +302,7 @@ export function AppShell() {
     <div ref={root} className={"k-app" + (isPlay ? " is-play" : " is-sheet")} data-theme={festive ? "festive" : undefined}
       data-render={info.data?.render?.mode === "software" ? "software" : flat ? "flat" : undefined}>
       <div className="k-stage" aria-hidden><Stage root={root} key={fire ? (turkey ? "turkey" : festive ? "festive" : "fire") : "plain"} enabled={fire} turkey={turkey} festive={festive} onLit={setLit} /><div className="k-fall" /></div>
-      {festive && <FestiveMantel />}
+      {mantel && <FestiveMantel />}
       <Header isPlay={isPlay} ctl={ctl} />
       <div className={"k-hero-layer" + (isPlay ? " on" : "")} aria-hidden={!isPlay}>
         {/* Thanksgiving weekend: a greeting on the wall over the mouth, lit by the fire (--fire, FIRE_READERS); a leaf */}
@@ -314,7 +317,7 @@ export function AppShell() {
         <div className="k-sheet-in">{sheet}</div>
       </main>
       <Mouth isPlay={isPlay} ctl={ctl} />
-      {festive && <FestiveHearth />}
+      {mantel && <FestiveHearth />}
       <GameArtAuto />
       <DropAnywhere add={(p) => void addMods(p)} />
       <InstallKilnModal onAdd={(p, g) => void addMods(p, g)} />

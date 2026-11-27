@@ -9,8 +9,9 @@
 // (Stage.tsx stageFrame), with its clock and its flicker, so they burn in step with it and stand still where it does
 // (reduced motion, the game running) or keep their first frame where it never draws (Animated fire off, no WebGL,
 // drawing without the GPU). Where WebKit composites nothing (Stage.tsx flatDrawing) they stand still too: each change
-// would be painted again on the CPU with everything round it. The garland on the sheets never moves (the page under it
-// is never repainted for it).
+// would be painted again on the CPU with everything round it; and while the fire burns there the shell leaves the
+// mantel and the threshold's diyas out (AppShell.tsx: each frame of the fire paints the window again, them with it).
+// The garland on the sheets never moves (the page under it is never repainted for it).
 // The mantel's drawing is in mouth units: the mouth (the Play button, base.css --kiln) is 1000 wide and 880 tall, its
 // apex at (500, 0); the mantel's SVGs lie over the mouth's box and draw outside it (overflow visible).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
