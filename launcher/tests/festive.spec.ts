@@ -217,6 +217,42 @@ for (const at of ["compile", "link"] as const) {
   });
 }
 
+// The threshold's diyas stand on the floor in front of the jambs, the band the Crucible dock's controls sit in (6 px under
+// the mouth). Where the dock's row is nearly as wide as the mouth (a small window, a longer language), a diya's flame or
+// spout ran under the Share button or a link; the row keeps clear of them instead, wrapping sooner. Where it had room,
+// the dock stands exactly where it does every other day.
+type Box = { l: number; t: number; r: number; b: number };
+const dockAndDiyas = (page: Page) => page.evaluate(() => {
+  const box = (e: Element): Box => { const b = e.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
+  const diyas = [...document.querySelectorAll(".k-fest-hearth > g")].map((g) =>
+    [...g.querySelectorAll('path[fill="url(#kf-clay)"], [data-fl]')].map(box).reduce((a, p) => ({ l: Math.min(a.l, p.l), t: Math.min(a.t, p.t), r: Math.max(a.r, p.r), b: Math.max(a.b, p.b) })));
+  return { diyas, controls: [...document.querySelectorAll(".kcr-dock-row > *")].map(box) };
+});
+test("the threshold's diyas keep clear of the Crucible dock's controls; where there was room the dock has not moved", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await open(page, "?theme=festive");
+  await expect(page.locator(".k-fest-hearth")).toBeVisible();
+  await expect(page.getByTestId("crucible-share")).toBeVisible();
+  for (const [width, height] of [[1024, 640], [1152, 648], [1280, 720]]) {
+    await page.setViewportSize({ width, height });
+    await expect.poll(async () => {
+      const { diyas, controls } = await dockAndDiyas(page);
+      const touching: string[] = [];
+      for (const [i, d] of diyas.entries()) for (const [j, c] of controls.entries()) {
+        // 2 px apart at least, across or down
+        if (Math.max(c.l - d.r, d.l - c.r, c.t - d.b, d.t - c.b) < 2) touching.push(`${width}x${height}: diya ${i} and control ${j}`);
+      }
+      return touching;
+    }).toEqual([]);
+  }
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.waitForTimeout(200);
+  const festive = (await dockAndDiyas(page)).controls;
+  await open(page, "?theme=normal");
+  await page.waitForTimeout(200);
+  expect((await dockAndDiyas(page)).controls).toEqual(festive);
+});
+
 test("the turkey wins: never both", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await open(page, "?turkey=1&theme=festive");
