@@ -2996,6 +2996,7 @@
       "desktopHint": "同时在任务栏和程序坞使用 Kiln 图标。菜单入口始终指向这个 AppImage。",
       "desktopHintFile": "同时在任务栏和程序坞使用 Kiln 图标。菜单入口始终指向这个 AppImage。{file}",
       "desktopHintForeign": "任务栏和程序坞也会显示 Kiln 图标。菜单项始终指向这个 AppImage。现有的 {file} 不是由 Kiln 创建的，开启此项会替换该文件。",
+      "desktopHintIntegrated": "Gear Lever（或其他 AppImage 集成工具）已将 Kiln 添加到应用菜单：{file}。Kiln 不会再添加第二个菜单项。",
       "desktopOn": "已将 Kiln Launcher 加入应用菜单",
       "desktopOff": "已从应用菜单移除 Kiln Launcher"
     },

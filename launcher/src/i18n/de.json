@@ -2771,6 +2771,7 @@
       "desktopHint": "Mit seinem Symbol, damit auch Taskleiste und Dock Kilns Symbol zeigen. Kiln hält den Eintrag auf dieses AppImage gerichtet.",
       "desktopHintFile": "Mit seinem Symbol, damit auch Taskleiste und Dock Kilns Symbol zeigen. Kiln hält den Eintrag auf dieses AppImage gerichtet. {file}",
       "desktopHintForeign": "Mit seinem Symbol, damit auch Taskleiste und Dock Kilns Symbol zeigen. Kiln hält den Eintrag auf dieses AppImage gerichtet. {file} gehört nicht zu Kiln: Einschalten ersetzt die Datei.",
+      "desktopHintIntegrated": "Gear Lever (oder ein anderes AppImage-Integrationswerkzeug) hat Kiln schon ins Anwendungsmenü eingetragen: {file}. Kiln legt keinen zweiten Eintrag an.",
       "desktopOn": "Kiln Launcher ist im App-Menü",
       "desktopOff": "Kiln Launcher ist nicht mehr im App-Menü"
     },

@@ -2715,6 +2715,7 @@
       "desktopHint": "アイコン付きで登録するので、タスクバーやドックにも Kiln のアイコンが表示されます。Kiln はこの AppImage を指すように保ちます。",
       "desktopHintFile": "アイコン付きで登録するので、タスクバーやドックにも Kiln のアイコンが表示されます。Kiln はこの AppImage を指すように保ちます。{file}",
       "desktopHintForeign": "アイコン付きで登録するので、タスクバーやドックにも Kiln のアイコンが表示されます。Kiln はこの AppImage を指すように保ちます。{file} は Kiln のものではありません。オンにすると置き換えます。",
+      "desktopHintIntegrated": "Gear Lever（または別の AppImage 統合ツール）がすでに Kiln をアプリメニューに追加しています: {file}。Kiln は 2 つ目の項目を追加しません。",
       "desktopOn": "Kiln Launcher をアプリメニューに追加しました",
       "desktopOff": "Kiln Launcher をアプリメニューから外しました"
     },

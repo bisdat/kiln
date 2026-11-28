@@ -2883,6 +2883,7 @@
       "desktopHint": "С иконкой, чтобы панель задач и док тоже показывали иконку Kiln. Kiln следит, чтобы ярлык указывал на этот AppImage.",
       "desktopHintFile": "С иконкой, чтобы панель задач и док тоже показывали иконку Kiln. Kiln следит, чтобы ярлык указывал на этот AppImage. {file}",
       "desktopHintForeign": "С иконкой, чтобы панель задач и док тоже показывали иконку Kiln. Kiln следит, чтобы ярлык указывал на этот AppImage. {file} не принадлежит Kiln: включение заменит его.",
+      "desktopHintIntegrated": "Gear Lever (или другой интегратор AppImage) уже добавил Kiln в меню приложений: {file}. Kiln не добавляет второй ярлык.",
       "desktopOn": "Kiln Launcher есть в меню приложений",
       "desktopOff": "Kiln Launcher убран из меню приложений"
     },

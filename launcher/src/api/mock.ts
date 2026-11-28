@@ -1160,7 +1160,7 @@ let sandbox: SandboxInfo = typeof location !== "undefined" && new URLSearchParam
     webkit: "off", webkitWhy: "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 is set", probe: "fails", probeSays: "bwrap fails: bwrap: setting up uid map: Permission denied", probeFailed: true }
   : { want: "on", why: "default", marker: false, webkit: "unused", webkitWhy: SANDBOX_UNUSED, probe: "works", probeSays: "bwrap works", probeFailed: false };
 // the AppImage's app menu entry (desktop.rs)
-let desktop: DesktopInfo = { on: true, installed: true, foreign: false, file: "/home/player/.local/share/applications/kiln-launcher.desktop" };
+let desktop: DesktopInfo = { on: true, installed: true, foreign: false, file: "/home/player/.local/share/applications/kiln-launcher.desktop", integrator: null };
 
 const server: ServerInstance = {
   id: "lab", name: "Lab server", kind: "local", dir: "/home/player/srv/enshrouded/lab", port: 26090, queryPort: 26091,

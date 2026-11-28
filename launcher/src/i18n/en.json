@@ -3086,6 +3086,7 @@
       "desktopHint": "With its icon, so the taskbar and dock show Kiln's icon too. Kiln keeps it pointed at this AppImage.",
       "desktopHintFile": "With its icon, so the taskbar and dock show Kiln's icon too. Kiln keeps it pointed at this AppImage. {file}",
       "desktopHintForeign": "With its icon, so the taskbar and dock show Kiln's icon too. Kiln keeps it pointed at this AppImage. {file} is not Kiln's: turning this on replaces it.",
+      "desktopHintIntegrated": "Gear Lever (or another AppImage integrator) already added Kiln to the app menu: {file}. Kiln adds no second entry.",
       "desktopOn": "Kiln Launcher is in the app menu",
       "desktopOff": "Kiln Launcher is out of the app menu"
     },

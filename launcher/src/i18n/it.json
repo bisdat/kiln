@@ -2771,6 +2771,7 @@
       "desktopHint": "Con la sua icona, così anche la barra delle applicazioni e il dock mostrano l'icona di Kiln. Kiln lo tiene puntato a questa AppImage.",
       "desktopHintFile": "Con la sua icona, così anche la barra delle applicazioni e il dock mostrano l'icona di Kiln. Kiln lo tiene puntato a questa AppImage. {file}",
       "desktopHintForeign": "Con la sua icona, così anche la barra delle applicazioni e il dock mostrano l'icona di Kiln. Kiln lo tiene puntato a questa AppImage. {file} non è di Kiln: attivando questa opzione viene sostituito.",
+      "desktopHintIntegrated": "Gear Lever (o un altro integratore di AppImage) ha già aggiunto Kiln al menu delle applicazioni: {file}. Kiln non aggiunge una seconda voce.",
       "desktopOn": "Kiln Launcher è nel menu app",
       "desktopOff": "Kiln Launcher è fuori dal menu app"
     },

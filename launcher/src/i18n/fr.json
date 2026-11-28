@@ -2771,6 +2771,7 @@
       "desktopHint": "Avec son icône, pour que la barre des tâches et le dock affichent aussi l'icône de Kiln. Kiln le garde pointé vers cette AppImage.",
       "desktopHintFile": "Avec son icône, pour que la barre des tâches et le dock affichent aussi l'icône de Kiln. Kiln le garde pointé vers cette AppImage. {file}",
       "desktopHintForeign": "Avec son icône, pour que la barre des tâches et le dock affichent aussi l'icône de Kiln. Kiln le garde pointé vers cette AppImage. {file} n'appartient pas à Kiln : activer cette option le remplace.",
+      "desktopHintIntegrated": "Gear Lever (ou un autre intégrateur d'AppImage) a déjà ajouté Kiln au menu des applications : {file}. Kiln n'ajoute pas de second raccourci.",
       "desktopOn": "Kiln Launcher est dans le menu des applications",
       "desktopOff": "Kiln Launcher n'est plus dans le menu des applications"
     },

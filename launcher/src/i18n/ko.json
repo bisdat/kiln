@@ -2715,6 +2715,7 @@
       "desktopHint": "아이콘과 함께 표시되어 작업 표시줄과 독에도 Kiln 아이콘이 보입니다. Kiln이 이 AppImage를 가리키도록 유지합니다.",
       "desktopHintFile": "아이콘과 함께 표시되어 작업 표시줄과 독에도 Kiln 아이콘이 보입니다. Kiln이 이 AppImage를 가리키도록 유지합니다. {file}",
       "desktopHintForeign": "아이콘과 함께 표시되어 작업 표시줄과 독에도 Kiln 아이콘이 보입니다. Kiln이 이 AppImage를 가리키도록 유지합니다. {file}은(는) Kiln의 파일이 아닙니다. 켜면 덮어씁니다.",
+      "desktopHintIntegrated": "Gear Lever(또는 다른 AppImage 통합 도구)가 이미 Kiln을 앱 메뉴에 추가했습니다: {file}. Kiln은 두 번째 항목을 추가하지 않습니다.",
       "desktopOn": "Kiln Launcher가 앱 메뉴에 있습니다",
       "desktopOff": "Kiln Launcher가 앱 메뉴에서 빠졌습니다"
     },
