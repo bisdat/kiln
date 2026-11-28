@@ -406,6 +406,29 @@ public sealed class SfiCatalogTests : IDisposable
         }
     }
 
+    /// <summary>kiln-eml, the plan's data writer, failed to apply the compatibility entry's package: its EML row is the
+    /// only place that failure shows, so the one-row rule leaves it (and the EML group's problem count) in place.</summary>
+    [Fact]
+    public void A_failed_eml_row_of_the_compatibility_entry_stays()
+    {
+        var lib = Package(Path.Combine(_root, "library", "eml", "wardrobe", "1.0.0"), "wardrobe", launcher: "EML", settings: Whitelist);
+        var copy = Package(Path.Combine(Mods, "wardrobe"), "wardrobe", marker: "eml", launcher: "EML", settings: Whitelist);
+        Profile(("eml", "wardrobe", lib, true), ("shroudforge", "wardrobe", lib, true));
+        WriteRaw("eml.json", JsonSerializer.Serialize(new
+        {
+            pid = Pid, updatedUnixMs = StartMs + 2000, phase = "done",
+            mods = new[] { new { id = "wardrobe", name = "Wardrobe", version = "1.0.0", path = lib, source = "profile", state = "failed",
+                reason = "patch failed: the target container is missing" } },
+        }));
+        SfStatus("kiln");
+        var s = Read();
+        var eml = Assert.Single(s.Mods, m => m.Engine == "eml" && m.Id == "wardrobe");
+        Assert.Equal(ModRunState.Failed, eml.State);
+        Assert.Contains("target container is missing", eml.Reason);
+        Assert.Equal(1, s.Engines.Single(e => e.Kind == "eml").Problems);
+        Assert.Equal(copy, Assert.Single(s.Mods, m => m.Engine == "shroudforge" && m.Id == "wardrobe").Folder);
+    }
+
     /// <summary>An EML package the interpreter runs from the mods root stays one EML row with the interpreter's truth; no
     /// second ShroudForge row for its folder.</summary>
     [Fact]

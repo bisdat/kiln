@@ -1107,8 +1107,9 @@ internal static class ModCatalog
         // one row per mod: a profile ShroudForge entry for the folder of an EML row is the launcher's compatibility entry for
         // an EML package that needs ShroudForge's runtime (kiln-manage profile.rs, emlRuntime): the ShroudForge row
         // stands for it, with its switch and ShroudForge's runtime truth, and the EML row goes
+        // (a failed or missing EML row stays: kiln-eml's failure shows nowhere else)
         var mine = b.SfProfileFolders();
-        emlRows.RemoveAll(m => m.Folder is { } ef && mine.Contains(NormPath(ef)));
+        emlRows.RemoveAll(m => !m.NeedsAttention && m.Folder is { } ef && mine.Contains(NormPath(ef)));
         // an EML package with ShroudForge's own settings in its folder here is ShroudForge's row while ShroudForge runs (or
         // was to run) the folder: its switch and settings are drawn there, and SfRefine says what ShroudForge did with it
         var moved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

@@ -160,9 +160,10 @@ internal static class SfiCatalog
         var covered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // (one row per mod: an EML row for the folder of a profile ShroudForge entry, the launcher's compatibility entry for
         // an EML package that needs ShroudForge's runtime, goes; step 2's row stands for it. kiln-eml names the entry's
-        // Library folder as the plan's data writer, Kiln's copy in the mods root otherwise: both are the entry's)
+        // Library folder as the plan's data writer, Kiln's copy in the mods root otherwise: both are the entry's. A failed or
+        // missing EML row stays: kiln-eml's failure shows nowhere else)
         var profileFolders = entries.SelectMany(e => new[] { ModCatalog.NormPath(e.Path), ModCatalog.NormPath(folderOf(e)) }).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        emlRows.RemoveAll(m => m.Folder is { } ef && profileFolders.Contains(ModCatalog.NormPath(ef)));
+        emlRows.RemoveAll(m => !m.NeedsAttention && m.Folder is { } ef && profileFolders.Contains(ModCatalog.NormPath(ef)));
         foreach (var m in ModCatalog.TakeSfPackages(emlRows, root, m => record is null || record.Find(SfPackageId(m.Folder!)) is not null))
         {
             var facts = ModCatalog.SfFacts(m.Folder!);
