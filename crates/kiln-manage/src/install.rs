@@ -671,6 +671,44 @@ fn occupied(path: &Path) -> Result<bool> {
     Ok(false)
 }
 
+/// The name Ultimate ASI Loader's chained copy has in the game folder (any spelling of [`ASI_LOADER_NAME`]), when that
+/// is a plain file (no link, no folder) that is Ultimate ASI Loader itself (its `IsUltimateASILoader` export,
+/// pe::classify_proxy). None: no such file, or another file under that name.
+fn chained_ual(game_dir: &Path) -> Result<Option<String>> {
+    let entries = match std::fs::read_dir(game_dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(io_at(game_dir, "reading")(e)),
+    };
+    for e in entries {
+        let e = e.map_err(io_at(game_dir, "reading"))?;
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !name.eq_ignore_ascii_case(ASI_LOADER_NAME) { continue; }
+        let plain = std::fs::symlink_metadata(e.path()).is_ok_and(|m| m.file_type().is_file());
+        let ual = plain && crate::pe::classify_proxy(&e.path()).is_ok_and(|c| c.kind == ProxyKind::UltimateAsiLoader);
+        return Ok(ual.then_some(name));
+    }
+    Ok(None)
+}
+
+/// Ultimate ASI Loader's file version (VS_VERSION_INFO, `a.b.c`), when the file has one.
+fn ual_version(p: &Path) -> Option<String> {
+    std::fs::read(p).ok().and_then(|b| crate::library::dll_file_version(&b))
+}
+
+/// Kiln is installed in `game_dir` (its receipt is there), but `dinput8.dll` is Ultimate ASI Loader again: another mod
+/// manager (Multi DLL Installer, Vortex) deployed it over Kiln's proxy, so the game would start without Kiln. The
+/// sentence that says so and what to do (Play refuses a start with Kiln with it); None otherwise.
+pub fn ual_over_proxy(game_dir: &Path) -> Option<String> {
+    read_receipt(game_dir).ok().flatten()?;
+    let c = crate::pe::classify_proxy(&game_dir.join(PROXY)).ok()?;
+    (c.kind == ProxyKind::UltimateAsiLoader).then(|| format!(
+        "dinput8.dll is Ultimate ASI Loader again instead of Kiln's loader, so the game would start without Kiln. Another \
+         mod manager (Multi DLL Installer, Vortex) likely deployed it again. Repair Kiln on the Runtime page: it puts its \
+         loader back and keeps Ultimate ASI Loader running as {ASI_LOADER_NAME}. To stop this coming back, turn off that \
+         manager's dinput8.dll deployment (Kiln already loads Ultimate ASI Loader)."))
+}
+
 /// A fresh slot: even identical existing files belong to the player and must survive uninstall.
 fn chain_slot(game_dir: &Path, kind: &str) -> Result<String> {
     for i in 1.. {
@@ -862,9 +900,131 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
         let proxy_path = game_dir.join(PROXY);
         let class = crate::pe::classify_proxy(&proxy_path)?;
         let ours = class.sha256.as_deref().is_some_and(|h| old_files.get(PROXY).is_some_and(|f| f.sha256 == h));
+        // (KR-NXM5) Ultimate ASI Loader at dinput8.dll while its chained copy is already under xinput9_1_0.dll: an
+        // earlier install chained it there and another mod manager (Multi DLL Installer, Vortex) wrote it back over
+        // Kiln's proxy, or the player put both there
+        let second_ual = if class.kind == ProxyKind::UltimateAsiLoader && !ours { chained_ual(game_dir)? } else { None };
         match class.kind {
             ProxyKind::None => {}
             _ if ours => {} // our previous install: replaced below like every receipt file
+            ProxyKind::UltimateAsiLoader if second_ual.is_some() => {
+                // never refused: the newer copy (by file version; the chained one when that does not tell) runs as
+                // xinput9_1_0.dll, the other goes to this install's backup, Kiln's proxy becomes dinput8.dll below
+                let slot_rel = second_ual.clone().expect("checked");
+                let slot = game_dir.join(&slot_rel);
+                let chain_path = game_dir.join(crate::paths::game::CHAIN);
+                if std::fs::metadata(&chain_path).is_ok_and(|m| m.len() > MAX_CHAIN_BYTES) {
+                    return Err(Error::new(ErrorCode::Refused, "chain.ini is over the proxy's size limit; no loader was moved"));
+                }
+                let (sha_d, size_d) = file_sha(&proxy_path).ok_or_else(|| Error::not_found(format!("{} vanished", proxy_path.display())))?;
+                let (sha_x, size_x) = file_sha(&slot).ok_or_else(|| Error::not_found(format!("{} vanished", slot.display())))?;
+                let (ver_d, ver_x) = (ual_version(&proxy_path), ual_version(&slot));
+                let proxy_newer = sha_d != sha_x && match (&ver_d, &ver_x) {
+                    (Some(d), Some(x)) => crate::bundle::compare_versions(d, x) == std::cmp::Ordering::Greater,
+                    (Some(_), None) => true,
+                    _ => false,
+                };
+                let backup_d = copy_into_backup(game_dir, &backup_rel, PROXY, Some(&mirror))?;
+                std::fs::create_dir_all(&prev_dir).map_err(io_at(&prev_dir, "creating"))?;
+                let ver = |v: &Option<String>| v.as_ref().map(|v| format!(" {v}")).unwrap_or_default();
+                let note = if proxy_newer {
+                    // the newer copy takes the chained name; the older chained copy goes to the backup
+                    let backup_x = copy_into_backup(game_dir, &backup_rel, &slot_rel, Some(&mirror))?;
+                    let hold = prev_dir.join(&slot_rel);
+                    std::fs::rename(&slot, &hold).map_err(io_at(&slot, "moving"))?;
+                    steps.push(Step::Moved { from: slot.clone(), to: hold });
+                    copy_new(&proxy_path, &slot, &slot_rel)?;
+                    if let Err(e) = std::fs::remove_file(&proxy_path) {
+                        let _ = std::fs::remove_file(&slot);
+                        return Err(io_at(&proxy_path, "moving the proxy from")(e));
+                    }
+                    steps.push(Step::Moved { from: proxy_path.clone(), to: slot.clone() });
+                    // an earlier install's record of the chained copy now names the newer bytes, so uninstall puts the
+                    // newer one back as dinput8.dll; without one, both originals are recorded (uninstall restores both)
+                    let first = replaced.iter().position(|r| r.path == PROXY);
+                    let kilns = first.filter(|&i| {
+                        let r = &replaced[i];
+                        r.action == ReplacedAction::Chained && r.sha256 == sha_x
+                            && r.chain_path.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(&slot_rel))
+                    });
+                    match kilns {
+                        Some(i) => {
+                            let r = &mut replaced[i];
+                            r.sha256 = sha_d.clone();
+                            r.size = Some(size_d);
+                            r.backup = Some(backup_d.clone());
+                        }
+                        None => {
+                            replaced.push(ReplacedFile {
+                                path: PROXY.into(),
+                                sha256: sha_d.clone(),
+                                size: Some(size_d),
+                                class: Some(ReplacedClass::Unknown),
+                                action: ReplacedAction::Chained,
+                                chain_path: Some(slot_rel.clone()),
+                                backup: Some(backup_d.clone()),
+                                engine: Some(ProxyKind::UltimateAsiLoader),
+                            });
+                            replaced.push(ReplacedFile {
+                                path: slot_rel.clone(),
+                                sha256: sha_x.clone(),
+                                size: Some(size_x),
+                                class: Some(ReplacedClass::Unknown),
+                                action: ReplacedAction::Replaced,
+                                chain_path: None,
+                                backup: Some(backup_x.clone()),
+                                engine: Some(ProxyKind::UltimateAsiLoader),
+                            });
+                        }
+                    }
+                    format!("Kiln put its loader back as dinput8.dll and moved the second copy of Ultimate ASI Loader to \
+                        {backup_x}: the newer copy{} from dinput8.dll now runs as {slot_rel} in place of the older{}. It's likely \
+                        another mod manager (Multi DLL Installer, Vortex) re-deployed it; turn off its dinput8.dll deployment, \
+                        Kiln already loads Ultimate ASI Loader.", ver(&ver_d), ver(&ver_x))
+                } else {
+                    let hold = prev_dir.join(PROXY);
+                    std::fs::rename(&proxy_path, &hold).map_err(io_at(&proxy_path, "moving"))?;
+                    steps.push(Step::Moved { from: proxy_path.clone(), to: hold });
+                    replaced.push(ReplacedFile {
+                        path: PROXY.into(),
+                        sha256: sha_d.clone(),
+                        size: Some(size_d),
+                        class: Some(ReplacedClass::Unknown),
+                        action: ReplacedAction::BackedUp,
+                        chain_path: None,
+                        backup: Some(backup_d.clone()),
+                        engine: Some(ProxyKind::UltimateAsiLoader),
+                    });
+                    let which = match (&ver_d, &ver_x) {
+                        _ if sha_d == sha_x => String::new(),
+                        (Some(d), Some(x)) if d == x => format!(" (the same version as the one running as {slot_rel}, other bytes)"),
+                        (Some(_), Some(x)) => format!(" (older than the {x} running as {slot_rel})"),
+                        _ => format!(" (not known to be newer than the one running as {slot_rel})"),
+                    };
+                    format!("Kiln put its loader back as dinput8.dll and moved the second copy of Ultimate ASI Loader{}{which} to \
+                        {backup_d}; Ultimate ASI Loader keeps running as {slot_rel}. It's likely another mod manager (Multi DLL \
+                        Installer, Vortex) re-deployed it; turn off its dinput8.dll deployment, Kiln already loads Ultimate ASI \
+                        Loader.", ver(&ver_d))
+                };
+                // the kept copy is loaded by Kiln's proxy (already so when an earlier install chained it)
+                let previous = match std::fs::read(&chain_path) {
+                    Ok(b) => Some(b),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(e) => return Err(io_at(&chain_path, "reading")(e)),
+                };
+                let line = chain_line(&slot_rel);
+                if !crate::chain::read(game_dir)?.chain.iter().any(|e| e.path.eq_ignore_ascii_case(&line)) {
+                    if crate::chain::read(game_dir)?.chain.len() >= crate::chain::MAX_ENTRIES {
+                        return Err(Error::new(ErrorCode::Refused, "chain.ini is at the proxy's entry limit; Ultimate ASI Loader could not be chained"));
+                    }
+                    steps.push(Step::Edited { target: chain_path.clone(), previous });
+                    crate::chain::add_chain_entry(game_dir, &line)?;
+                    if std::fs::metadata(&chain_path).map_err(io_at(game_dir, "reading chain.ini"))?.len() > MAX_CHAIN_BYTES {
+                        return Err(Error::new(ErrorCode::Refused, "adding Ultimate ASI Loader would exceed the proxy's chain.ini size limit"));
+                    }
+                }
+                warnings.push(note); // said in the log with the other warnings once the install worked
+            }
             ProxyKind::Kiln => {
                 let backup = copy_into_backup(game_dir, &backup_rel, PROXY, Some(&mirror))?;
                 replaced.push(ReplacedFile {
