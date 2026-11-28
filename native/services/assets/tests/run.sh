@@ -28,6 +28,14 @@ sed -n '/^FARPROC WINAPI hk_GetProcAddress(/,/^}/p' "$here/../hooks.cpp" > "$out
 grep -qF 'patch_iat("KERNEL32.dll", "GetProcAddress", reinterpret_cast<void*>(&hk_GetProcAddress))' "$here/../hooks.cpp" ||
   { echo "FAIL ioring.install: install_content_hooks does not patch the game's GetProcAddress import"; exit 1; }
 echo "PASS ioring.install: install_content_hooks patches the game's GetProcAddress import"
+# review-3129: only a start whose content path is on keeps the game off the ring. The GetProcAddress patch comes after the
+# KfcContentMap and AsyncIoCreate hooks are in, so a start where one of them is refused (content off) keeps the game's I/O ring.
+content_body=$(sed -n '/^bool install_content_hooks(/,/^}/p' "$here/../hooks.cpp")
+hooks_line=$(grep -n 'hook(h_io_create, Y.io_create' <<<"$content_body" | head -1 | cut -d: -f1)
+gate_line=$(grep -n 'patch_iat("KERNEL32.dll", "GetProcAddress"' <<<"$content_body" | head -1 | cut -d: -f1)
+[ -n "$hooks_line" ] && [ -n "$gate_line" ] && [ "$gate_line" -gt "$hooks_line" ] ||
+  { echo "FAIL ioring.content-off: install_content_hooks patches GetProcAddress (line ${gate_line:-none}) before the content hooks are in (line ${hooks_line:-none})"; exit 1; }
+echo "PASS ioring.content-off: the GetProcAddress patch only follows the KfcContentMap and AsyncIoCreate hooks (content off keeps the I/O ring)"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$here/.." -I"$out" \
   "$here/test_ioring_gate.cpp" -o "$out/test_ioring_gate"
 "$out/test_ioring_gate"

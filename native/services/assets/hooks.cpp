@@ -858,7 +858,6 @@ bool install_content_hooks(std::string* why) {
         g_CreateFileW = reinterpret_cast<CreateFileWFn>(GetProcAddress(k32, "CreateFileW"));
         g_CreateIoCompletionPort = reinterpret_cast<CreateIoCompletionPortFn>(GetProcAddress(k32, "CreateIoCompletionPort"));
         g_ReadFile = reinterpret_cast<ReadFileFn>(GetProcAddress(k32, "ReadFile"));
-        g_GetProcAddress = reinterpret_cast<GetProcAddressFn>(GetProcAddress(k32, "GetProcAddress"));
         void* a = patch_iat("KERNEL32.dll", "CreateFileW", reinterpret_cast<void*>(&hk_CreateFileW));
         void* b = patch_iat("KERNEL32.dll", "CreateIoCompletionPort", reinterpret_cast<void*>(&hk_CreateIoCompletionPort));
         void* c = patch_iat("KERNEL32.dll", "ReadFile", reinterpret_cast<void*>(&hk_ReadFile));
@@ -867,19 +866,23 @@ bool install_content_hooks(std::string* why) {
         if (c) g_ReadFile = reinterpret_cast<ReadFileFn>(c);
         ok = a && b && c && g_CreateFileW && g_CreateIoCompletionPort && g_ReadFile;
         if (!ok) w = "import slots CreateFileW / CreateIoCompletionPort / ReadFile not found";
-        // Before the game makes its async IO (GameFramework "AsyncIo", after Kiln's boot): its I/O ring lookups fail, so it
-        // reads through the three imports above (KR-KZRX). Without this slot the content path still runs; Windows 11 then
-        // reads Kiln's container through the ring, which hk_io_create says.
-        if (ok && g_GetProcAddress) {
-            if (void* d = patch_iat("KERNEL32.dll", "GetProcAddress", reinterpret_cast<void*>(&hk_GetProcAddress))) {
-                g_GetProcAddress = reinterpret_cast<GetProcAddressFn>(d);
-                g_ioring_gate = true;
-            } else
-                LOGW("assets: the game's GetProcAddress import slot was not found: on Windows 11 the game may read Kiln's "
-                     "container through the I/O ring, where Kiln cannot answer it");
-        }
     }
     if (ok) ok = hook(h_cmap, Y.cmap, &hk_cmap, "KfcContentMap", &w) && hook(h_io_create, Y.io_create, &hk_io_create, "AsyncIoCreate", &w);
+    // Only once Kiln serves its container (every hook above is in; a start whose content path is off keeps the game's I/O
+    // ring), and before the game makes its async IO (GameFramework "AsyncIo", which runs after Kiln's boot): its I/O ring
+    // lookups fail, so it reads through the three imports above (KR-KZRX). Without this slot the content path still runs;
+    // Windows 11 then reads Kiln's container through the ring, which hk_io_create says.
+    if (ok) {
+        g_GetProcAddress = reinterpret_cast<GetProcAddressFn>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetProcAddress"));
+        void* d = g_GetProcAddress ? patch_iat("KERNEL32.dll", "GetProcAddress", reinterpret_cast<void*>(&hk_GetProcAddress)) : nullptr;
+        if (d) {
+            g_GetProcAddress = reinterpret_cast<GetProcAddressFn>(d);
+            g_ioring_gate = true;
+        } else {
+            LOGW("assets: the game's GetProcAddress import slot was not found: on Windows 11 the game may read Kiln's "
+                 "container through the I/O ring, where Kiln cannot answer it");
+        }
+    }
     g_content_on = ok;
     *why = w;
     return ok;
