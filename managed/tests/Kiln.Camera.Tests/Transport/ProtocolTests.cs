@@ -288,6 +288,22 @@ public sealed class ProtocolTests
         Assert.Equal(50ul, rig.Client.HighestSerial);  // a refusal advances the serial
     }
 
+    /// <summary>(0.2.0-dev.31.25 review) What a client answers for numbers past its own limits, as a Kiln client before
+    /// 0.2.0-dev.31.25 does for a newer server's lens, profile or shake past its old caps (docs/kiln/services/camera.md,
+    /// "Numeric limits"): its wire check takes the request for one it cannot read, MalformedRemote, never Bounds, and
+    /// nothing changes there.</summary>
+    [Fact]
+    public void Numbers_past_the_clients_limits_are_refused_MalformedRemote_and_change_nothing()
+    {
+        var rig = Bound();
+        var body = CameraWire.Mutation(CameraMessage.Apply, new WireHeader(rig.Server.Binding, 5, 1000, 1, 51, 1), 0,
+            Requests.Lens(fov: 0.5f), CameraWireAbi.MaxBody)!;
+        rig.Client.Receive(CameraMessage.Apply, body);
+        Assert.Empty(rig.Endpoint.Started);
+        Assert.True(CameraWire.TryAck(rig.SentToServer.Last().Body, out var ack));
+        Assert.Equal((false, CameraReasons.MalformedRemote, 51ul), (ack.Ok, ack.Reason, ack.Header.Serial));
+    }
+
     [Fact]
     public void A_lost_ACK_retries_the_same_serial_twice_then_answers_TransportTimeout_with_MayHaveApplied()
     {

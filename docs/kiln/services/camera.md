@@ -155,7 +155,8 @@ still join; at most 16384 bytes a message) and turns the row on. Per player:
   `RequiresKilnClient`; a client without a part the request needs (its `camera.local_*` row is off there)
   `ClientCapability`; a client that does not finish the camera handshake within 2 s `Negotiation`; no such player
   connected `PeerUnavailable`; more than 10 requests a second (burst 16) to one player `RateLimit`; a request larger than
-  the negotiated body `BodyTooLarge`.
+  the negotiated body `BodyTooLarge`; a client on a Kiln before 0.2.0-dev.31.25, for numbers past its old limits,
+  `MalformedRemote` or `Bounds` ([Numeric limits](#numeric-limits-and-authored-data)).
 
 `Camera.GetCapabilities(CameraEndpoint.Remote, player)` answers `Remote` plus the parts that player's client offered (the
 host's own player: the host's local rows). A mount or cutscene that requires a part checks it there first.
@@ -192,7 +193,11 @@ are 1–179, the whole degrees inside the 0.01 rad margin from 0 and 180 that th
 and frequency are any finite value of 0 or more: the offset is never longer than the amplitude, a frequency above half
 the frame rate turns into an irregular jitter, and how strong or fast a shake may be is the mod's choice (a strong, fast
 one can be hard to look at). Until 0.2.0-dev.31.24 the profile's distance was 0.25–200 m, its offsets at most 100 m, the
-lens 5–160 degrees and a shake at most 0.5 m at 0.1–30 Hz, and an older Kiln client still refuses `Bounds` past those.
+lens 5–160 degrees and a shake at most 0.5 m at 0.1–30 Hz, and an older Kiln client still refuses a `Camera.Set` past
+those: `MalformedRemote` for a profile, lens or shake value past the old caps (its wire check reads such a request as
+not one it takes), `Bounds` for a path key or a derived camera more than 250 m from its player. Either is a plain
+refusal: nothing changes on that client, and a refused `Update` keeps the lease as it was. `Camera.GetCapabilities`
+does not tell the two versions apart.
 A path has 1–256 keys, first at 0, strictly increasing whole-millisecond times no later than its duration. Every key
 has a lens or none does; keyed lenses cannot combine with a standalone lens. Blends are nonnegative whole
 milliseconds with In + Out ≤ Duration. Collision is explicitly `None` in v1; rotational shake, splines, looping and

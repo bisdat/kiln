@@ -171,7 +171,8 @@ public enum CameraReason
     Collision = 14,
     /// <summary>The player's client did not answer within 3 seconds; see <see cref="CameraResult.MayHaveApplied"/>.</summary>
     TransportTimeout = 15,
-    /// <summary>A camera message from the other side could not be read.</summary>
+    /// <summary>A camera message from the other side could not be read, or its numbers are not ones the player's Kiln
+    /// takes (a client before 0.2.0-dev.31.25 answers so for a profile, lens or shake past its older limits).</summary>
     MalformedRemote = 16,
     /// <summary>The camera resource is in use: the player's client could not take its camera for the request.</summary>
     ResourceBusy = 17,
@@ -182,7 +183,8 @@ public enum CameraReason
     /// <summary>The newest snapshot is older than 250 ms: the game is paused or not drawing.</summary>
     SnapshotStale = 20,
     /// <summary>A value is out of its range: a camera outside the world bound (±1,000,000 m on each axis) or not a finite
-    /// view, a lens outside 1 to 179 degrees, a negative distance, a time out of bounds.</summary>
+    /// view, a lens outside 1 to 179 degrees, a negative distance, a time out of bounds (a client before 0.2.0-dev.31.25
+    /// also answers so for a key or camera more than 250 m from its player).</summary>
     Bounds = 21,
     /// <summary>Too many camera requests wait already: ask again in a later step.</summary>
     RateLimit = 22,
