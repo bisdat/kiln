@@ -57,10 +57,10 @@ uint32_t append_rows(uint8_t* ui, const MapLayout& l, const MapRow* rows, uint32
 
 // ---- every client step (GitHub issue 159) -----------------------------------------------------------------------------
 // The game clears this list and fills it again at every client SimStep (clear_map_markers_for_ui, then
-// replicate_map_markers_for_ui; StepPrograms waits for their jobs before SimStep returns), the map reads it in the UI frame
-// on the same thread, and Kiln's Post runs only at the SimSteps that advance the client clock (60 Hz). Above 60 fps the
-// SimSteps in between left the list without Kiln's rows and the icons flickered. So the rows a Post wrote are kept and
-// written again at the end of every client SimStep (docs/re/map.md, "The list in a frame").
+// replicate_map_markers_for_ui; the client world's StepPrograms waits for their jobs before SimStep returns), the map
+// reads it in the UI frame on the same thread, and Kiln's Post runs only at the SimSteps that advance the client clock
+// (60 Hz). Above 60 fps the SimSteps in between left the list without Kiln's rows and the icons flickered. So the rows a
+// Post wrote are kept and written again at the end of every client SimStep (docs/re/map.md, "The list in a frame").
 struct MapKeep {
     uint64_t epoch = 0;        // the client world epoch of the Post that wrote them; 0 = nothing kept
     std::vector<MapRow> rows;  // in the Post's order

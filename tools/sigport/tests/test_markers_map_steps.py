@@ -10,7 +10,7 @@ update calls SimStep on frames without a new step too (ticked 0), SimStep runs t
 StepPrograms waits for the world's jobs before it returns.
 
     KILN_MARKERS_CLIENT_EXE=<read-only copy of enshrouded.exe 26430625> \\
-        python3 -I -m unittest tools/sigport/tests/test_markers_map_steps.py
+        python3 -I -m unittest discover -s tools/sigport/tests -p test_markers_map_steps.py
 """
 import hashlib
 import json
@@ -125,7 +125,10 @@ class MapStepsSignatures(unittest.TestCase):
         self.assertEqual(bytes.fromhex("41 0f b6 46 44 88 87 59 79 e1 00"), self.at(CONFIG_COPY, 11))
         self.assertEqual(bytes.fromhex("66 c7 45 44 01 00"), self.at(CLIENT_CONFIG, 6))
         self.assertEqual(bytes.fromhex("c6 45 00 02"), self.at(CLIENT_CONFIG + 0xA, 4))  # kind byte 2: the client world
-        # StepPrograms until it says done
+        # StepPrograms until it says done, when SimStep's storage byte +0x518 is still set: SimStep sets it at entry, and
+        # its direct callees before the test do not write it (else 0x9af3d0 runs instead; review-3128)
+        self.assertEqual(bytes.fromhex("c6 81 18 05 00 00 01"), self.at(0xA2C699, 7))
+        self.assertEqual(bytes.fromhex("44 38 ae 18 05 00 00 74 1d"), self.at(0xA2C85F, 9))
         self.assertEqual(bytes.fromhex("48 8d 95 38 00 02 00 48 8b ce"), self.at(0xA2C870, 10))
         self.assertEqual(STEP_PROGRAMS, self.target(0xA2C87A))
         self.assertEqual(bytes.fromhex("84 c0 74 ed"), self.at(0xA2C87F, 4))
@@ -137,6 +140,17 @@ class MapStepsSignatures(unittest.TestCase):
         self.assertEqual(0x928 + 0xE17038, 0xE17960)
         self.assertEqual(bytes.fromhex("48 8b 4c 24 28"), self.at(STEP_WAIT - 5, 5))
         self.assertEqual(WAIT_TASK_GROUP, self.target(STEP_WAIT))
+        # the wait is taken by the client world: a flag from the storage's kind byte (+8) is 1 for kind 2 (the client
+        # world) and 0 for kind 1 (the prediction world, which skips the wait); the server world's is its own word
+        # (review-3128)
+        self.assertEqual(bytes.fromhex("44 0f b6 41 08"), self.at(STEP_PROGRAMS + 0x22, 5))  # movzx r8d, [rcx+8]
+        self.assertEqual(bytes.fromhex("45 85 c0 74 1b 41 83 e8 01 74 10 41 83 f8 01 0f 85"), self.at(0x9ADE8E, 17))
+        self.assertEqual(bytes.fromhex("41 0f b6 f8"), self.at(0x9ADEA3, 4))  # kind 2: movzx edi, r8b (1)
+        self.assertEqual(bytes.fromhex("40 32 ff"), self.at(0x9ADEA9, 3))  # kind 1: xor dil, dil
+        self.assertEqual(bytes.fromhex("40 88 bd 80 01 08 00"), self.at(0x9ADEEB, 7))
+        # read back before the return: test dil, dil; je past the wait (0x9ae68b, right after the call)
+        self.assertEqual(bytes.fromhex("0f b6 bd 80 01 08 00 40 84 ff 74 3d"), self.at(0x9AE642, 12))
+        self.assertEqual(STEP_WAIT + 5, 0x9AE64E + 0x3D)
         self.assertEqual(WAIT_TASK_GROUP, self.syms["WaitTaskGroup"]["rva"])  # the core's WaitWorldJobs jumps there
         self.assertEqual(self.syms["WaitTaskGroup"]["rva"], self.target(self.syms["WaitWorldJobs"]["rva"] + 7))
 

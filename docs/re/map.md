@@ -205,12 +205,15 @@ icons flickered. Pinned by `tools/sigport/tests/test_markers_map_steps.py`. In o
 2. **SimStep** `0xa2c660` uses ticked once: the input apply `0x9653e0` (`0xa2c6a5`), a server-world function. The
    programs run when the world's byte `+0xe17959` is set (`0xa2c6c7`, as storage `+0xe17031`), which createWorld copies
    from its config `+0x44` (`0x983213`) and the client world's config sets to 1 (`0x84d064`). StepPrograms `0x9ade50`
-   runs until it returns true (`0xa2c87a`).
+   runs until it returns true (`0xa2c87a`) when SimStep's storage byte `+0x518` is still set (`0xa2c85f`, else
+   `0x9af3d0`): SimStep sets it at entry (`0xa2c699`) and none of its direct callees before the test writes it.
 3. **StepPrograms** selects programs by their flags (client bit `0x1`; SYSTEM always; the others when an archetype
    matches) with no clock or interval test. clear_map_markers_for_ui (`0x304470`, flags 5, CLIENT | SYSTEM) and
    replicate_map_markers_for_ui (`0x3161b0`, flags `0x201`, CLIENT | CHUNKED: slices on the world's task queue) both
-   sys-write G38UiPlayData, so they never overlap. Before its only return StepPrograms waits for the whole queue
-   (`WaitTaskGroup` `0x8f0b30` at `0x9ae686`, on `world+0xe17960`, the queue WaitWorldJobs waits for).
+   sys-write G38UiPlayData, so they never overlap. Before its only return StepPrograms of the client world waits for
+   the whole queue (`WaitTaskGroup` `0x8f0b30` at `0x9ae686`, on `world+0xe17960`, the queue WaitWorldJobs waits for):
+   the wait is taken when a flag made from the storage's kind byte is set, 1 for the client world (kind 2) and 0 for
+   the prediction world (kind 1; `0x9ade72..0x9adeeb`, read back at `0x9ae642`).
 4. **Kiln's Post** of the client world runs when SimStep returns, and only for a ticked step: the core's tick link
    passes the others through without Pre or Post (`native/core/src/tick.cpp`, `hk_sim_step`). The client clock is
    60 Hz.
@@ -234,8 +237,11 @@ do not share this: they draw from a snapshot that lasts until the next Post.
 **The fix (the 31.x patch after 0.2.0-dev.31.26):** kiln.markers keeps the rows its last Post wrote and writes them again after every client
 SimStep returns: a kiln.hooks link on SimStep before the core's own (sigdb feature `markers.client_map_steps`), so after
 the step's join and before a UI frame can read the list again. The count stays N+k, the layer's entry pointers stay on Kiln's slots while N
-is stable, and a moved marker's slot is written again at every step. `append_rows`' in-place rewrite now matters only
-when no SimStep ran in between (the skipped step above). Without the feature the rows are written at the Post only.
+is stable, and a moved marker's slot is written again at every step. At a ticked step the link finds the Post's rows at
+the list's end and `append_rows` writes them over in place, so they are never there twice; the same holds for a step
+whose clear did not run. A ticked step without Kiln's Post (the core removes a tick subscriber that faults) drops the
+kept rows, so they never outlive the Post that would move or remove them. Without the feature the rows are written at
+the Post only.
 
 ### Compass, projection and names [static] [refl]
 
