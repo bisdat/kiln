@@ -2246,3 +2246,30 @@ fn ual_at_dinput8_with_a_foreign_xinput9_1_0_is_still_refused() {
         assert_eq!(outside_kiln(&g), before);
     }
 }
+
+/// The other mod manager deploys UAL again after a Repair: Play says so plainly instead of starting the game without
+/// Kiln; Repair fixes it again.
+#[test]
+fn play_says_when_ual_came_back_over_kilns_proxy() {
+    let t = tmp("ual-play");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let a = bundle::create(&stage(&t.0, "a", false), &t.0.join("out"), &opts(1_793_793_600, "aaaaaaa")).unwrap();
+    let g = t.0.join("game");
+    let asi = ual("one", None);
+    put(&g, "enshrouded.exe", b"MZ");
+    put(&g, "dinput8.dll", &asi);
+    install::install(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap();
+    put(&g, "dinput8.dll", &asi);
+    let opened = std::cell::RefCell::new(0);
+    let opener = |_: &str| { *opened.borrow_mut() += 1; Ok(()) };
+    let req = |mode| kiln_manage::launch::LaunchRequest { mode, profile_id: None, skip_backup: true };
+    for mode in [kiln_manage::launch::LaunchMode::Profile, kiln_manage::launch::LaunchMode::NoMods] {
+        let e = kiln_manage::launch::play_with(&dirs, &client(&g), &req(mode), Some(&[]), &opener).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Refused);
+        assert!(e.message.contains("Ultimate ASI Loader") && e.message.contains("Repair") && e.message.contains("Vortex"), "{}", e.message);
+    }
+    assert_eq!(*opened.borrow(), 0, "the game is not started without Kiln");
+    install::install(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap();
+    kiln_manage::launch::play_with(&dirs, &client(&g), &req(kiln_manage::launch::LaunchMode::Profile), Some(&[]), &opener).unwrap();
+    assert_eq!(*opened.borrow(), 1);
+}

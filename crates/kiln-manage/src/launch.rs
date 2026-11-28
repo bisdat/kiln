@@ -313,6 +313,11 @@ pub fn play_gated(dirs: &DataDirs, install: &GameInstall, request: &LaunchReques
     if install.kind != crate::game::GameKind::Client {
         return Err(Error::invalid("launch_play starts the game client; servers start through server_start"));
     }
+    // (KR-NXM5) another mod manager deployed Ultimate ASI Loader over Kiln's proxy again since the last install: said
+    // plainly instead of a start without Kiln (every mode but vanilla needs Kiln's proxy, which reads play-once.ini)
+    if request.mode != LaunchMode::Vanilla && let Some(why) = crate::install::ual_over_proxy(&install.path) {
+        return Err(Error::new(ErrorCode::Refused, why).with_detail(serde_json::json!({ "ualOverProxy": true })));
+    }
     if matches!(request.mode, LaunchMode::Vanilla | LaunchMode::NoMods) {
         let loaders = crate::game_files::loaders_in_game(&install.path)?;
         if !loaders.is_empty() {
