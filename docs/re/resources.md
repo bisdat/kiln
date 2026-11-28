@@ -92,6 +92,19 @@ worker thread issues `ReadFile` with an `OVERLAPPED` offset and drains completio
    requested byte range from the mod blobs), posting the completion to the IOCP exactly as a real overlapped read does.
    **[rt]** "the game opened Kiln's container (handle …)", "Kiln's container joined the IO completion port … (key 10)";
    assets-test read a 4096-byte blob back byte-for-byte through this path.
+   **The Windows 11 I/O ring (0.2.0-dev.31.29, KR-KZRX).** The game's AsyncIo init (client 26430625 0x140f3f700, called
+   from GameFramework's 'AsyncIo' at 0x14090b3d4; a second queue kind at 0x140f50100) skips the ring with
+   `--disable-ioring`, else calls 0x140f40fe0: `LoadLibraryW("kernelbase.dll")` (0x140f50a70), then each of the 11 I/O
+   ring names through 0x140f4c780, which calls the exe's own KERNEL32 `GetProcAddress` import (slot 0x1413cf908). The
+   first one not found ("[os] Could not find IORing Api function '%s' - IORing not available") makes it take the ReadFile
+   + IOCP queue above, as on Windows 10 (no such export) and under Proton; found, it logs "Using IoRing for async io..."
+   and reads the containers through the ring ("[os] Enabled bypass io for file" and "[os] Using IO Ring API for async io
+   queue" are only on that path, from 0x140f3e5e0 and 0x140f4fec0), where Kiln's ReadFile answer never runs: the game
+   read the empty container (PopIoRingCompletion 0x80070026, end of file) and a mod material's mip tail was the fatal
+   "error loading streamed texture mip tail" (0x1400b9093, fatal at exe+0xb90a5). Server 26430253 has the same path
+   (0x1405aea70, lookups through 0x1405ba330 to its `GetProcAddress` slot 0x140bd58b0). So while the content path is on,
+   kiln.assets patches the exe's `GetProcAddress` slot too (`ioring_gate.h`): a name containing "IoRing" is not found,
+   everything else is a tail jump to the import. **[dis]** + the KR-KZRX logs.
 3. `KfcContentMap` is hooked to return a merged map (built once per content generation): the game's entries, with
    overridden hashes re-pointed into Kiln's container, plus the mod hashes. Kiln verifies the game map reads the way it
    assumes (bucket layout) before trusting it. **[rt]** "content map rebuilt: N game blobs + M Kiln entries".
