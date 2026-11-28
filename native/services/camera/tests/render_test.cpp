@@ -933,6 +933,34 @@ void test_far_follow_and_world_bound() {
     CHECK(near(g.position(), {2000, 0, -999997}, 1e-6));
     g.pre();
     CHECK(r3.seen && r3.r.ok);
+
+    // a top-down view of a base: straight down from 300 m above a pivot 150 m ahead of the player and 40 m up (past the
+    // old 200 m distance and 100 m offsets), with a 2 m shake (past the old 0.5 m) and a 170 degree lens (past 160)
+    Rig h(kAllLocal);
+    h.source.put(1, 100, 10, 100, yaw_q(0));
+    KilnCameraProfile pr = profile_of(0, 300, KILN_CAMERA_FIXED_WORLD, pitch_q(kPi / 2));
+    pr.offset_local[2] = 150;
+    pr.offset_world_y = 40;
+    KilnCameraRequest q = follow_request(h, pr);
+    Result r4;
+    const KilnCameraLease top = h.apply(30, q, &r4);
+    h.pre();
+    h.frame(0);
+    CHECK(near(h.position(), {100, 350, 250}, 1e-6));
+    CHECK(near(rotate(Quat{h.pose().rotation[0], h.pose().rotation[1], h.pose().rotation[2], h.pose().rotation[3]}, {0, 0, 1}), {0, -1, 0}, 1e-6));
+    h.pre();
+    CHECK(r4.seen && r4.r.ok);
+    q.parts |= KILN_CAMERA_SHAKE | KILN_CAMERA_LENS;
+    q.shake = KilnCameraShake{2.0f, 45.0f, 0, 7};
+    q.lens_source = KILN_CAMERA_LENS_CONSTANT;
+    q.fov_y_degrees = 170;
+    Result u;
+    CHECK(h.core.update(30, top, KILN_CAMERA_PRESERVE_TIMELINE, &q, &on_done, &u, kOnClient) == KILN_OK);
+    h.later(16);
+    h.pre();
+    CHECK(u.seen && u.r.ok);
+    const Vec3 d = h.position() - Vec3{100, 350, 250};
+    CHECK(length(d) <= 2.0 + 1e-6 && near(h.fov_reg, radians(170), 1e-6));
 }
 
 void test_shake_through_the_transaction() {

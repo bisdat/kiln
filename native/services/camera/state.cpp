@@ -12,7 +12,11 @@ namespace kcam {
 namespace {
 
 constexpr uint32_t kKnownParts = KILN_CAMERA_MODE | KILN_CAMERA_PATH | KILN_CAMERA_PROFILE | KILN_CAMERA_SHAKE | KILN_CAMERA_LENS;
-constexpr double kMaxMetres = 1000000.0;
+// The authored numbers keep only the guards that protect the game (owner, 0.2.0-dev.31.25: no arbitrary limits): finite
+// values, the world bound on positions, unit rotations, a lens the projection can take. No distance from the player, no
+// cap on a profile's distance or offsets, a shake's strength or speed: the render path checks every camera that comes
+// out of them against the same world bound before anything is written.
+constexpr double kMaxMetres = 1000000.0;  // the world bound (cam_math.h, kMaxWorldMetres: why it stays)
 
 bool finite_position(const double* p) {
     for (int i = 0; i < 3; ++i)
@@ -33,7 +37,9 @@ bool unit_quaternion(float* q) {
     return true;
 }
 
-bool lens_degrees(float v) { return std::isfinite(v) && v >= 5.0f && v <= 160.0f; }
+// A vertical field of view the projection can take: the whole degrees 1 to 179, inside the 0.01 rad margin from 0 and
+// from 180 degrees that the render path and the snapshot check (at 0 or 180, tan(fov/2) has no finite, nonzero value).
+bool lens_degrees(float v) { return std::isfinite(v) && v >= 1.0f && v <= 179.0f; }
 
 uint32_t scope_of(uint32_t endpoint) { return endpoint == KILN_CAMERA_SERVER_MODE ? KILN_CAMERA_COMMIT_SERVER_STATE : KILN_CAMERA_COMMIT_CLIENT_FRAME; }
 
@@ -97,14 +103,11 @@ bool validate(const KilnCameraRequest* r, Stored* out) {
             KilnCameraProfile& p = q.profile;
             if (p.size < sizeof(KilnCameraProfile)) return false;
             if (p.rotation_mode > KILN_CAMERA_FIXED_WORLD || p.collision_policy != KILN_CAMERA_COLLISION_NONE) return false;
-            if (!std::isfinite(p.distance) || p.distance < 0.25f || p.distance > 200.0f) return false;
-            double n2 = 0;
-            for (float v : p.offset_local) {
+            // a distance is 0 or more; how far, and how far the pivot is moved, is the mod's choice
+            if (!std::isfinite(p.distance) || p.distance < 0.0f) return false;
+            for (float v : p.offset_local)
                 if (!std::isfinite(v)) return false;
-                n2 += static_cast<double>(v) * v;
-            }
-            if (n2 > 100.0 * 100.0) return false;
-            if (!std::isfinite(p.offset_world_y) || std::fabs(p.offset_world_y) > 100.0f) return false;
+            if (!std::isfinite(p.offset_world_y)) return false;
             if (!unit_quaternion(p.rotation)) return false;
             if (p.rotation_mode == KILN_CAMERA_FREE_ORBIT &&
                 (std::fabs(p.rotation[0]) > 1e-5f || std::fabs(p.rotation[1]) > 1e-5f || std::fabs(p.rotation[2]) > 1e-5f))
@@ -112,8 +115,9 @@ bool validate(const KilnCameraRequest* r, Stored* out) {
         }
         if (q.parts & KILN_CAMERA_SHAKE) {
             const KilnCameraShake& s = q.shake;
-            if (!std::isfinite(s.amplitude_metres) || s.amplitude_metres < 0.0f || s.amplitude_metres > 0.5f) return false;
-            if (!std::isfinite(s.frequency_hz) || s.frequency_hz < 0.1f || s.frequency_hz > 30.0f) return false;
+            // a closed-form sine: any finite strength and speed gives a finite offset never longer than the amplitude
+            if (!std::isfinite(s.amplitude_metres) || s.amplitude_metres < 0.0f) return false;
+            if (!std::isfinite(s.frequency_hz) || s.frequency_hz < 0.0f) return false;
             if (s.falloff_ms > q.duration_ms) return false;
         }
     }

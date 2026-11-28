@@ -162,7 +162,7 @@ typedef struct KilnCameraRequest {
     uint32_t input_policy, duration_ms, blend_in_ms, blend_out_ms; /* duration 1..KILN_CAMERA_MAX_DURATION_MS */
     int32_t priority; /* -1000..1000 */
     uint32_t lens_source;
-    float fov_y_degrees; /* LENS_CONSTANT: 5..160; otherwise 0 */
+    float fov_y_degrees; /* LENS_CONSTANT: 1..179; otherwise 0 */
     uint8_t camera_id, transition_override, reserved[2]; /* MODE: stock camera id 0..45, KILN_CAMERA_TRANSITION_* */
     KilnCameraProfile profile;
     KilnCameraShake shake;

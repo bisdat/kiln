@@ -299,13 +299,21 @@ void test_validation() {
         r.input_policy = KILN_CAMERA_STOCK_MODE;
         CHECK(!valid(r));  // a visual part with the stock policy
     }
-    {   // lens
-        auto r = lens_request(4.99f);
+    {   // lens: 1 to 179 degrees, the whole degrees the projection takes (0.01 rad from 0 and from 180)
+        auto r = lens_request(0.99f);
         CHECK(!valid(r));
-        r.fov_y_degrees = 160.01f;
+        r.fov_y_degrees = 179.01f;
         CHECK(!valid(r));
         r.fov_y_degrees = NAN;
         CHECK(!valid(r));
+        r.fov_y_degrees = INFINITY;
+        CHECK(!valid(r));
+        r.fov_y_degrees = 0;
+        CHECK(!valid(r));
+        for (float d : {1.0f, 2.5f, 4.99f, 160.01f, 179.0f}) {
+            r.fov_y_degrees = d;
+            CHECK(valid(r));
+        }
         r.fov_y_degrees = 160;
         CHECK(valid(r));
         r.lens_source = KILN_CAMERA_LENS_NONE;
@@ -364,6 +372,11 @@ void test_validation() {
         CHECK(!valid(r));  // every key has a lens, or none
         keys[0].fov_y_degrees = keys[2].fov_y_degrees = 50;
         CHECK(valid(r));
+        keys[1].fov_y_degrees = 175;
+        CHECK(valid(r));  // keyed lenses: the same 1 to 179 degrees
+        keys[1].fov_y_degrees = 179.5f;
+        CHECK(!valid(r));
+        keys[1].fov_y_degrees = 50;
         r.fov_y_degrees = 40;
         CHECK(!valid(r));  // a static lens and keyed lenses
         r.fov_y_degrees = 0;
@@ -386,17 +399,34 @@ void test_validation() {
         r.profile.size = sizeof r.profile - 4;
         CHECK(!valid(r));
         r = profile_request();
-        r.profile.distance = 0.24f;
+        // no size caps (0.2.0-dev.31.25): any finite distance of 0 or more, any finite offsets; the render path checks
+        // the camera that comes out against the world bound
+        for (float d : {0.0f, 0.24f, 200.5f, 300.0f, 5000.0f}) {
+            r.profile.distance = d;
+            CHECK(valid(r));
+        }
+        r.profile.distance = -0.01f;
+        CHECK(!valid(r));  // a distance is not negative
+        r.profile.distance = INFINITY;
         CHECK(!valid(r));
-        r.profile.distance = 200.5f;
+        r.profile.distance = NAN;
         CHECK(!valid(r));
         r.profile.distance = 200;
-        CHECK(valid(r));
         r.profile.offset_local[0] = 80, r.profile.offset_local[1] = 80;
-        CHECK(!valid(r));  // the offset's length, not each axis
-        r.profile.offset_local[1] = 0;
+        CHECK(valid(r));  // more than 100 m long
+        r.profile.offset_local[2] = 4000;
         CHECK(valid(r));
-        r.profile.offset_world_y = -100.5f;
+        r.profile.offset_local[2] = NAN;
+        CHECK(!valid(r));
+        r.profile.offset_local[2] = -INFINITY;
+        CHECK(!valid(r));
+        r.profile.offset_local[0] = r.profile.offset_local[1] = r.profile.offset_local[2] = 0;
+        CHECK(valid(r));
+        for (float y : {-100.5f, 277.0f, -2000.0f}) {
+            r.profile.offset_world_y = y;
+            CHECK(valid(r));
+        }
+        r.profile.offset_world_y = INFINITY;
         CHECK(!valid(r));
         r.profile.offset_world_y = 0;
         r.profile.collision_policy = 1;
@@ -423,11 +453,24 @@ void test_validation() {
         r.parts |= KILN_CAMERA_SHAKE;
         r.shake.amplitude_metres = 0.5f, r.shake.frequency_hz = 30, r.shake.falloff_ms = 10000;
         CHECK(valid(r));
+        // no caps on strength or speed (0.2.0-dev.31.25): finite, 0 or more
         r.shake.amplitude_metres = 0.51f;
-        CHECK(!valid(r));
+        CHECK(valid(r));
+        r.shake.amplitude_metres = 5, r.shake.frequency_hz = 60;
+        CHECK(valid(r));
         r.shake.amplitude_metres = 0.1f, r.shake.frequency_hz = 0.09f;
+        CHECK(valid(r));
+        r.shake.frequency_hz = 0;
+        CHECK(valid(r));
+        r.shake.frequency_hz = -1;
         CHECK(!valid(r));
-        r.shake.frequency_hz = 1, r.shake.falloff_ms = 10001;
+        r.shake.frequency_hz = INFINITY;
+        CHECK(!valid(r));
+        r.shake.frequency_hz = 1, r.shake.amplitude_metres = -0.01f;
+        CHECK(!valid(r));
+        r.shake.amplitude_metres = NAN;
+        CHECK(!valid(r));
+        r.shake.amplitude_metres = 0.1f, r.shake.falloff_ms = 10001;
         CHECK(!valid(r));
     }
     // the rows a request needs
