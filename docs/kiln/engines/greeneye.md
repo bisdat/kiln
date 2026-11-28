@@ -125,10 +125,15 @@ the exe file's code, so a function another module hooked is still found by its o
 stayed upstream's: it returned the live bytes, and the hook's bytes showed where `find` had just matched the
 original ones. A mod that found a call or a global load by its pattern and read the operand inside the match then got
 the hook's jump or a relay's address. Hollow Halls Progression 1.0.5 called its signatures unsupported on 31.24
-(kiln#157) beside hosted ShroudForge, whose runtime sends the main menu's two Settings calls to a relay, and Kiln's own
-newer detours, while the same DLL started on the same game build without them. `find` gave it the same answers as on an
-unhooked game there (the player's 135 hooked places, rebuilt over client 26430625, change none of the code `find`
-matches); `read` was the answer that differed. `read` now returns the bytes `find` matched.
+(kiln#157). The same DLL had started on the same exe under 0.2.0-dev.29.19 (another player's report of 20 Nov 2026),
+hosted ShroudForge's two main menu call relays included. The 31.24 start's `hooks.json` lists 40 hooked places that
+one's does not: 30 of Kiln's own newer detours, several of them a jump over an instruction inside a function (a struct offset or a branch a
+pattern can cover), and 10 of the ShroudForge mod fcu-render-observer. `find` gave it the same answers as on an
+unhooked game (the player's 135 hooked places, rebuilt over client 26430625, change none of the code `find` matches);
+`read` was the answer that differed, so it is the likely cause. Hollow Halls Progression itself has not been run
+against the change: its DLL is not in Kiln's tests. `read` now returns the bytes `find` matched. A mod that wants the
+live bytes reads the memory itself: `read` keeps a byte changed in place, but a jump or a call to outside the image that
+a mod wrote itself (not through `hook` or `redirectCall`) reads as the exe file's bytes, like any other module's hook.
 
 ## Kiln C# additions
 
