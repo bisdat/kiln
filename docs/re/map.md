@@ -234,7 +234,7 @@ were in some frames only (cykel-far's count check, N against N+2, is what this p
 step: the Post was right after the refill, but it skipped most of the steps. Kiln's own compass strip and world labels
 do not share this: they draw from a snapshot that lasts until the next Post.
 
-**The fix (the 31.x patch after 0.2.0-dev.31.26):** kiln.markers keeps the rows its last Post wrote and writes them again after every client
+**The fix (0.2.0-dev.31.28):** kiln.markers keeps the rows its last Post wrote and writes them again after every client
 SimStep returns: a kiln.hooks link on SimStep before the core's own (sigdb feature `markers.client_map_steps`), so after
 the step's join and before a UI frame can read the list again. The count stays N+k, the layer's entry pointers stay on Kiln's slots while N
 is stable, and a moved marker's slot is written again at every step. At a ticked step the link finds the Post's rows at
