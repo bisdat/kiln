@@ -3987,7 +3987,7 @@
       "version": "0.2.0-dev.31.25",
       "status": "next",
       "title": "Cameras anywhere, Kiln's overlay by choice",
-      "summary": "Mod cameras can go anywhere in the world, players with a frame generation mod can choose to draw Kiln's overlay anyway, and the launcher shows up once in the app menu under Gear Lever.",
+      "summary": "Mod cameras can go anywhere in the world, players with a frame generation mod can choose to draw Kiln's overlay anyway, the launcher shows up once in the app menu under Gear Lever, and Ultimate ASI Loader under two names no longer stops Install.",
       "patch": true,
       "features": [
         {
@@ -4006,6 +4006,12 @@
           "title": "Once in the app menu under Gear Lever",
           "text": "The launcher's AppImage no longer adds a second Kiln Launcher entry when Gear Lever or another AppImage tool already added one (thanks Dark-Thoughts).",
           "area": "launcher",
+          "kind": "fix"
+        },
+        {
+          "title": "Ultimate ASI Loader under two names",
+          "text": "Install and Repair no longer refuse when another mod manager put Ultimate ASI Loader back over Kiln's loader: Kiln keeps the newer copy chained, and Play says so when it comes back (thanks KR-NXM5).",
+          "area": "compat",
           "kind": "fix"
         },
         {
