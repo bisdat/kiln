@@ -523,7 +523,9 @@ needs no Kiln hook. A failed preparation is reported; the adapter does not attem
 options; it splices only the value, typed as SF reads it back (a fractional setting's numbers keep a fraction or an
 exponent), so the file stays byte-identical otherwise),
 `settings_schema` (JSON Schema for the launcher's SchemaForm with `x-kiln-control`, `x-kiln-group`, `x-kiln-restart`,
-`x-kiln-enum-labels`, `x-kiln-enabled-when`), `settings_values`, `status`, `effects` (SF's per-mod `runtime.report_effect` states from its `state.json`). Unit
+`x-kiln-enum-labels` (label text), `x-kiln-enum-groups` (SF 1.8 option groups, null when ungrouped; only when one has a
+group), `x-kiln-enabled-when`), `option_label`/`option_group` (an option label is text or SF 1.8's
+`{ label, group }`), `settings_values`, `status`, `effects` (SF's per-mod `runtime.report_effect` states from its `state.json`). Unit
 tests and shared managed/Rust package fixtures cover parsing and byte-preserving edits. Runtime reports require a fresh
 heartbeat and active runtime; a confirmed memory write is not proof of the gameplay effect.
 
@@ -531,9 +533,12 @@ heartbeat and active runtime; a confirmed memory write is not proof of the gamep
 
 The existing Mods details panel reads SF's package metadata, enabled switch, settings, groups, conditional controls
 and public group actions. It edits SF's own files with a JSONC span writer, not a parallel Kiln config. Shared fixtures
-in `schema/fixtures/shroudforge/cases.json` exercise the Rust launcher and managed implementation, including comments,
-CRLF, typed numeric/bool/list options, chained/cyclic conditions, canonical SDL shortcut text, live/restart rules,
-refused edits and exact written bytes. No SF fork change or second UI executable is required.
+in `schema/fixtures/shroudforge/cases.json` exercise the Rust launcher, the sfi editor and the managed implementation,
+including comments, CRLF, typed numeric/bool/list options, SF 1.8 option labels with groups, SF's own starter mod
+(`docs/examples/starter-mod`) byte for byte, chained/cyclic conditions, canonical SDL shortcut text, live/restart rules,
+refused edits (each metadata refusal names the field) and exact written bytes. The page draws a list's option groups
+as headings and names a single choice's group in its combo; what it does not use (`presets`, `inputReservations`, tab
+groups, `assetPreparation`, setting fields outside SF's schema) is read past and noted once in kiln.log. No SF fork change or second UI executable is required.
 
 A `keybind` setting is a capture box (since 0.2.0-dev.31.18, `SfShortcuts.cs`): click it and press a key or the middle
 or a side mouse button, with Ctrl, Shift or Alt. Kiln stores SF's canonical text for the key's place
@@ -1025,6 +1030,8 @@ column names what a Kiln mod uses today for the same effect. The C# column state
 | `extended.mod.json` `enabled` | plugin; `set_enabled` | profile entry `enabled` | done; unit, lab (enabled survival + probe) |
 | `targets` client/server | plugin (SF skips a mod outside its targets) | `side` in kiln.mod.json | done; lab (server) |
 | settings `value` + label/description/control/min/max/step/options/enabledWhen/applyAt | plugin; launcher SchemaForm and in-game Mods panel edit the same file | `[Config]` classes + SchemaForm | shared Rust/managed fixtures; rendered SF panel still a client check |
+| SF 1.8 option labels `{ label, group }` | plugin; launcher `x-kiln-enum-labels` + `x-kiln-enum-groups`; in-game list headings, combo "Group: Label" | — | shared fixtures (grouped-option-labels, SF's starter mod), page test; rendered panel a client check |
+| `presets`, `inputReservations`, tab groups, `assetPreparation` | plugin (SF's Modloader); Kiln's panel reads past them, leaves them in the file, notes them once in kiln.log | — | starter-mod fixture, page test |
 | live settings (`shroudforge.settings.get` in callbacks) | plugin | `Config` reload events | done; **lab**: survival all off → "Runtime settings applied live", effect `no-change: All Survival settings are off`; probe off → restore |
 | groups | launcher `x-kiln-group`; in-game labels, descriptions, settings and action buttons | config sections | managed package/action tests; execution client check |
 | keybind settings (`control: keybind`) | plugin (SF's hotkeys); key state from Kiln's host key feed (bundled runtime, client, no `shroudforge.exe` installed), else from an installed `shroudforge/shroudforge.exe` (section 5.6) | `Kiln.Ui.KeyBindings` | feed: Wine harnesses and the real runtime with fed records (section 5.6), not a game client; before dev.24 bundled-only: never pressed (player log r1110); installed: client |
