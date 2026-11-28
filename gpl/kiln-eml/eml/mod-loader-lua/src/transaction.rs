@@ -172,7 +172,8 @@ pub(crate) const IN_USE_WAITS: [Duration; 5] =
 /// kiln-eml: Windows' ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33): another program has the file open
 /// without sharing it, or holds a lock on it. Only these are tried again (Wine reports the same codes). Other systems
 /// have other codes under these numbers, so the host tests' copy function (cfg(test)) stands for Windows there.
-/// A rename over a target another program holds fails with ERROR_ACCESS_DENIED (5) instead, which is not tried again.
+/// A rename over a target another program holds fails with ERROR_ACCESS_DENIED (5) instead: only a copy's own rename over
+/// its target tries that again, once the target is shown to be held ([`replace_retrying`]).
 fn in_use_code(e: &io::Error) -> Option<i32> {
     let code = e.raw_os_error()?;
     (cfg!(any(windows, test)) && matches!(code, 32 | 33)).then_some(code)
@@ -183,8 +184,9 @@ fn in_use_code(e: &io::Error) -> Option<i32> {
 /// error (in the player's language) and the paths are in the kiln.log line written when it gave up.
 #[derive(Debug)]
 pub struct InUse {
-    /// The file another program has open: the source of the copy or rename (its name only; the paths are in kiln.log). In a
-    /// copy, a temp of Kiln's own that a scanner opened right after it was written shows as the source too.
+    /// The file another program has open: the source of the copy or rename, or the target a copy's temp goes over
+    /// ([`replace_retrying`]) (its name only; the paths are in kiln.log). In a copy, a temp of Kiln's own that a scanner
+    /// opened right after it was written shows as the source too.
     pub file: String,
     source: io::Error,
 }
@@ -218,6 +220,11 @@ thread_local! {
     /// 6), it answers the OS error code that try fails with, if any.
     pub(crate) static IN_USE_COPY: std::cell::Cell<Option<fn(&Path, &Path, usize) -> Option<i32>>> = const { std::cell::Cell::new(None) };
     pub(crate) static IN_USE_WAIT: std::cell::Cell<Option<fn(Duration)>> = const { std::cell::Cell::new(None) };
+    /// The same for the rename of a copy's temp over its target (`replace_retrying`): called with the target and the try's
+    /// number, it answers the OS error code that rename fails with, if any.
+    pub(crate) static IN_USE_REPLACE: std::cell::Cell<Option<fn(&Path, usize) -> Option<i32>>> = const { std::cell::Cell::new(None) };
+    /// The answer of the target opened for deletion (`target_held`): the OS error code of that open, None when it opens.
+    pub(crate) static IN_USE_PROBE: std::cell::Cell<Option<fn(&Path) -> Option<i32>>> = const { std::cell::Cell::new(None) };
 }
 
 /// kiln-eml: `copy(src, dst)`, tried again after each pause of [`IN_USE_WAITS`] while it fails because another program
@@ -239,7 +246,48 @@ pub(crate) fn rename_retrying(src: &Path, dst: &Path) -> io::Result<()> {
     retry_in_use(src, dst, || fs::rename(src, dst), wait)
 }
 
-fn retry_in_use(src: &Path, dst: &Path, mut step: impl FnMut() -> io::Result<()>, mut pause: impl FnMut(Duration)) -> io::Result<()> {
+/// kiln-eml (0.2.0-dev.31.25 review): the rename of a copy's temp over its target (`replace`), tried again with the
+/// pauses of [`IN_USE_WAITS`] while another program holds the target, then [`InUse`] naming it. Windows refuses a rename
+/// over a file another program has open as access denied (5), which is also the answer to a real permission problem (a
+/// read-only file, an ACL): a 5 counts only when [`target_held`] says the target is held, everything else fails at once
+/// with the system's words. A sharing violation (32) on the rename is the temp's own (a scanner that opened it): it goes
+/// to the copy's own tries ([`copy_retrying`]), which start the copy again.
+fn replace_retrying(tmp: &Path, dst: &Path) -> io::Result<()> {
+    let mut tries = 0usize;
+    retry_held(dst, tmp, dst, || {
+        tries += 1;
+        #[cfg(test)]
+        if let Some(code) = IN_USE_REPLACE.with(|r| r.get()).and_then(|r| r(dst, tries)) { return Err(io::Error::from_raw_os_error(code)); }
+        replace(tmp, dst)
+    }, |e| (e.raw_os_error() == Some(5) && target_held(dst)).then_some(5), wait)
+}
+
+/// kiln-eml: whether another program holds `p` open without letting it be deleted or renamed over: `p` opened for
+/// deletion (DELETE access, every sharing allowed, nothing changed or deleted) answers a sharing violation (32) or a lock
+/// violation (33). An open that works, or any other answer (access denied: a real permission problem), is not a hold.
+/// Windows only (Wine checks the same sharing); host tests answer through IN_USE_PROBE.
+fn target_held(p: &Path) -> bool {
+    #[cfg(test)]
+    if let Some(probe) = IN_USE_PROBE.with(|h| h.get()) { return matches!(probe(p), Some(32 | 33)); }
+    #[cfg(windows)] {
+        use std::os::windows::fs::OpenOptionsExt;
+        const DELETE: u32 = 0x0001_0000;
+        const SHARE_ALL: u32 = 0x1 | 0x2 | 0x4;  // FILE_SHARE_READ | WRITE | DELETE
+        return matches!(OpenOptions::new().access_mode(DELETE).share_mode(SHARE_ALL).open(p).map(drop).err().and_then(|e| e.raw_os_error()),
+            Some(32 | 33));
+    }
+    #[allow(unreachable_code)]
+    { let _ = p; false }
+}
+
+fn retry_in_use(src: &Path, dst: &Path, step: impl FnMut() -> io::Result<()>, pause: impl FnMut(Duration)) -> io::Result<()> {
+    retry_held(src, src, dst, step, in_use_code, pause)
+}
+
+/// The tries of [`retry_in_use`]: `step` again after each pause while `code_of` says its error is a file another program
+/// holds (`held`, named in the logs and the [`InUse`] message), then [`InUse`]; any other error returns at once.
+fn retry_held(held: &Path, src: &Path, dst: &Path, mut step: impl FnMut() -> io::Result<()>, code_of: impl Fn(&io::Error) -> Option<i32>,
+              mut pause: impl FnMut(Duration)) -> io::Result<()> {
     let name = |p: &Path| p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned());
     let mut waited = Duration::ZERO;
     for n in 0..=IN_USE_WAITS.len() {
@@ -247,26 +295,26 @@ fn retry_in_use(src: &Path, dst: &Path, mut step: impl FnMut() -> io::Result<()>
             Ok(()) => {
                 if n > 0 {
                     tracing::info!("{} was in use by another program; it went through on try {} of {}, after {:.1} s",
-                        name(src), n + 1, IN_USE_WAITS.len() + 1, waited.as_secs_f64());
+                        name(held), n + 1, IN_USE_WAITS.len() + 1, waited.as_secs_f64());
                 }
                 return Ok(());
             }
             Err(e) => e,
         };
-        let Some(code) = in_use_code(&error) else { return Err(error) };
+        let Some(code) = code_of(&error) else { return Err(error) };
         match IN_USE_WAITS.get(n) {
             Some(&next) => {
                 if n == 0 {
                     tracing::info!("{} is in use by another program (os error {code}); trying again for up to {:.1} s",
-                        name(src), IN_USE_WAITS.iter().sum::<Duration>().as_secs_f64());
+                        name(held), IN_USE_WAITS.iter().sum::<Duration>().as_secs_f64());
                 }
                 pause(next);
                 waited += next;
             }
             None => {
                 tracing::warn!("{} stayed in use by another program through {} tries over {:.1} s (os error {code}: {error}); \
-                                {} to {} was not done", name(src), n + 1, waited.as_secs_f64(), src.display(), dst.display());
-                return Err(io::Error::new(io::ErrorKind::ResourceBusy, InUse { file: name(src), source: error }));
+                                {} to {} was not done", name(held), n + 1, waited.as_secs_f64(), src.display(), dst.display());
+                return Err(io::Error::new(io::ErrorKind::ResourceBusy, InUse { file: name(held), source: error }));
             }
         }
     }
@@ -287,7 +335,9 @@ fn copy_via_temp(src: &Path, dst: &Path, own_record: bool) -> io::Result<()> {
         sync_file(&f, dst)?;
         drop(f);
         failpoint!("temp.written", dst);
-        replace(&tmp, dst)?;
+        // kiln-eml (0.2.0-dev.31.25 review): a target another program holds (a restore over the live enshrouded.kfc of a
+        // game still closing) is waited for as a held source is; a real permission problem fails at once
+        replace_retrying(&tmp, dst)?;
         failpoint!("temp.replaced", dst);
         Ok(())
     })();
@@ -1291,6 +1341,74 @@ pub(crate) mod tests {
 
     thread_local! { static WAITED: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) }; }
 
+    // (0.2.0-dev.31.25 review) a copy's last step renames its temp over the target (a restore's: the live enshrouded.kfc).
+    // Windows refuses that rename as access denied (5) while another program holds the target, the code of a real
+    // permission problem too. The target, opened for deletion with every sharing allowed, tells them apart: a sharing
+    // violation is the hold (tried again as 32 and 33 are), an open that works or any other answer is a real problem,
+    // said at once with the system's words. The rename and the open are injected: these run on any host.
+    fn game_with_backup(tag: &str) -> PathBuf {
+        let game = std::env::temp_dir().join(format!("kiln-in-use-{tag}-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&game).unwrap();
+        fs::write(game.join("enshrouded.kfc.bak"), "vanilla header").unwrap();
+        fs::write(game.join("enshrouded.kfc"), "patched").unwrap();
+        game
+    }
+    fn temps_left(game: &Path) -> Vec<String> {
+        fs::read_dir(game).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.contains(".kiln-")).collect()
+    }
+
+    #[test]
+    fn a_rename_over_a_target_another_program_holds_is_tried_again() {
+        let game = game_with_backup("held-target");
+        WAITED.with(|t| t.set(Duration::ZERO));
+        IN_USE_WAIT.with(|w| w.set(Some(|d| WAITED.with(|t| t.set(t.get() + d)))));
+        IN_USE_REPLACE.with(|r| r.set(Some(|dst, n| (dst.file_name() == Some("enshrouded.kfc".as_ref()) && n < 3).then_some(5))));
+        IN_USE_PROBE.with(|p| p.set(Some(|_| Some(32))));
+        atomic_copy(&game.join("enshrouded.kfc.bak"), &game.join("enshrouded.kfc")).unwrap();
+        assert_eq!(fs::read(game.join("enshrouded.kfc")).unwrap(), b"vanilla header");
+        assert_eq!(WAITED.with(|t| t.get()), IN_USE_WAITS[0] + IN_USE_WAITS[1]);
+        assert!(temps_left(&game).is_empty(), "{:?}", temps_left(&game));
+        // held through every try (a lock violation on the open counts too): the plain message names the target, which
+        // stays as it was, and no temp is left
+        fs::write(game.join("enshrouded.kfc"), "patched").unwrap();
+        WAITED.with(|t| t.set(Duration::ZERO));
+        IN_USE_REPLACE.with(|r| r.set(Some(|_, _| Some(5))));
+        IN_USE_PROBE.with(|p| p.set(Some(|_| Some(33))));
+        let e = atomic_copy(&game.join("enshrouded.kfc.bak"), &game.join("enshrouded.kfc")).unwrap_err();
+        assert_eq!(e.to_string(), PLAIN.replace("enshrouded.kfc.bak", "enshrouded.kfc"));
+        assert_eq!(WAITED.with(|t| t.get()), IN_USE_WAITS.iter().sum::<Duration>(), "about 2.5 s, not a second round of the copy's own tries");
+        assert_eq!(in_use(&anyhow::Error::new(e)).as_deref(), Some(PLAIN.replace("enshrouded.kfc.bak", "enshrouded.kfc").as_str()));
+        assert_eq!(fs::read(game.join("enshrouded.kfc")).unwrap(), b"patched");
+        assert!(temps_left(&game).is_empty(), "{:?}", temps_left(&game));
+        IN_USE_REPLACE.with(|r| r.set(None));
+        IN_USE_PROBE.with(|p| p.set(None));
+        fs::remove_dir_all(game).unwrap();
+    }
+
+    #[test]
+    fn a_real_access_denied_on_the_rename_fails_at_once_with_the_systems_words() {
+        let game = game_with_backup("denied-target");
+        IN_USE_WAIT.with(|w| w.set(Some(|_| panic!("a real permission problem is not tried again"))));
+        IN_USE_REPLACE.with(|r| r.set(Some(|_, _| Some(5))));
+        // the target opens for deletion (nobody holds it: a read-only file, an ACL), or that open is refused too
+        let probes: [fn(&Path) -> Option<i32>; 3] = [|_| None, |_| Some(5), |_| Some(2)];
+        for probe in probes {
+            IN_USE_PROBE.with(|p| p.set(Some(probe)));
+            let e = atomic_copy(&game.join("enshrouded.kfc.bak"), &game.join("enshrouded.kfc")).unwrap_err();
+            assert_eq!(e.raw_os_error(), Some(5), "{e}");
+            assert!(in_use(&anyhow::Error::new(e)).is_none());
+            assert_eq!(fs::read(game.join("enshrouded.kfc")).unwrap(), b"patched");
+            assert!(temps_left(&game).is_empty(), "{:?}", temps_left(&game));
+        }
+        // other refusals of the rename are not probed at all
+        IN_USE_PROBE.with(|p| p.set(Some(|_| panic!("only access denied is probed"))));
+        IN_USE_REPLACE.with(|r| r.set(Some(|_, _| Some(2))));
+        assert_eq!(atomic_copy(&game.join("enshrouded.kfc.bak"), &game.join("enshrouded.kfc")).unwrap_err().raw_os_error(), Some(2));
+        IN_USE_REPLACE.with(|r| r.set(None));
+        IN_USE_PROBE.with(|p| p.set(None));
+        fs::remove_dir_all(game).unwrap();
+    }
+
     #[test]
     fn atomic_and_stage_copies_wait_out_a_brief_hold_and_leave_no_temp() {
         let game = std::env::temp_dir().join(format!("kiln-in-use-{}", uuid::Uuid::new_v4()));
@@ -1336,15 +1454,32 @@ pub(crate) mod tests {
         IN_USE_WAIT.with(|w| w.set(Some(|_| HOLD.with(|h| drop(h.borrow_mut().take())))));
         stage_copy(&bak, &game.join("staged")).unwrap();
         assert_eq!(fs::read(game.join("staged")).unwrap(), b"vanilla header");
-        // a held target: Windows refuses the rename over it as access denied (5), not a sharing violation, so it is not
-        // tried again (and the target stays as it was)
+        // a held target: Windows refuses the rename over it as access denied (5); the target opened for deletion answers a
+        // sharing violation, so it is tried again (0.2.0-dev.31.25 review): held through every try, the plain message
+        // names it and it stays as it was; let go during the first pause, the next try replaces it
         let live = game.join("enshrouded.kfc");
         fs::write(&live, "patched").unwrap();
-        let held_live = OpenOptions::new().read(true).share_mode(0).open(&live).unwrap();
-        IN_USE_WAIT.with(|w| w.set(Some(|_| panic!("access denied is not tried again"))));
+        HOLD.with(|h| *h.borrow_mut() = Some(OpenOptions::new().read(true).share_mode(0).open(game.join("enshrouded.kfc")).unwrap()));
+        IN_USE_WAIT.with(|w| w.set(Some(|_| {})));
+        let e = atomic_copy(&bak, &live).unwrap_err();
+        assert_eq!(e.to_string(), PLAIN.replace("enshrouded.kfc.bak", "enshrouded.kfc"));
+        let source = std::error::Error::source(e.get_ref().unwrap()).unwrap().downcast_ref::<io::Error>().unwrap();
+        assert_eq!(source.raw_os_error(), Some(5), "{source}");
+        assert_eq!(fs::read(&live).unwrap_or_default(), b"");  // (still held: not even readable)
+        IN_USE_WAIT.with(|w| w.set(Some(|_| HOLD.with(|h| drop(h.borrow_mut().take())))));
+        atomic_copy(&bak, &live).unwrap();
+        assert_eq!(fs::read(&live).unwrap(), b"vanilla header");
+        // a real permission problem, a read-only target: access denied at once, never waited for
+        fs::write(&live, "patched").unwrap();
+        let mut ro = fs::metadata(&live).unwrap().permissions();
+        ro.set_readonly(true);
+        fs::set_permissions(&live, ro.clone()).unwrap();
+        IN_USE_WAIT.with(|w| w.set(Some(|_| panic!("a read-only target is not tried again"))));
         let e = atomic_copy(&bak, &live).unwrap_err();
         assert_eq!(e.raw_os_error(), Some(5), "{e}");
-        drop(held_live);
+        #[allow(clippy::permissions_set_readonly_false)]
+        ro.set_readonly(false);
+        fs::set_permissions(&live, ro).unwrap();
         assert_eq!(fs::read(&live).unwrap(), b"patched");
         fs::remove_dir_all(game).unwrap();
     }

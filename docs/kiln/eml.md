@@ -622,8 +622,12 @@ backup pair aside are tried again on Windows' sharing violation (os error 32) an
 pauses of 0.1, 0.2, 0.4, 0.8 and 1 s (six tries, about 2.5 s; 0.2.0-dev.31.25, sosmic's start right after the last game
 closed). A file still held after that fails the run with the reason `another program has enshrouded.kfc.bak open (the
 game still closing, an antivirus or a backup); try again in a moment`; the kiln.log warning before it keeps the
-paths, the try count and the system's own words. A rename over a target another program holds is `Access is denied
-(os error 5)` on Windows and is not tried again. A backup seal mismatch means the vanilla pair cannot be trusted: verify the game
+paths, the try count and the system's own words. A copy's last step, its temp renamed over the target (a restore over
+the live `enshrouded.kfc` of a game still closing), is refused `Access is denied (os error 5)` on Windows while another
+program holds that target. Since the 0.2.0-dev.31.25 review such a 5 is tried again with the same pauses, but only when
+the target, opened for deletion with every sharing allowed, answers a sharing or lock violation (it is held); then the
+reason names it (`another program has enshrouded.kfc open ...`). A real permission problem (a read-only file, an ACL)
+opens or is refused otherwise, and fails at once with the system's words. A backup seal mismatch means the vanilla pair cannot be trusted: verify the game
 files in Steam, then start through Kiln again. The same recovery applies when another tool changed the game data.
 A ShroudForge writer refusal carries its own lock or handoff explanation; let that writer finish before retrying.
 - `kiln.log`, owner `early:kiln-eml.dll`: EML's info, warning and error lines as `[eml] ...`, one line per failed or
