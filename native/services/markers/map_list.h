@@ -16,6 +16,7 @@
 #define KILN_MARKERS_MAP_LIST_H
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace kmk {
 
@@ -53,6 +54,25 @@ struct Appended {
 // clear it in between), they are replaced in place instead of appended again. Returns the rows written; *state says
 // whether the guards held.
 uint32_t append_rows(uint8_t* ui, const MapLayout& l, const MapRow* rows, uint32_t n, Appended* last, ListState* state);
+
+// ---- every client step (GitHub issue 159) -----------------------------------------------------------------------------
+// The game clears this list and fills it again at every client SimStep (clear_map_markers_for_ui, then
+// replicate_map_markers_for_ui; StepPrograms waits for their jobs before SimStep returns), the map reads it in the UI frame
+// on the same thread, and Kiln's Post runs only at the SimSteps that advance the client clock (60 Hz). Above 60 fps the
+// SimSteps in between left the list without Kiln's rows and the icons flickered. So the rows a Post wrote are kept and
+// written again at the end of every client SimStep (docs/re/map.md, "The list in a frame").
+struct MapKeep {
+    uint64_t epoch = 0;        // the client world epoch of the Post that wrote them; 0 = nothing kept
+    std::vector<MapRow> rows;  // in the Post's order
+    void set(uint64_t e, const MapRow* r, uint32_t n);
+    void clear();
+};
+
+// The end of a client SimStep: the kept rows again through append_rows when they are this epoch's (the same guards and
+// room: the game's rows are never displaced, rows beyond the room are left out). A step whose clear did not run leaves the
+// list ending with them, and append_rows writes them over in place. Returns the rows written; nothing kept for this epoch
+// writes nothing and leaves *state Ok.
+uint32_t rewrite_kept(uint8_t* ui, const MapLayout& l, const MapKeep& keep, uint64_t epoch, Appended* last, ListState* state);
 
 }  // namespace kmk
 #endif
