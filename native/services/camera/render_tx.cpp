@@ -19,13 +19,6 @@ bool scale_ok(const float s[3]) {
 constexpr uint64_t kLocalBits = KILN_CAMERA_CAP_LOCAL_POSE | KILN_CAMERA_CAP_LOCAL_FOV | KILN_CAMERA_CAP_LOCAL_PROFILE | KILN_CAMERA_CAP_LOCAL_SHAKE;
 constexpr uint32_t kGraveyardMax = 64;
 
-// The local player's sample when it is fresh and of this world, else null.
-const Sample* fresh_local(const SampleSet& samples, uint32_t player, uint32_t epoch, int64_t now) {
-    const Sample& s = samples.s[0];
-    if (s.state != kSamplePresent || !player || s.entity != player || s.epoch != epoch || now - s.ns > kSampleValidNs || now < s.ns) return nullptr;
-    return &s;
-}
-
 }  // namespace
 
 // ---- Backend (the core's lock is held; the client world's thread) -------------------------------------------------------
@@ -81,21 +74,6 @@ bool LocalBackend::stage(const Staged& st, uint32_t* reason, const char** text) 
                 return *reason = KILN_CAMERA_REASON_INSUFFICIENT_LIFETIME, false;
             }
             p->t0_ns = t0 ? t0 : now;
-        }
-    }
-    if (p->pose() && (q.parts & KILN_CAMERA_PATH)) {
-        // every authored key within 250 m of the local player, when the player's position is known now (the render
-        // path checks every derived position again)
-        SampleSet s;
-        if (samples_->try_read(&s)) {
-            if (const Sample* me = fresh_local(s, q.player_entity, st.epoch, now)) {
-                const Vec3 at{me->position[0], me->position[1], me->position[2]};
-                for (const KilnCameraKey& k : p->request.keys)
-                    if (length(vec(k.pose.position) - at) > kMaxSeparationMetres) {
-                        *text = "a key is more than 250 m from the player";
-                        return *reason = KILN_CAMERA_REASON_BOUNDS, false;
-                    }
-            }
         }
     }
     p->gen = next_gen_++;
@@ -349,15 +327,15 @@ uint32_t LocalBackend::plans_held() const {
 
 // ---- the render path ----------------------------------------------------------------------------------------------------------
 
-bool LocalBackend::safe(const Output& o, const SampleSet& samples) const {
+// What the renderer may be given. Only guards that protect the game: a lens the projection can take (0.01 rad from 0
+// and from pi: tan(fov/2) finite and not zero, the same check the snapshot makes of the game's own view), a finite
+// position inside the world bound (metres_to_fixed: the engine's 32.32 metres, and grids and floats that stay sane
+// within +-1,000,000 m) and a unit rotation. No distance from the player: a far camera is the mod's choice.
+bool LocalBackend::safe(const Output& o) {
     if (o.fov && !lens_ok(o.view.fov)) return false;
     if (!o.pose) return true;
     Quat q = o.view.rotation;
     if (!finite(o.view.position) || !engine_unit(&q)) return false;
-    const Sample& me = samples.s[0];
-    const Vec3 at{me.position[0], me.position[1], me.position[2]};
-    const double gap = length(o.view.position - at);
-    if (!(gap <= kMaxSeparationMetres)) return false;
     int64_t f;
     return metres_to_fixed(o.view.position.x, &f) && metres_to_fixed(o.view.position.y, &f) && metres_to_fixed(o.view.position.z, &f);
 }
@@ -388,16 +366,6 @@ LocalBackend::Eval LocalBackend::evaluate(Plan& p, Run& run, const View& natural
     const int64_t release = p.release_ns.load(std::memory_order_acquire);
     // an expired lease is skipped before anything else: the stock view wins and the client Pre reports it
     if (!release && elapsed >= q.duration_ms) return Eval::Nothing;
-    if (out->pose) {
-        // pose, profile and shake need the local player's fresh sample (the 250 m bound and their safety)
-        if (!fresh_local(samples, q.player_entity, p.epoch, now)) {
-            if (!shown) return Eval::Nothing;  // not yet: the 1 s deadline answers NO_CAMERA_FRAME if it never comes
-            *end_reason = KILN_CAMERA_END_SAFETY_REJECTED;
-            *code = KILN_CAMERA_REASON_NONE;
-            return Eval::Ended;
-        }
-    }
-
     if (release) {
         // End: the last shown view out to the fresh natural one; no new synthetic motion
         if (!r.releasing) {
@@ -421,7 +389,8 @@ LocalBackend::Eval LocalBackend::evaluate(Plan& p, Run& run, const View& natural
             if (q.lens_source == KILN_CAMERA_LENS_KEYS) a.fov = radians(pp.fov_degrees);
         }
         if (const uint32_t follow = p.follow()) {
-            // the target's copy from the newest client Pre: one completed step behind, never older than 250 ms
+            // the target's copy from the newest client Pre: one completed step behind, never older than 250 ms (the one
+            // position that depends on a sample: a stale copy would freeze the view on a target that moves on)
             const Sample* t = samples.find(follow == q.player_entity ? 0 : follow);
             const bool usable = t && t->state == kSamplePresent && t->epoch == p.epoch && now >= t->ns && now - t->ns <= kSampleValidNs;
             if (!usable) {
@@ -449,7 +418,7 @@ LocalBackend::Eval LocalBackend::evaluate(Plan& p, Run& run, const View& natural
     if (!out->pose) out->view.position = natural.position, out->view.rotation = natural.rotation;
     if (!out->fov) out->view.fov = natural.fov;
 
-    if (!safe(*out, samples)) {
+    if (!safe(*out)) {
         *code = KILN_CAMERA_REASON_BOUNDS;
         if (!shown) return Eval::Refused;  // a bad request leaves the previous one as it is
         *end_reason = KILN_CAMERA_END_SAFETY_REJECTED;

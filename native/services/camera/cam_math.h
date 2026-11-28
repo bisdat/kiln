@@ -12,7 +12,11 @@ namespace kcam {
 
 constexpr double kFixedOne = 4294967296.0;  // 2^32: one metre in the engine's 32.32 positions
 constexpr double kPi = 3.14159265358979323846;
-constexpr double kMaxWorldMetres = 1000000.0;  // Kiln policy, not an engine bound (4.4)
+// The world bound, the one distance limit kept (owner, 0.2.0-dev.31.25: no arbitrary limits). It protects the game, it
+// does not shape views: within +-1,000,000 m a camera position fits the engine's 32.32 metres with room to spare (they
+// end near 2.1e9 m), a float copy of it keeps a 6 cm step and a 0.5 m grid index of it fits 32 bits easily; far past
+// it the renderer's float maths would lose whole metres. The playable map is about 10 km across: no real view gets near.
+constexpr double kMaxWorldMetres = 1000000.0;
 
 inline double fixed_to_metres(int64_t v) { return static_cast<double>(v) / kFixedOne; }
 

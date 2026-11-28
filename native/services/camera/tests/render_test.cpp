@@ -206,6 +206,8 @@ struct FakeSource : SampleSource {
     }
 };
 
+constexpr uint64_t kAllLocal = KILN_CAMERA_CAP_LOCAL_FOV | KILN_CAMERA_CAP_LOCAL_POSE | KILN_CAMERA_CAP_LOCAL_PROFILE | KILN_CAMERA_CAP_LOCAL_SHAKE;
+
 // One client with a renderer, the lease model and the backend.
 struct Rig {
     FakeClock clock;
@@ -444,16 +446,16 @@ void test_no_frame_deadline() {
     }
     g.pre(1001);
     CHECK(r2.seen && r2.r.reason_code == KILN_CAMERA_REASON_NO_CAMERA_FRAME && (r2.r.flags & KILN_CAMERA_MAY_HAVE_APPLIED));
-    // a pose request without the local player's sample: nothing written, then NoCameraFrame
+    // a path reads no sample: without the local player's copy it is drawn all the same
     Result r3;
     g.source.at.clear();
     std::vector<KilnCameraKey> keys = {key(0, 0, 5, 0)};
     g.apply(30, g.path(keys), &r3);
     g.pre();
     g.frame();
-    CHECK(g.pose_is_stock());
-    g.pre(1001);
-    CHECK(r3.seen && r3.r.reason_code == KILN_CAMERA_REASON_NO_CAMERA_FRAME);
+    CHECK(near(g.position(), {0, 5, 0}, 1e-9));
+    g.pre();
+    CHECK(r3.seen && r3.r.ok);
 }
 
 void test_updates_and_timeline() {
@@ -579,41 +581,50 @@ void test_supersession() {
 }
 
 void test_limits_and_safety() {
-    Rig g;
-    // a key more than 250 m from the player is refused before anything is written
+    Rig g(kAllLocal);
+    // no distance bound from the player: keys 300 m up and 5 km away are shown where they were authored
     g.pre();
-    std::vector<KilnCameraKey> far_keys = {key(0, 0, 0, 0), key(100, 251, 0, 0)};
+    std::vector<KilnCameraKey> far_keys = {key(0, 0, 300, 0), key(100, 5000, 300, 0)};
     Result r;
-    g.apply(30, g.path(far_keys), &r);
+    const KilnCameraLease far = g.apply(30, g.path(far_keys), &r);
     g.pre();
-    CHECK(r.seen && r.r.reason_code == KILN_CAMERA_REASON_BOUNDS);
-    // a lease whose player walks away: the derived view leaves the 250 m bound and it ends SafetyRejected
-    std::vector<KilnCameraKey> keys = {key(0, 0, 10, 0)};
-    Result r2;
-    g.apply(30, g.path(keys), &r2);
+    g.frame(0);
+    CHECK(near(g.position(), {0, 300, 0}, 1e-6));
     g.pre();
-    g.frame();
+    CHECK(r.seen && r.r.ok);
+    g.later(200);  // after the last key it holds that key
+    CHECK(near(g.position(), {5000, 300, 0}, 1e-6));
+    // the player walks a kilometre away: a path does not depend on where the player is
+    g.source.put(1, -1000, 0, 0);
+    g.later(16);
+    CHECK(near(g.position(), {5000, 300, 0}, 1e-6));
+    // no client Pre for over 250 ms (a hitch while the renderer draws on): a path needs no player sample, it goes on
+    g.frame(300);
+    g.frame(300);
+    CHECK(near(g.position(), {5000, 300, 0}, 1e-6));
     g.pre();
-    CHECK(r2.r.ok);
-    g.source.put(1, 300, 0, 0);
+    CHECK(g.core.live_leases() == 1 && g.env.lines.back().find("ended") == std::string::npos);
+    Result e;
+    CHECK(g.core.end(30, far, &on_done, &e, kOnClient) == KILN_OK);
+    g.later(0);
     g.pre();
-    g.frame();
+    CHECK(e.seen && e.r.ok && g.core.live_leases() == 0 && g.pose_is_stock());
+    // the world bound stays (the 32.32 conversion, the engine's grids): a shake that would carry a key at the
+    // world's edge past +-1,000,000 m is refused Bounds before anything is written
+    std::vector<KilnCameraKey> edge = {key(0, 1000000, 1000000, 1000000)};
+    KilnCameraRequest q = g.path(edge);
+    q.parts |= KILN_CAMERA_SHAKE;
+    q.shake = KilnCameraShake{0.5f, 1.0f, 0, 3};
+    CHECK(shake_offset(q.shake, 0, q.duration_ms).x > 0 || shake_offset(q.shake, 0, q.duration_ms).y > 0 || shake_offset(q.shake, 0, q.duration_ms).z > 0);
+    Result rb;
+    g.apply(30, q, &rb);
+    g.pre();
+    g.frame(0);
     CHECK(g.pose_is_stock());
     g.pre();
-    CHECK(g.env.lines.back().find("end=11 code=21") != std::string::npos);
-    // no client Pre for over 250 ms: a pose lease ends SafetyRejected; a lens lease goes on
-    g.source.put(1, 0, 0, 0);
-    g.pre();  // the player is back near the keys (the stage checks them against the newest sample)
-    Result r3, r4;
-    g.apply(30, g.path(keys), &r3);
-    g.pre();
-    g.frame();
-    g.pre();
-    CHECK(r3.r.ok);
-    g.frame(251);
-    CHECK(g.pose_is_stock());
-    g.pre();
-    CHECK(g.env.lines.back().find("end=11 code=0") != std::string::npos);
+    CHECK(rb.seen && !rb.r.ok && rb.r.reason_code == KILN_CAMERA_REASON_BOUNDS);
+    // a lens lease goes on without a Pre too
+    Result r4;
     g.apply(30, g.lens(40), &r4);
     g.pre();
     g.frame();
@@ -792,8 +803,6 @@ void test_sampler() {
     CHECK(!s.faulted() && board.try_read(&set) && set.s[0].state == kSamplePresent && set.s[0].epoch == 4);
 }
 
-constexpr uint64_t kAllLocal = KILN_CAMERA_CAP_LOCAL_FOV | KILN_CAMERA_CAP_LOCAL_POSE | KILN_CAMERA_CAP_LOCAL_PROFILE | KILN_CAMERA_CAP_LOCAL_SHAKE;
-
 KilnCameraRequest follow_request(Rig& g, const KilnCameraProfile& pr, uint32_t duration = 10000) {
     KilnCameraRequest q = g.lens(0, duration);
     q.parts = KILN_CAMERA_PROFILE;
@@ -886,6 +895,46 @@ void test_follow_refusals() {
     CHECK(g.env.lines.back().find("end=11") != std::string::npos);
 }
 
+// No distance bound from the player for a follow camera either: it needs its target's fresh copy and nothing of the
+// player's. Only the world bound stays: +-1,000,000 m on each axis (the 32.32 conversion, the engine's grids).
+void test_far_follow_and_world_bound() {
+    Rig g(kAllLocal);
+    // a target 2 km from the player, and the player not even there to copy: the camera follows the target
+    g.source.at.erase(1);
+    g.source.put(5, 2000, 0, 0, yaw_q(0));
+    Result r;
+    const KilnCameraLease lease = g.apply(30, follow_request(g, profile_of(5, 4, KILN_CAMERA_FIXED_WORLD)), &r);
+    g.pre();
+    g.frame(0);
+    CHECK(near(g.position(), {2000, 0, -4}, 1e-6));
+    g.pre();
+    CHECK(r.seen && r.r.ok);
+    // the target goes on to the world's edge: the camera 4 m behind it would be past -1,000,000 m: SafetyRejected
+    // (Bounds), nothing written
+    g.source.put(5, 2000, 0, -999998, yaw_q(0));
+    g.later(16);
+    CHECK(g.pose_is_stock());
+    g.pre();
+    CHECK(g.env.lines.back().rfind("ended lease=" + std::to_string(lease), 0) == 0 && g.env.lines.back().find("end=11 code=21") != std::string::npos);
+    // a new request there is refused Bounds before anything is written
+    Result r2;
+    g.apply(30, follow_request(g, profile_of(5, 4, KILN_CAMERA_FIXED_WORLD)), &r2);
+    g.pre();
+    g.frame(0);
+    CHECK(g.pose_is_stock());
+    g.pre();
+    CHECK(r2.seen && !r2.r.ok && r2.r.reason_code == KILN_CAMERA_REASON_BOUNDS);
+    // 3 m short of the edge it is shown again
+    g.source.put(5, 2000, 0, -999993, yaw_q(0));
+    Result r3;
+    g.apply(30, follow_request(g, profile_of(5, 4, KILN_CAMERA_FIXED_WORLD)), &r3);
+    g.pre();
+    g.frame(0);
+    CHECK(near(g.position(), {2000, 0, -999997}, 1e-6));
+    g.pre();
+    CHECK(r3.seen && r3.r.ok);
+}
+
 void test_shake_through_the_transaction() {
     // a shake alone moves the game's own pose in the camera's axes, never turns it, and two clients agree
     std::vector<Vec3> seen[2];
@@ -916,29 +965,31 @@ void test_shake_through_the_transaction() {
 
 // ---- review fixes ---------------------------------------------------------------------------------------------------------
 
-// M1: a drawn staged request that the render path ends before the next Pre (stale sample, more than 250 m, target
-// gone) is committed (a frame did show it) and ends at once with the right reason; it never holds the camera on.
+// M1: a drawn staged request that the render path ends before the next Pre (its target's copy stale, its view past the
+// world bound, its target gone) is committed (a frame did show it) and ends at once with the right reason; it never
+// holds the camera on.
 void test_drawn_then_ended_before_pre() {
     for (int variant = 0; variant < 3; ++variant) {
         Rig g(kAllLocal);
+        g.source.put(1, 0, 0, 0, yaw_q(0));
         g.source.put(5, 10, 0, 0, yaw_q(kPi / 2));
-        std::vector<KilnCameraKey> keys = {key(0, 0, 10, 0)};
-        KilnCameraRequest q = variant == 2 ? follow_request(g, profile_of(5, 4, KILN_CAMERA_FIXED_WORLD)) : g.path(keys, 10000);
+        // variant 0 follows the local player (follow 0), the others entity 5
+        KilnCameraRequest q = follow_request(g, profile_of(variant == 0 ? 0 : 5, 4, KILN_CAMERA_FIXED_WORLD));
         q.blend_out_ms = 500;
         Result r;
         const KilnCameraLease lease = g.apply(30, q, &r);
         g.pre();
         g.frame(0);  // drawn; the capture confirms it
         CHECK(!g.pose_is_stock());
+        const uint32_t t[] = {5};
         if (variant == 0) {
-            g.frame(300);  // no Pre for 300 ms (a simulation hitch while the renderer draws on): the sample is stale
+            g.frame(300);  // no Pre for 300 ms (a simulation hitch while the renderer draws on): the target's copy is stale
         } else if (variant == 1) {
-            g.source.put(1, 1000, 0, 0);  // the player teleports: the copy reaches the board before the backend's step
-            g.sampler.sample(g.frames.epoch(), ++g.step, 1, nullptr, 0);
+            g.source.put(5, 10, 0, -999998);  // the target teleports to the world's edge: the camera 4 m behind is past it
+            g.sampler.sample(g.frames.epoch(), ++g.step, 1, t, 1);  // the copy reaches the board before the backend's step
             g.frame(0);
         } else {
             g.source.at.erase(5);  // the target goes
-            const uint32_t t[] = {5};
             g.sampler.sample(g.frames.epoch(), ++g.step, 1, t, 1);
             g.frame(0);
         }
@@ -963,22 +1014,30 @@ void test_drawn_then_ended_before_pre() {
         g.pre();
         CHECK(r2.seen && r2.r.ok);
     }
-    // End with a blend out that cannot finish (the sample goes stale during it): it ends, it does not hang
-    Rig g(kAllLocal);
-    std::vector<KilnCameraKey> keys = {key(0, 0, 10, 0)};
-    KilnCameraRequest q = g.path(keys, 10000);
-    q.blend_out_ms = 500;
-    Result r, e;
-    const KilnCameraLease lease = g.apply(30, q, &r);
-    g.pre();
-    g.frame(0);
-    g.pre();
-    CHECK(r.r.ok);
-    CHECK(g.core.end(30, lease, &on_done, &e, kOnClient) == KILN_OK);
-    g.frame(0);
-    g.frame(300);
-    g.pre();
-    CHECK(e.seen && e.r.ok && g.core.live_leases() == 0);
+    // End's blend out goes from the last shown view to the game's own: it reads no sample, so it runs to its end on the
+    // clock even with no Pre (a path, and a follow camera whose target's copy goes stale during it)
+    for (int variant = 0; variant < 2; ++variant) {
+        Rig g(kAllLocal);
+        std::vector<KilnCameraKey> keys = {key(0, 0, 10, 0)};
+        KilnCameraRequest q = variant == 0 ? g.path(keys, 10000) : follow_request(g, profile_of(0, 4, KILN_CAMERA_FIXED_WORLD));
+        q.blend_out_ms = 500;
+        Result r, e;
+        const KilnCameraLease lease = g.apply(30, q, &r);
+        g.pre();
+        g.frame(0);
+        g.pre();
+        CHECK(r.r.ok);
+        CHECK(g.core.end(30, lease, &on_done, &e, kOnClient) == KILN_OK);
+        g.frame(0);
+        g.frame(300);
+        CHECK(!g.pose_is_stock());  // still blending out
+        g.pre();
+        CHECK(!e.seen && g.core.live_leases() == 1);
+        g.frame(300);
+        CHECK(g.pose_is_stock());  // the blend is over: the game's own view
+        g.pre();
+        CHECK(e.seen && e.r.ok && g.core.live_leases() == 0);
+    }
 }
 
 void retire_owner_30(void* rig) { static_cast<Rig*>(rig)->core.owner_retiring(30); }
@@ -1100,7 +1159,9 @@ int main(int argc, char** argv) {
     const struct {
         const char* name;
         void (*fn)();
-    } named[] = {{"drawn_then_ended", test_drawn_then_ended_before_pre},
+    } named[] = {{"limits", test_limits_and_safety},
+                 {"far_follow", test_far_follow_and_world_bound},
+                 {"drawn_then_ended", test_drawn_then_ended_before_pre},
                  {"recheck_before_write", test_recheck_before_write},
                  {"capture_fault", test_capture_fault_turns_writes_off},
                  {"capability_lost", test_capability_lost},
@@ -1124,7 +1185,6 @@ int main(int argc, char** argv) {
     test_updates_and_timeline();
     test_blends_and_end();
     test_supersession();
-    test_limits_and_safety();
     test_world_owner_and_fault();
     test_profile_geometry();
     test_shake();

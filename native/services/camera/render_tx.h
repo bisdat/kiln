@@ -45,8 +45,10 @@
 
 namespace kcam {
 
-constexpr double kMaxSeparationMetres = 250.0;     // every authored and derived visual position from the local player
-constexpr int64_t kSampleValidNs = 250'000'000;    // a sample older than this is stale
+// No distance bound from the local player (owner, 0.2.0-dev.31.25): a key or a derived position may be anywhere inside
+// the world bound (cam_math.h, kMaxWorldMetres). A path and a shake depend on no sample at all; only a follow profile
+// reads one, its target's, and stops when that copy is stale.
+constexpr int64_t kSampleValidNs = 250'000'000;  // a follow target's copy older than this is stale: the view would freeze or jump
 constexpr int64_t kFrameDeadlineNs = 1'000'000'000; // no confirming frame within this: NO_CAMERA_FRAME
 
 // What the backend needs of the client (production: kiln.client; the host tests: a fake).
@@ -160,7 +162,7 @@ private:
     enum class Eval { Write, Nothing, Refused, Ended };
     Eval evaluate(Plan& p, Run& run, const View& natural, bool natural_had_override, const SampleSet& samples, int64_t now, Output* out,
                   uint32_t* code, uint32_t* end_reason);
-    bool safe(const Output& o, const SampleSet& samples) const;
+    static bool safe(const Output& o);
 
     // client side (lock held)
     void publish_mail();
