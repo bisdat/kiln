@@ -4065,6 +4065,22 @@
       ]
     },
     {
+      "version": "0.2.0-dev.31.28",
+      "status": "planned",
+      "title": "Steady map icons",
+      "summary": "Map icons that mods place with Kiln.Markers stay on the world map in every frame, at any frame rate, instead of blinking above 60 fps.",
+      "patch": true,
+      "features": [
+        {
+          "title": "Mod markers on the world map no longer flicker",
+          "text": "The game rebuilds its list of map markers in every frame, and Kiln added the mods' icons only at the game's 60 steps per second, so above 60 fps they blinked. Kiln now puts them back after every frame's rebuild; the game's own markers, Kiln's compass strip and its world labels were never affected (thanks cykel-far, #159).",
+          "area": "content",
+          "kind": "fix",
+          "gamePending": true
+        }
+      ]
+    },
+    {
       "version": "0.2.0-dev.32",
       "status": "planned",
       "title": "Pets, taming and more registries",
