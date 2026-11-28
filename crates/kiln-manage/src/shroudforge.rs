@@ -415,14 +415,10 @@ fn check_metadata(s: &SfSetting, raw: &serde_json::Value) -> std::result::Result
     }
     for (k, label) in s.options.iter().flatten() {
         if option_value(s, k).is_none() {
-            return Err(format!("option {k:?} must be written as {} {} like the value", article(option_type(s)), option_type(s)));
+            return Err(format!("option {} must be written as {} {} like the value", quoted(k), article(option_type(s)), option_type(s)));
         }
-        if option_label(label).is_none() {
-            return Err(if label.is_object() && label.get("label").is_some_and(|l| l.is_string()) {
-                format!("option {k:?}'s group must be text")
-            } else {
-                format!("option {k:?}'s label must be text, or {{ \"label\": text, \"group\": text }}")
-            });
+        if let Some(why) = label_problem(label) {
+            return Err(format!("option {}'s {why}", quoted(k)));
         }
     }
     if s.enabled_when.as_ref().is_some_and(|w| w.get("setting").and_then(|v| v.as_str()).is_none() || w.get("equals").is_none()) {
@@ -435,14 +431,46 @@ fn article(word: &str) -> &'static str {
     if word.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" }
 }
 
-/// An option's label text: the label itself, or (ShroudForge 1.8) the `label` of `{ "label": text, "group": text }`.
-/// None when ShroudForge refuses it (read_mod_settings.rs: anything else, or a group that is not text).
-pub fn option_label(label: &serde_json::Value) -> Option<&str> {
-    match label {
-        serde_json::Value::String(text) => Some(text),
-        serde_json::Value::Object(o) if o.get("group").is_none_or(|g| g.is_string()) => o.get("label")?.as_str(),
-        _ => None,
+/// A key or field name of a package in a message: quoted, and at most 80 characters of it.
+fn quoted(text: &str) -> String {
+    match text.char_indices().nth(80) {
+        Some((at, _)) => format!("{:?}...", &text[..at]),
+        None => format!("{text:?}"),
     }
+}
+
+/// Why ShroudForge refuses an option's label, or None: `$defs.setting.options` in its 1.8 schemas (which ShroudForge checks
+/// a package against when it reads it) and read_mod_settings.rs. A label is 1 to 120 characters of text, or
+/// `{ "label": text, "group": text }` with nothing else, its label 1 to 120 characters and its group 1 to 60
+/// (jsonschema counts characters, not bytes).
+fn label_problem(label: &serde_json::Value) -> Option<String> {
+    const FORM: &str = "label must be text, or { \"label\": text, \"group\": text }";
+    let text = match label {
+        serde_json::Value::String(text) => text,
+        serde_json::Value::Object(o) => {
+            if let Some(field) = o.keys().find(|k| *k != "label" && *k != "group") {
+                return Some(format!("label may hold only \"label\" and \"group\", not {}", quoted(field)));
+            }
+            if o.get("group").is_some_and(|g| !g.as_str().is_some_and(|g| (1..=60).contains(&g.chars().count()))) {
+                return Some("group must be text of 1 to 60 characters".into());
+            }
+            match o.get("label").and_then(|l| l.as_str()) {
+                Some(text) => text,
+                None => return Some(FORM.into()),
+            }
+        }
+        _ => return Some(FORM.into()),
+    };
+    (!(1..=120).contains(&text.chars().count())).then(|| "label must be text of 1 to 120 characters".into())
+}
+
+/// An option's label text: the label itself, or (ShroudForge 1.8) the `label` of `{ "label": text, "group": text }`.
+/// None when ShroudForge refuses it ([`label_problem`]).
+pub fn option_label(label: &serde_json::Value) -> Option<&str> {
+    if label_problem(label).is_some() {
+        return None;
+    }
+    label.as_str().or_else(|| label.get("label")?.as_str())
 }
 
 /// The group an option sorts into (ShroudForge 1.8's `{ "label": text, "group": text }`); ShroudForge's own Modloader

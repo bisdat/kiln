@@ -44,7 +44,7 @@ fn view(m: &edit::EditorPackage) -> Value {
 pub fn all_shared_cases_match_views_decisions_and_exact_bytes() {
     let doc = corpus();
     let cases = doc["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 84);
+    assert_eq!(cases.len(), 90);
     for c in cases {
         let name = c["name"].as_str().unwrap();
         let manifest = c["modText"]
@@ -76,6 +76,13 @@ pub fn all_shared_cases_match_views_decisions_and_exact_bytes() {
             assert!(
                 strict.is_ok(),
                 "{name}: unexpected strict refusal {strict:?}"
+            );
+        } else {
+            // "refused" means ShroudForge refuses it: the strict model (ShroudForge's schema and reader) says so too, so
+            // every refusal the corpus asks of Kiln's readers is one ShroudForge makes
+            assert!(
+                strict.is_err(),
+                "{name}: ShroudForge's rules accept a case the corpus says it refuses"
             );
         }
         if refused {
@@ -135,7 +142,7 @@ pub fn all_shared_cases_match_views_decisions_and_exact_bytes() {
         }
     }
     eprintln!(
-        "core editor corpus: 84/84 read views, accept/refuse decisions and byte-exact outputs"
+        "core editor corpus: 90/90 read views, accept/refuse decisions and byte-exact outputs"
     );
 }
 

@@ -185,6 +185,29 @@ internal static class ShroudForgePackages
         }
     }
 
+    /// <summary>A key or field name of a package in a message: quoted, and at most 80 characters of it (kiln-manage
+    /// <c>quoted</c>).</summary>
+    private static string Quoted(string text)
+    {
+        var at = 0;
+        var n = 0;
+        foreach (var r in text.EnumerateRunes())
+        {
+            if (n++ == 80) return "\"" + text[..at] + "\"...";
+            at += r.Utf16SequenceLength;
+        }
+        return "\"" + text + "\"";
+    }
+
+    /// <summary>The length of a text as ShroudForge's schema counts it (jsonschema's minLength and maxLength: characters, not
+    /// UTF-16 units).</summary>
+    private static int Characters(string text)
+    {
+        var n = 0;
+        foreach (var _ in text.EnumerateRunes()) n++;
+        return n;
+    }
+
     private static string? Str(JsonNode? o, string key) =>
         o is JsonObject obj && obj.TryGetPropertyValue(key, out var v) && v is JsonValue jv && jv.TryGetValue<string>(out var s) ? s : null;
 
@@ -264,7 +287,7 @@ internal static class ShroudForgePackages
             "integer" when RustInteger(option) is { } l => JsonValue.Create(l),
             "number" when RustFloat(option) is { } d => double.IsFinite(d) ? JsonValue.Create(d) : null,
             "integer" or "number" => throw new SfEditException(
-                $"ShroudForge would refuse setting {key}: option \"{option}\" must be written as {(elementType == "integer" ? "an" : "a")} {elementType} like the value"),
+                $"ShroudForge would refuse setting {key}: option {Quoted(option)} must be written as {(elementType == "integer" ? "an" : "a")} {elementType} like the value"),
             _ => JsonValue.Create(option),
         };
     }
@@ -337,14 +360,21 @@ internal static class ShroudForgePackages
             foreach (var (k, label) in opts)
             {
                 var optionValue = OptionValue(key, type, value, k);
-                // a label is text, or (ShroudForge 1.8) { "label": text, "group": text } (read_mod_settings.rs)
+                // a label is text, or (ShroudForge 1.8) { "label": text, "group": text } with nothing else; its text 1 to 120
+                // characters, its group 1 to 60 (read_mod_settings.rs, and $defs.setting.options, which ShroudForge checks a
+                // package against when it reads it; jsonschema counts characters: kiln-manage label_problem)
+                SfEditException Refused(string why) => new($"ShroudForge would refuse setting {key}: option {Quoted(k)}'s {why}");
                 (string Text, string? Group) parsed = label switch
                 {
                     JsonValue lv when lv.GetValueKind() == JsonValueKind.String => (lv.GetValue<string>(), null),
-                    JsonObject lo when Str(lo, "label") is { } l => (l, !lo.ContainsKey("group") ? null
-                        : Str(lo, "group") ?? throw new SfEditException($"ShroudForge would refuse setting {key}: option \"{k}\"'s group must be text")),
-                    _ => throw new SfEditException($"ShroudForge would refuse setting {key}: option \"{k}\"'s label must be text, or {{ \"label\": text, \"group\": text }}"),
+                    JsonObject lo when lo.Select(kv => kv.Key).FirstOrDefault(f => f is not ("label" or "group")) is { } stray =>
+                        throw Refused($"label may hold only \"label\" and \"group\", not {Quoted(stray)}"),
+                    JsonObject lo when lo.ContainsKey("group") && (Str(lo, "group") is not { } g || Characters(g) is < 1 or > 60) =>
+                        throw Refused("group must be text of 1 to 60 characters"),
+                    JsonObject lo when Str(lo, "label") is { } l => (l, Str(lo, "group")),
+                    _ => throw Refused("label must be text, or { \"label\": text, \"group\": text }"),
                 };
+                if (Characters(parsed.Text) is < 1 or > 120) throw Refused("label must be text of 1 to 120 characters");
                 options.Add(new SfOption(optionValue, parsed.Text, parsed.Group));
             }
         var control = Str(meta, "control");

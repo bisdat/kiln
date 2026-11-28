@@ -4194,6 +4194,195 @@
       ],
       "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":5}}}}}\n",
       "errorContains": "group"
+    },
+    {
+      "name": "option-label-and-group-lengths-count-characters",
+      "about": "ShroudForge's 1.8 schema bounds an option's label text to 1-120 characters and its group to 1-60, counted as Unicode characters (jsonschema's minLength/maxLength), not bytes or UTF-16 units: 120 CJK characters, a group of 60 accented letters and 120 emoji (240 UTF-16 units) are all accepted.",
+      "mod": {
+        "id": "option-label-lengths",
+        "name": "Option label lengths",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語\",\"group\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"},\"y\":\"🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥\"}}}}\n",
+      "read": {
+        "enabled": true,
+        "switchLive": true,
+        "settings": [
+          {
+            "key": "a",
+            "type": "string",
+            "label": "a",
+            "control": "select",
+            "applyAt": "restart",
+            "live": true,
+            "options": [
+              {
+                "value": "x",
+                "label": "語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語",
+                "group": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+              },
+              {
+                "value": "y",
+                "label": "🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥"
+              }
+            ]
+          }
+        ],
+        "enabledNow": [
+          "a"
+        ]
+      },
+      "edits": [
+        {
+          "setting": "a",
+          "value": "y",
+          "ok": true
+        },
+        {
+          "setting": "a",
+          "value": "🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"y\",\"options\":{\"x\":{\"label\":\"語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語語\",\"group\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"},\"y\":\"🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥\"}}}}\n"
+    },
+    {
+      "name": "option-label-object-takes-only-label-and-group",
+      "about": "ShroudForge's 1.8 schema closes an option label object (additionalProperties: false): only label and group; ShroudForge validates extended.mod.json against it when it reads the package. The message names the stray field.",
+      "mod": {
+        "id": "option-label-object-takes-only-label-and-group",
+        "name": "option-label-object-takes-only-label-and-group",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":\"G\",\"icon\":\"star\"}}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":\"G\",\"icon\":\"star\"}}}}}\n",
+      "errorContains": "\"icon\""
+    },
+    {
+      "name": "option-label-text-must-not-be-empty",
+      "about": "ShroudForge's schema: an option label is 1 to 120 characters (minLength 1), plain or in { label, group }",
+      "mod": {
+        "id": "option-label-text-must-not-be-empty",
+        "name": "option-label-text-must-not-be-empty",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":\"\",\"y\":\"Y\"}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":\"\",\"y\":\"Y\"}}}}\n",
+      "errorContains": "1 to 120 characters"
+    },
+    {
+      "name": "option-label-object-text-over-120-characters",
+      "about": "ShroudForge's 1.8 schema: the label of { label, group } is 1 to 120 characters (maxLength 120)",
+      "mod": {
+        "id": "option-label-object-text-over-120-characters",
+        "name": "option-label-object-text-over-120-characters",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL\",\"group\":\"G\"}}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL\",\"group\":\"G\"}}}}}\n",
+      "errorContains": "1 to 120 characters"
+    },
+    {
+      "name": "option-group-must-not-be-empty",
+      "about": "ShroudForge's 1.8 schema: an option group is 1 to 60 characters (minLength 1)",
+      "mod": {
+        "id": "option-group-must-not-be-empty",
+        "name": "option-group-must-not-be-empty",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":\"\"}}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":\"\"}}}}}\n",
+      "errorContains": "1 to 60 characters"
+    },
+    {
+      "name": "option-group-over-60-characters",
+      "about": "ShroudForge's 1.8 schema: an option group is 1 to 60 characters (maxLength 60)",
+      "mod": {
+        "id": "option-group-over-60-characters",
+        "name": "option-group-over-60-characters",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":\"ggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg\"}}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":\"ggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg\"}}}}}\n",
+      "errorContains": "1 to 60 characters"
     }
   ],
   "limits": {
