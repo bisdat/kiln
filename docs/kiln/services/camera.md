@@ -103,12 +103,31 @@ its first frame); one that disappears later ends the lease `TargetLost`, one not
 A `Shake` moves the camera without turning it, in the camera's own axes, never further than `AmplitudeMetres`; equal
 seeds give equal shakes whatever the frame rate, `Falloff` fades it over the duration's last part, and `End` stops it.
 
-Limits: every key and every derived camera position must stay within 250 m of the local player, whose position Kiln
-copies each client step; a path, profile or shake request whose player sample is missing or older than 250 ms writes nothing (and ends
-`SafetyRejected` once it was shown), a lens alone does not need it. A value out of bounds is refused `Bounds` before the
-first frame and ends the lease `SafetyRejected` after it. Kiln leaves the game's view alone when it is one v1 does not
-take (a scaled camera, a lens outside 0.01 to pi - 0.01 rad). A write that faults turns visual writes off for the rest
-of the client world (the rows say so). Since mod API 0.2.17.
+Limits: there is no distance from the player. A key or a camera position Kiln derives may be anywhere inside the world
+bound, ±1,000,000 m on each axis. A path, a shake and a lens read no position of the player and run on the clock alone,
+through a hitch too; only a follow profile reads one, its target's, copied each client step. A camera that would leave the
+world bound, or is not a finite view, is refused `Bounds` before the first frame and ends the lease `SafetyRejected` after
+it. Kiln leaves the game's view alone when it is one v1 does not take (a scaled camera, a lens outside 0.01 to pi - 0.01
+rad). A write that faults turns visual writes off for the rest of the client world (the rows say so). Since mod API
+0.2.17; the distance bound went in 0.2.0-dev.31.25 (until then every key and derived position had to stay within 250 m
+of the local player, and a path, profile or shake needed the player's copy no older than 250 ms).
+
+### A camera far from the player
+
+Kiln moves the picture only, so a far camera shows the world as the game has it around the player's character:
+
+- **What the server sends.** The server streams to each player around their focus (`PlayerFocus`): the character's
+  position, or the game's own free camera or build-mode spark while one is used. Kiln never moves it, because the input
+  camera the client reports stays the character's. Things the server sends a client only near its player (creatures,
+  other players, dropped items, other entities) can be missing far from the character.
+- **What the client draws.** Culling and level of detail follow the drawn camera: things far from it are drawn coarser,
+  and detail the game loads as the view moves can come in late. Kiln never changes the near and far planes, so nothing
+  past the game's own far plane is drawn, and the Shroud's fog, sound and the HUD stay the player's.
+- **What that means for a mod.** A view over the player's own surroundings works: a top-down view of the whole base
+  from 300 m up, a cutscene that sweeps around the camp, a mount framed from far behind. For a place kilometres away, move
+  the player there first (a teleport) if the view must show its creatures and props.
+
+Not yet seen in a real game: how far from the character the game streams and draws at full detail.
 
 ## A server's visual for a player's client (`Camera.Set`)
 
@@ -164,10 +183,16 @@ has both. `Update` and `End` follow the lease's stored world, even if both world
 
 ### Numeric limits and authored data
 
-All authored numbers are finite. Positions are within ±1,000,000 m on each axis and visual positions within 250 m of
-the sampled local player. Authored quaternion norm squared must be within 0.001 of 1 (then normalized). Profiles use
-absolute distance 0.25–200 m, local-offset vector length at most 100 m and world-Y offset ±100 m, with combined pivot
-and output checked again. Lens degrees are 5–160; shake amplitude is at most 0.5 m and frequency 0.1–30 Hz.
+Kiln keeps only the limits that protect the game (since 0.2.0-dev.31.25). All authored numbers are finite. Positions are
+within ±1,000,000 m on each axis: the world bound, which keeps every position the renderer gets inside what the engine's
+32.32 metres and its float maths handle (the map is about 10 km across); there is no distance from the player. Authored
+quaternion norm squared must be within 0.001 of 1 (then normalized). A profile's absolute distance is 0 m or more and its
+local and world-Y offsets are any finite metres; the camera it produces is checked against the world bound. Lens degrees
+are 1–179, the whole degrees inside the 0.01 rad margin from 0 and 180 that the projection takes. A shake's amplitude
+and frequency are any finite value of 0 or more: the offset is never longer than the amplitude, a frequency above half
+the frame rate turns into an irregular jitter, and how strong or fast a shake may be is the mod's choice (a strong, fast
+one can be hard to look at). Until 0.2.0-dev.31.24 the profile's distance was 0.25–200 m, its offsets at most 100 m, the
+lens 5–160 degrees and a shake at most 0.5 m at 0.1–30 Hz, and an older Kiln client still refuses `Bounds` past those.
 A path has 1–256 keys, first at 0, strictly increasing whole-millisecond times no later than its duration. Every key
 has a lens or none does; keyed lenses cannot combine with a standalone lens. Blends are nonnegative whole
 milliseconds with In + Out ≤ Duration. Collision is explicitly `None` in v1; rotational shake, splines, looping and
@@ -193,9 +218,9 @@ sample's current local lease before starting another (one that ended by itself, 
 forgotten through `Camera.Changed`); owner retirement also cancels all its work on unload.
 `MountFollow.cs` is the riding view of a big or flying mount (chapter 03's S9): `MountFollow.BuildFlyerProfile` turns the
 mount's author-supplied bounds (scaled enclosing sphere with wings, seat height, top speed) into a height and an absolute
-distance that keep the camera at least 1 m outside the body while the followed sample is at most 250 ms old, and
-refuses (never clamps) a mount v1 cannot frame: H over 100 m, D over 200 m, or the camera more than 250 m from the
-rider. `MountView` asks it with `Camera.Set` for the rider (FollowHeading, 12° down, no collision, a 90° lens, 120 s
+distance that keep the camera at least 1 m outside the body while the followed sample is at most 250 ms old. Any size of
+mount is framed (since 0.2.0-dev.31.25; it used to refuse H over 100 m, D over 200 m or the camera more than 250 m from
+the rider); it refuses only bounds that are not usable numbers, and never clamps. `MountView` asks it with `Camera.Set` for the rider (FollowHeading, 12° down, no collision, a 90° lens, 120 s
 renewed with `Restart` every 30 s, ended before a controlled teleport and on dismount) and tries once more if the view
 ends by itself while seated. The formula is the sample's, not Kiln API.
 
