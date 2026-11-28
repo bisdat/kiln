@@ -208,7 +208,7 @@ bool LocalBackend::step() {
             }
         }
 
-        // a capability the request needs went (the sampler faulted: pose, profile and shake): it ends at once
+        // a capability the request needs went (a sigdb row, or the sampler faulted: the follow profile): it ends at once
         const uint64_t have = caps();
         if (staged_) {
             const uint64_t need = required_caps(staged_->request.req);

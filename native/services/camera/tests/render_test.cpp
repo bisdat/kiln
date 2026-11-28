@@ -1096,7 +1096,7 @@ void test_capture_fault_turns_writes_off() {
     CHECK(g.pre() && g.backend.caps() == kAllLocal);  // the next world starts healthy
 }
 
-// Should-fix 4: a capability lost while a lease runs (the sampler faulted: pose, profile and shake go) ends it
+// Should-fix 4: a capability lost while a lease runs (a row turned off: here the pose row) ends it
 // CapabilityLost at once; a lens alone keeps running.
 void test_capability_lost() {
     Rig g(kAllLocal);

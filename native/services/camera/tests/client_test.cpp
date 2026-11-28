@@ -6,9 +6,9 @@
 //   no-constants   the renderer's layout constants are missing: no hook, the rows say why
 //   no-capture     the capture place is not resolved: no write row, no snapshot
 //   no-mid2        kiln.hooks predates ordered mid hooks
-//   bad-reflection RenderTransform is not the checked type: lens and snapshot only
+//   bad-reflection RenderTransform is not the checked type: no follow profile (the only part that reads a position)
 //   pose-row-off   the sigdb row camera.local_pose is off: that row only
-//   sampler-fault  GetComponent answers another size in a world: pose, profile and shake off until the next world
+//   sampler-fault  GetComponent answers another size in a world: the follow profile off until the next world
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -386,8 +386,10 @@ int main(int argc, char** argv) {
     available("camera.rendered_snapshot");
     if (scenario == "bad-reflection" || scenario == "pose-row-off") {
         if (scenario == "bad-reflection") {
-            CHECK(local_bits() == (KILN_CAMERA_CAP_LOCAL_FOV | KILN_CAMERA_CAP_RENDERED_SNAPSHOT));
-            for (const char* r : {"camera.local_pose", "camera.local_profile", "camera.local_shake"}) unavailable(r, KILN_CAP_REASON_SYMBOL_MISSING, "RenderTransform");
+            // a path and a shake read no position: only the follow profile needs the sampler
+            CHECK(local_bits() == ((kWrites & ~KILN_CAMERA_CAP_LOCAL_PROFILE) | KILN_CAMERA_CAP_RENDERED_SNAPSHOT));
+            unavailable("camera.local_profile", KILN_CAP_REASON_SYMBOL_MISSING, "RenderTransform");
+            for (const char* r : {"camera.local_pose", "camera.local_shake"}) available(r);
         } else {
             CHECK(local_bits() == (kWrites & ~KILN_CAMERA_CAP_LOCAL_POSE) + KILN_CAMERA_CAP_RENDERED_SNAPSHOT);
             unavailable("camera.local_pose", KILN_CAP_REASON_SYMBOL_MISSING, "camera.local_pose");
@@ -403,9 +405,9 @@ int main(int argc, char** argv) {
     if (scenario == "sampler-fault") {
         component_size = 160;  // the component is not the checked size any more
         pre();
-        CHECK(local_bits() == (KILN_CAMERA_CAP_LOCAL_FOV | KILN_CAMERA_CAP_RENDERED_SNAPSHOT));
-        available("camera.local_fov");
-        for (const char* r : {"camera.local_pose", "camera.local_profile", "camera.local_shake"}) unavailable(r, KILN_CAP_REASON_FAULTED, "next world");
+        CHECK(local_bits() == ((kWrites & ~KILN_CAMERA_CAP_LOCAL_PROFILE) | KILN_CAMERA_CAP_RENDERED_SNAPSHOT));
+        for (const char* r : {"camera.local_fov", "camera.local_pose", "camera.local_shake"}) available(r);
+        unavailable("camera.local_profile", KILN_CAP_REASON_FAULTED, "next world");
         // the next world starts healthy
         component_size = 176;
         world_event(KILN_WORLD_STOPPING, 1);

@@ -142,7 +142,7 @@ SampleBoard g_board;
 Sampler g_sampler(&g_source, &g_board, &g_clock);
 ClientWorld g_world;
 std::unique_ptr<LocalBackend> g_backend;
-bool g_sampling = false;    // GetComponent, kiln.client and RenderTransform's layout are there
+bool g_sampling = false;    // GetComponent, kiln.client and RenderTransform's layout are there (a follow profile's target)
 uint64_t g_serving = 0;     // the local bits the hooks and the sampler allow in a healthy world
 
 // Why each client bit is off from the start (index: the bit's position, 1..5), for its row.
@@ -162,7 +162,9 @@ void why_off(uint64_t bits, uint32_t reason, const std::string& text) {
         if ((bits >> i & 1) && !g_why[i].reason) g_why[i] = Why{reason, text};
 }
 constexpr uint64_t kWriteBits = KILN_CAMERA_CAP_LOCAL_POSE | KILN_CAMERA_CAP_LOCAL_FOV | KILN_CAMERA_CAP_LOCAL_PROFILE | KILN_CAMERA_CAP_LOCAL_SHAKE;
-constexpr uint64_t kSampledBits = KILN_CAMERA_CAP_LOCAL_POSE | KILN_CAMERA_CAP_LOCAL_PROFILE | KILN_CAMERA_CAP_LOCAL_SHAKE;
+// The rows that read a sampled position: only the follow profile (its target). A path and a shake read none since the
+// distance bound from the player went (0.2.0-dev.31.25).
+constexpr uint64_t kSampledBits = KILN_CAMERA_CAP_LOCAL_PROFILE;
 constexpr uint64_t kClientBits = kWriteBits | KILN_CAMERA_CAP_RENDERED_SNAPSHOT;
 
 // keen::ecs::RenderTransform as kiln.types reflects it: 176 bytes, a 56-byte WorldTransform `transform` at +0 with the
@@ -306,7 +308,7 @@ void local_start(const KilnApi* api, KilnOwner owner, Core* core, bool client_si
         g_source.fn = reinterpret_cast<GetComponentFn>(get_component);
     } else {
         const char* missing = !g_client ? "kiln.client is not here" : !get_component ? "symbol GetComponent: not resolved on this game build" : nullptr;
-        logf(KILN_LOG_WARN, "camera: the client sampler is off (%s): no path, follow profile or shake", missing ? missing : layout_why.c_str());
+        logf(KILN_LOG_WARN, "camera: the client sampler is off (%s): no follow profile", missing ? missing : layout_why.c_str());
         // checked after the hooks below: a missing hook is the first reason of those rows
         layout_why = missing ? missing : "the player's position cannot be read: " + layout_why;
     }
@@ -340,12 +342,12 @@ void local_start(const KilnApi* api, KilnOwner owner, Core* core, bool client_si
     if (!g_sampling) why_off(kSampledBits, layout_why.rfind("kiln.client", 0) == 0 ? KILN_CAP_REASON_SERVICE_MISSING : KILN_CAP_REASON_SYMBOL_MISSING, layout_why);
     g_snapshot = captured && snapshot_row;
     if (g_snapshot) core->set_local_read_caps(KILN_CAMERA_CAP_RENDERED_SNAPSHOT);
-    // a write needs both hooks (Applied only after the capture saw it); the pose parts also the local player's samples
+    // a write needs both hooks (Applied only after the capture saw it); a follow profile also the sampler (its target)
     if (selection && captured) {
         if (fov_row) g_serving |= KILN_CAMERA_CAP_LOCAL_FOV;
-        if (pose_row && g_sampling) g_serving |= KILN_CAMERA_CAP_LOCAL_POSE;
-        if (profile_row && g_sampling) g_serving |= KILN_CAMERA_CAP_LOCAL_PROFILE;  // and its target through the same sampler
-        if (shake_row && g_sampling) g_serving |= KILN_CAMERA_CAP_LOCAL_SHAKE;
+        if (pose_row) g_serving |= KILN_CAMERA_CAP_LOCAL_POSE;
+        if (profile_row && g_sampling) g_serving |= KILN_CAMERA_CAP_LOCAL_PROFILE;
+        if (shake_row) g_serving |= KILN_CAMERA_CAP_LOCAL_SHAKE;
     }
     g_backend->set_serving(g_serving);
     core->set_backend(KILN_CAMERA_LOCAL_VISUAL, g_backend.get());
@@ -360,7 +362,7 @@ bool local_pre(const KilnTickInfo* tick) {
         uint32_t targets[kSampleSlots];
         const uint32_t n = g_backend->targets(targets, kSampleSlots - 1);
         g_sampler.sample(g_frames.epoch(), step, g_world.local_player(), targets, n);
-        if (g_sampler.faulted()) g_backend->set_serving(g_serving & KILN_CAMERA_CAP_LOCAL_FOV);  // until the next world
+        if (g_sampler.faulted()) g_backend->set_serving(g_serving & ~kSampledBits);  // until the next world
     }
     g_frames.set_sample_step(step);
     return g_backend->step();
@@ -376,7 +378,7 @@ const char* local_why(uint64_t bit, uint32_t* reason) {
     }
     if ((bit & kSampledBits) && (g_serving & bit) && g_sampler.faulted()) {
         *reason = KILN_CAP_REASON_FAULTED;
-        return "reading the player's or the target's position faulted in this client world: off until the next world";
+        return "reading the followed target's position faulted in this client world: off until the next world";
     }
     if (!g_why[i].reason) return nullptr;
     *reason = g_why[i].reason;
