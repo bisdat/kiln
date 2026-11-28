@@ -386,6 +386,26 @@ fn package_version(version: &str) -> bool {
     })
 }
 
+/// A setting's fields in ShroudForge's `$defs.setting`, the same in its 1.7.9 schema and every 1.8 snapshot. The schema
+/// closes it (`additionalProperties: false`) and ShroudForge checks extended.mod.json against it when it reads a package
+/// (parse_mod_manifest.rs: only unknown top-level fields are tolerated), so a setting with any other field refuses the mod.
+pub const SETTING_FIELDS: [&str; 14] = [
+    "value",
+    "label",
+    "description",
+    "control",
+    "applyAt",
+    "restartRequired",
+    "assetPreparation",
+    "enabledWhen",
+    "min",
+    "max",
+    "step",
+    "minLength",
+    "maxLength",
+    "options",
+];
+
 /// What ShroudForge's own reader and schema refuse in one setting's metadata (`raw`: the setting as declared), in words
 /// naming the field and what it expects; kiln-manage's shroudforge.rs check_metadata says the same. ShroudForge's
 /// `$defs.setting` in its 1.7 and every 1.8 schema snapshot, and read_mod_settings.rs: anything those accept passes.
@@ -394,6 +414,16 @@ fn check_metadata(s: &EditorSetting, raw: &Doc) -> std::result::Result<(), Strin
         return Err(format!(
             "value must be a boolean, text, a number or a list, not {}",
             kind(&s.value)
+        ));
+    }
+    if let Some(field) = raw
+        .as_object()
+        .and_then(|o| o.keys().find(|k| !SETTING_FIELDS.contains(&k.as_str())))
+    {
+        return Err(format!(
+            "field {} is not one a setting may have ({})",
+            quoted(field),
+            SETTING_FIELDS.join(", ")
         ));
     }
     if !matches!(s.apply_at.as_deref(), Some("live" | "restart")) {

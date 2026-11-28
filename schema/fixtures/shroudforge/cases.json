@@ -4383,6 +4383,33 @@
       ],
       "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":\"ggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg\"}}}}}\n",
       "errorContains": "1 to 60 characters"
+    },
+    {
+      "name": "setting-field-outside-schema",
+      "about": "ShroudForge validates extended.mod.json against its schema when it reads a package, and $defs.setting is closed (additionalProperties: false, in 1.7.9 and every 1.8 snapshot); only unknown top-level fields are tolerated (modDetection.tolerateUnknownManifestFields). A setting field outside the schema refuses the mod; the message names it.",
+      "mod": {
+        "id": "setting-field-outside-schema",
+        "name": "setting-field-outside-schema",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":\"X\"},\"tooltip\":\"Pick one\"}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":\"X\"},\"tooltip\":\"Pick one\"}}}\n",
+      "errorContains": "\"tooltip\""
     }
   ],
   "limits": {

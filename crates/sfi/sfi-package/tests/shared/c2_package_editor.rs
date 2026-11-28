@@ -44,7 +44,7 @@ fn view(m: &edit::EditorPackage) -> Value {
 pub fn all_shared_cases_match_views_decisions_and_exact_bytes() {
     let doc = corpus();
     let cases = doc["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 90);
+    assert_eq!(cases.len(), 91);
     for c in cases {
         let name = c["name"].as_str().unwrap();
         let manifest = c["modText"]
@@ -142,7 +142,7 @@ pub fn all_shared_cases_match_views_decisions_and_exact_bytes() {
         }
     }
     eprintln!(
-        "core editor corpus: 90/90 read views, accept/refuse decisions and byte-exact outputs"
+        "core editor corpus: 91/91 read views, accept/refuse decisions and byte-exact outputs"
     );
 }
 

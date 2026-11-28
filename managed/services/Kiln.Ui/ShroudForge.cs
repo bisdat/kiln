@@ -100,8 +100,8 @@ internal sealed record SfPackage
     /// were (kiln-manage <c>SfMod::repair</c>).</summary>
     public IReadOnlyList<string> Repair { get; init; } = [];
     /// <summary>What the package declares that Kiln's page does not use (ShroudForge's own Modloader does): presets,
-    /// inputReservations, tab groups, assetPreparation, and setting fields outside ShroudForge's schema. Read past, never
-    /// refused; the page notes them once in kiln.log.</summary>
+    /// inputReservations, tab groups, assetPreparation. Read past, never refused; the page notes them once in
+    /// kiln.log.</summary>
     public IReadOnlyList<string> Unused { get; init; } = [];
 
     /// <summary>The settings' values by key.</summary>
@@ -352,6 +352,10 @@ internal static class ShroudForgePackages
                 repair.Add(key);
             }
         }
+        // ShroudForge checks extended.mod.json against its schema when it reads a package, and $defs.setting is closed
+        // (additionalProperties: false; only unknown top-level fields are tolerated): any other field refuses the mod
+        if (meta is not null && meta.Select(kv => kv.Key).FirstOrDefault(f => !SettingFields.Contains(f)) is { } unknown)
+            throw new SfEditException($"ShroudForge would refuse setting {key}: field {Quoted(unknown)} is not one a setting may have ({string.Join(", ", SettingFieldNames)})");
         var options = new List<SfOption>();
         // ShroudForge's schema: options name at least one choice ("options": {} refuses the mod)
         if (meta is not null && meta.TryGetPropertyValue("options", out var declared) && declared is not JsonObject { Count: > 0 })
@@ -517,28 +521,23 @@ internal static class ShroudForgePackages
         };
     }
 
-    // a setting's fields in ShroudForge's $defs.setting (1.7.9 and every 1.8 snapshot)
-    private static readonly HashSet<string> SettingFields = new(StringComparer.Ordinal)
-    {
+    // a setting's fields in ShroudForge's $defs.setting (1.7.9 and every 1.8 snapshot; kiln-manage SETTING_FIELDS)
+    private static readonly string[] SettingFieldNames =
+    [
         "value", "label", "description", "control", "applyAt", "restartRequired", "assetPreparation", "enabledWhen",
         "min", "max", "step", "minLength", "maxLength", "options",
-    };
+    ];
+    private static readonly HashSet<string> SettingFields = new(SettingFieldNames, StringComparer.Ordinal);
 
-    /// <summary><see cref="SfPackage.Unused"/>: at most 8 names.</summary>
+    /// <summary><see cref="SfPackage.Unused"/>: what ShroudForge accepts and uses that the page does not (a setting field
+    /// outside ShroudForge's schema is refused instead: ShroudForge refuses the mod over it).</summary>
     private static List<string> Unused(JsonObject ext)
     {
         var unused = new List<string>();
         if (ext.ContainsKey("presets")) unused.Add("presets");
         if (ext.ContainsKey("inputReservations")) unused.Add("inputReservations");
         if (ext["groups"] is JsonArray ga && ga.OfType<JsonObject>().Any(g => Flag(g, "tab") == true)) unused.Add("tab groups (drawn as plain groups)");
-        if (ext["settings"] is JsonObject so)
-        {
-            if (so.Any(kv => kv.Value is JsonObject m && Flag(m, "assetPreparation") == true)) unused.Add("assetPreparation");
-            foreach (var (k, v) in so)
-                if (v is JsonObject m && m.ContainsKey("value"))
-                    foreach (var (field, _) in m)
-                        if (!SettingFields.Contains(field) && unused.Count < 8) unused.Add($"settings.{k}.{field} (not in ShroudForge's schema)");
-        }
+        if (ext["settings"] is JsonObject so && so.Any(kv => kv.Value is JsonObject m && Flag(m, "assetPreparation") == true)) unused.Add("assetPreparation");
         return unused;
     }
 

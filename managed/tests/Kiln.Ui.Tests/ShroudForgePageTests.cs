@@ -288,14 +288,15 @@ public sealed class ShroudForgePageTests : IDisposable
     }
 
     /// <summary>What a ShroudForge 1.8 package declares that the page does not use (presets, inputReservations, tab
-    /// groups, assetPreparation, a setting field outside ShroudForge's schema) is read past, never refused, and noted
-    /// once in kiln.log; a re-read of the same package does not say it again, and a package without any says nothing.</summary>
+    /// groups, assetPreparation) is read past, never refused, and noted once in kiln.log; a re-read of the same package
+    /// does not say it again, and a package without any says nothing. A setting field outside ShroudForge's schema is no
+    /// such field: ShroudForge refuses the mod over it, and so does the page, naming it.</summary>
     [Fact]
     public void Fields_the_page_does_not_use_are_noted_once_in_kiln_log()
     {
         var folder = Package("""
             {
-              "level": { "value": 3, "assetPreparation": true, "hidden": true },
+              "level": { "value": 3, "assetPreparation": true },
               "quality": { "value": "low", "options": { "low": "Low", "custom": "Custom" } }
             }
             """, groups: """
@@ -313,9 +314,13 @@ public sealed class ShroudForgePageTests : IDisposable
         lock (logs) notes = logs.Where(l => l.Contains("does not use", StringComparison.Ordinal)).ToArray();
         var note = Assert.Single(notes);
         Assert.Contains("ShroudForge mod notes: Kiln's Mods page does not use presets, inputReservations, tab groups (drawn as plain groups), " +
-            "assetPreparation, settings.level.hidden (not in ShroudForge's schema)", note);
+            "assetPreparation; it shows", note);
         var plain = Package("""{ "level": { "value": 3 } }""", id: "plain");
         Assert.NotNull(ShroudForgeUi.Get(plain, out _));
+        lock (logs) Assert.Single(logs, l => l.Contains("does not use", StringComparison.Ordinal));
+        var hidden = Package("""{ "level": { "value": 3, "hidden": true } }""", id: "hidden");
+        Assert.Null(ShroudForgeUi.Get(hidden, out var why));
+        Assert.Contains("ShroudForge would refuse setting level: field \"hidden\" is not one a setting may have", why);
         lock (logs) Assert.Single(logs, l => l.Contains("does not use", StringComparison.Ordinal));
     }
 

@@ -393,12 +393,23 @@ fn package_version(version: &str) -> bool {
         && !(version.as_bytes()[i] == b'-' && p.len() > 1 && p.starts_with('0') && p.bytes().all(|b| b.is_ascii_digit()))))
 }
 
+/// A setting's fields in ShroudForge's `$defs.setting`, the same in its 1.7.9 schema and every 1.8 snapshot. The schema
+/// closes it (`additionalProperties: false`) and ShroudForge checks extended.mod.json against it when it reads a package
+/// (parse_mod_manifest.rs: only unknown top-level fields are tolerated), so a setting with any other field refuses the mod.
+pub const SETTING_FIELDS: [&str; 14] = [
+    "value", "label", "description", "control", "applyAt", "restartRequired", "assetPreparation", "enabledWhen", "min", "max",
+    "step", "minLength", "maxLength", "options",
+];
+
 /// What ShroudForge's own reader and schema refuse in one setting's metadata (`raw`: the setting as declared), in words
 /// naming the field and what it expects. ShroudForge's `$defs.setting` in its 1.7 and every 1.8 schema snapshot, and
 /// read_mod_settings.rs: anything those accept passes, fields Kiln does not use included.
 fn check_metadata(s: &SfSetting, raw: &serde_json::Value) -> std::result::Result<(), String> {
     if s.value.is_null() || s.value.is_object() {
         return Err(format!("value must be a boolean, text, a number or a list, not {}", kind(&s.value)));
+    }
+    if let Some(field) = raw.as_object().and_then(|o| o.keys().find(|k| !SETTING_FIELDS.contains(&k.as_str()))) {
+        return Err(format!("field {} is not one a setting may have ({})", quoted(field), SETTING_FIELDS.join(", ")));
     }
     if !matches!(s.apply_at.as_deref(), Some("live" | "restart")) {
         return Err(format!("applyAt must be \"live\" or \"restart\", not {}", raw.get("applyAt").map_or_else(|| "missing".into(), |v| v.to_string())));
