@@ -2960,6 +2960,7 @@
         "unknown": "W folderze gry jest inne narzędzie graficzne ({file})",
         "frameCap": "Limit klatek i ustawienia DLSS z Kiln ustępują; odczyt nadal działa.",
         "frameCapUpscaler": "Limit klatek, ustawienia DLSS i wybór skalowania z Kiln ustępują; odczyt nadal działa.",
+        "overlay": "Limit klatek, ustawienia DLSS i wybór skalowania z Kiln ustępują, podobnie nakładka Kiln: odczyt widać tylko wtedy, gdy włączone jest „Mimo to rysuj nakładkę Kiln”.",
         "dlss": "Ustawienia DLSS z Kiln ustępują; limit klatek i odczyt nadal działają.",
         "upscaler": "Obok gry są pliki innego narzędzia do skalowania ({file})",
         "upscalerOnly": "Wybór skalowania z Kiln ustępuje; limit klatek, ustawienia DLSS i odczyt nadal działają."

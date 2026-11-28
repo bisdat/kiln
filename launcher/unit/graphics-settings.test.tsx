@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { SchemaSnapshot } from "../src/api/commands";
+import type { GraphicsStepAside, GraphicsToolNote, SchemaSnapshot } from "../src/api/commands";
 import { UPSCALER_PATHS, graphicsAsideText, graphicsLabels, graphicsSchema, isGraphicsPath } from "../src/components/GraphicsSettings";
+import { overlayAsideFor } from "../src/components/OverlayAnyway";
 import snapshot from "../src/data/kiln-json.snapshot.json";
 import { SchemaForm } from "../src/ui/SchemaForm";
 
@@ -56,6 +57,27 @@ test("a step-aside line names the tool's file and what steps aside", () => {
     "Another upscaler tool's files are next to the game (libxess.dll): Kiln's upscaler choice steps aside; the frame cap, DLSS settings and readout still work.");
   // a kind a later backend adds still reads as a sentence
   expect(graphicsAsideText({ kind: "future", file: "x.dll", frameCap: false })).toStartWith("Another graphics tool is in the game folder (x.dll)");
+});
+
+// (0.2.0-dev.31.25 review) the readout is drawn by Kiln's overlay: next to a tool the overlay steps aside for on its own
+// (NVIDIA Streamline; OptiScaler with its own menu or frame generation) it does not "still work", it shows only while
+// "Draw Kiln's overlay anyway" is on
+test("a step-aside line says the readout goes with the overlay where the overlay steps aside too", () => {
+  const sl: GraphicsStepAside = { kind: "streamline", file: "sl.interposer.dll", frameCap: true, upscaler: true };
+  const opti: GraphicsStepAside = { kind: "optiscaler", file: "dxgi.dll", frameCap: true, upscaler: true };
+  const menuOn: GraphicsToolNote = { engine: "optiscaler", file: "dxgi.dll", kilnOverlay: false, text: "steps aside" };
+  const menuOff: GraphicsToolNote = { ...menuOn, kilnOverlay: true, text: "draws next to it" };
+  expect(overlayAsideFor(sl, [])).toBe(true);
+  expect(overlayAsideFor(opti, [menuOn])).toBe(true);
+  expect(overlayAsideFor(opti, [menuOff])).toBe(false);
+  expect(overlayAsideFor(opti, [])).toBe(false);
+  expect(overlayAsideFor({ kind: "vkfg", file: "EnshroudedVKFG.ini", frameCap: true, upscaler: true }, [menuOn])).toBe(false);
+  const overlay = "Kiln's frame cap, DLSS settings and upscaler choice step aside, and so does Kiln's overlay: its readout shows only while "
+    + "\"Draw Kiln's overlay anyway\" is on.";
+  expect(graphicsAsideText(sl, overlayAsideFor(sl, []))).toBe(`NVIDIA Streamline is in the game folder (sl.interposer.dll): ${overlay}`);
+  expect(graphicsAsideText(opti, overlayAsideFor(opti, [menuOn]))).toBe(`OptiScaler is installed (dxgi.dll): ${overlay}`);
+  expect(graphicsAsideText(opti, overlayAsideFor(opti, [menuOff]))).toBe(
+    "OptiScaler is installed (dxgi.dll): Kiln's frame cap, DLSS settings and upscaler choice step aside; the readout still works.");
 });
 
 test("the Graphics card's fields have labels in words, not their key names", () => {

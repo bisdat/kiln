@@ -2848,6 +2848,7 @@
         "unknown": "Nella cartella del gioco c'è un altro strumento grafico ({file})",
         "frameCap": "Il limite fotogrammi e le impostazioni DLSS di Kiln si fanno da parte; l'indicatore funziona ancora.",
         "frameCapUpscaler": "Il limite fotogrammi, le impostazioni DLSS e la scelta dell'upscaler di Kiln si fanno da parte; l'indicatore funziona ancora.",
+        "overlay": "Il limite fotogrammi, le impostazioni DLSS e la scelta dell'upscaler di Kiln si fanno da parte, e così l'overlay di Kiln: l'indicatore appare solo mentre «Disegna comunque l'overlay di Kiln» è attivo.",
         "dlss": "Le impostazioni DLSS di Kiln si fanno da parte; il limite fotogrammi e l'indicatore funzionano ancora.",
         "upscaler": "Accanto al gioco ci sono i file di un altro strumento di upscaling ({file})",
         "upscalerOnly": "La scelta dell'upscaler di Kiln si fa da parte; il limite fotogrammi, le impostazioni DLSS e l'indicatore funzionano ancora."

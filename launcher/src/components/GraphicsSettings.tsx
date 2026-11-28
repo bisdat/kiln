@@ -36,8 +36,9 @@ export function graphicsLabels(): Record<string, string> {
   };
 }
 
-/** One line for a tool Kiln's graphics tools step aside for: what it is (naming the file) and what steps aside. */
-export function graphicsAsideText(a: GraphicsStepAside): string {
+/** One line for a tool Kiln's graphics tools step aside for: what it is (naming the file) and what steps aside.
+ *  `overlayAside`: Kiln's overlay steps aside for it on its own too (OverlayAnyway's overlayAsideFor). */
+export function graphicsAsideText(a: GraphicsStepAside, overlayAside = false): string {
   const tools: Record<string, string> = {
     optiscaler: tr("settings.graphics.aside.optiscaler", { file: a.file }),
     streamline: tr("settings.graphics.aside.streamline", { file: a.file }),
@@ -47,6 +48,9 @@ export function graphicsAsideText(a: GraphicsStepAside): string {
     upscaler: tr("settings.graphics.aside.upscaler", { file: a.file }),
   };
   const tool = tools[a.kind] ?? tr("settings.graphics.aside.unknown", { file: a.file });
-  const effect = tr(`settings.graphics.aside.${a.frameCap ? (a.upscaler ? "frameCapUpscaler" : "frameCap") : a.upscaler ? "upscalerOnly" : "dlss"}`);
+  // (0.2.0-dev.31.25) next to a tool Kiln's overlay steps aside for on its own (OverlayAnyway's overlayAsideFor: NVIDIA
+  // Streamline, OptiScaler with its menu or frame generation; both take the frame cap and the upscaler too), the readout
+  // the overlay draws shows only while "Draw Kiln's overlay anyway" is on
+  const effect = tr(`settings.graphics.aside.${overlayAside ? "overlay" : a.frameCap ? (a.upscaler ? "frameCapUpscaler" : "frameCap") : a.upscaler ? "upscalerOnly" : "dlss"}`);
   return tr("settings.graphics.aside.line", { tool, effect });
 }

@@ -8,7 +8,7 @@
 import type { GameId, GraphicsNow, GraphicsStepAside, Json } from "../../../api/commands";
 import { useGame, useGameStatus } from "../../../api/hooks";
 import { graphicsAsideText, graphicsLabels, graphicsSchema, isGraphicsPath, UPSCALER_PATHS } from "../../../components/GraphicsSettings";
-import { OverlayAnyway, overlayAnyway, overlayAsideTools } from "../../../components/OverlayAnyway";
+import { OverlayAnyway, overlayAnyway, overlayAsideFor, overlayAsideTools } from "../../../components/OverlayAnyway";
 import { UpscalerFilesList, useUpscalerFiles, type UpscalerFiles } from "../../../components/UpscalerSettings";
 import { AMD_MODES, UPSCALER_CHOICES, amdModeOf, choiceOf, upscalerView } from "../../../components/upscalerStatus";
 import { useT } from "../../../i18n";
@@ -43,7 +43,8 @@ function Graphics({ gameId }: { gameId: GameId }) {
   const aside = status.data?.graphicsStepAside ?? [];
   const doc = k.doc.data;
   // the switch next to the tools Kiln's overlay steps aside for, and while it is on without one (so it can go off again)
-  const overlayTools = overlayAsideTools(aside, status.data?.graphicsTools ?? []);
+  const graphicsTools = status.data?.graphicsTools ?? [];
+  const overlayTools = overlayAsideTools(aside, graphicsTools);
   const offerOverlay = !!installed && (overlayTools.length > 0 || overlayAnyway(doc?.values));
   const schema = doc?.schema ? graphicsSchema(doc.schema) : null;
   const ids = (schema?.entries ?? []).map((e) => `kj:${e.path}`);
@@ -57,7 +58,7 @@ function Graphics({ gameId }: { gameId: GameId }) {
         <div className="k-stack k-st-notes" style={{ gap: 6 }}>
           {aside.map((a) => (
             <Banner key={`${a.kind}-${a.file}`} tone="info">
-              <span data-testid="graphics-step-aside">{graphicsAsideText(a)}</span>
+              <span data-testid="graphics-step-aside">{graphicsAsideText(a, overlayAsideFor(a, graphicsTools))}</span>
             </Banner>
           ))}
           {offerOverlay && <OverlayAnyway gameId={gameId} tools={overlayTools} />}

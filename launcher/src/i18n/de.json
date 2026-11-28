@@ -2848,6 +2848,7 @@
         "unknown": "Ein anderes Grafikwerkzeug liegt im Spielordner ({file})",
         "frameCap": "Kilns Bildratenbegrenzung und DLSS-Einstellungen treten zurück; die Anzeige funktioniert weiter.",
         "frameCapUpscaler": "Kilns Bildratenbegrenzung, DLSS-Einstellungen und Upscaler-Wahl treten zurück; die Anzeige funktioniert weiter.",
+        "overlay": "Kilns Bildratenbegrenzung, DLSS-Einstellungen und Upscaler-Wahl treten zurück, ebenso Kilns Overlay: die Anzeige erscheint nur, solange „Kilns Overlay trotzdem zeichnen“ an ist.",
         "dlss": "Kilns DLSS-Einstellungen treten zurück; Bildratenbegrenzung und Anzeige funktionieren weiter.",
         "upscaler": "Dateien eines anderen Upscaler-Werkzeugs liegen neben dem Spiel ({file})",
         "upscalerOnly": "Kilns Upscaler-Wahl tritt zurück; Bildratenbegrenzung, DLSS-Einstellungen und Anzeige funktionieren weiter."

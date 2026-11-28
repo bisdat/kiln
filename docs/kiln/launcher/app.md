@@ -1222,7 +1222,10 @@ FSR 3"). A client with Kiln in it only.
 - **Step-aside lines** (end of the card): OptiScaler, Streamline and `EnshroudedVKFG.ini` now say "Kiln's frame cap,
   DLSS settings and upscaler choice step aside; the readout still works."; another tool's upscaler DLLs next to the game
   (`GraphicsStepAside` kind `upscaler`): "Another upscaler tool's files are next to the game (libxess.dll): Kiln's
-  upscaler choice steps aside; the frame cap, DLSS settings and readout still work."
+  upscaler choice steps aside; the frame cap, DLSS settings and readout still work." Since 0.2.0-dev.31.25 a tool Kiln's
+  overlay steps aside for on its own too (Streamline; OptiScaler with its own menu or frame generation, `kilnOverlay`
+  false) says "..., and so does Kiln's overlay: its readout shows only while "Draw Kiln's overlay anyway" is on." (the
+  readout is drawn by the overlay; `OverlayAnyway.tsx` `overlayAsideFor`).
 - **The Deck** has the same in its Settings ([deck.md](deck.md), "Upscaler").
 - Tests: `unit/upscalers.test.tsx` (the row of every state; no preview gate), `unit/upscaler-status.test.ts` (Now,
   Last game, the plan, the offer; one reason table with kiln_ui.h, the game's English and the docs),

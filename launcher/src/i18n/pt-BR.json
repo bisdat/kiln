@@ -2848,6 +2848,7 @@
         "unknown": "Outra ferramenta gráfica está na pasta do jogo ({file})",
         "frameCap": "O limite de quadros e as configurações de DLSS do Kiln dão passagem; o painel de desempenho continua funcionando.",
         "frameCapUpscaler": "O limite de quadros, as configurações de DLSS e a escolha de upscaler do Kiln dão passagem; o painel de desempenho continua funcionando.",
+        "overlay": "O limite de quadros, as configurações de DLSS e a escolha de upscaler do Kiln dão passagem, e o overlay do Kiln também: o painel de desempenho só aparece enquanto \"Desenhar o overlay do Kiln mesmo assim\" estiver ativado.",
         "dlss": "As configurações de DLSS do Kiln dão passagem; o limite de quadros e o painel de desempenho continuam funcionando.",
         "upscaler": "Os arquivos de outra ferramenta de upscaler estão junto do jogo ({file})",
         "upscalerOnly": "A escolha de upscaler do Kiln dá passagem; o limite de quadros, as configurações de DLSS e o painel de desempenho continuam funcionando."

@@ -602,8 +602,10 @@ test("Settings, Graphics: Draw Kiln's overlay anyway writes kiln.json ui.overlay
   await page.evaluate(() => (window as unknown as OverlayMock).__kilnMock.setGraphicsStepAside([
     { kind: "streamline", file: "sl.interposer.dll", frameCap: true, upscaler: true },
   ]));
+  // (the readout is the overlay's: next to Streamline it shows only with the switch on, 0.2.0-dev.31.25 review)
   await expect(page.getByTestId("graphics-step-aside")).toHaveText([
-    "NVIDIA Streamline is in the game folder (sl.interposer.dll): Kiln's frame cap, DLSS settings and upscaler choice step aside; the readout still works.",
+    "NVIDIA Streamline is in the game folder (sl.interposer.dll): Kiln's frame cap, DLSS settings and upscaler choice step aside, and so does "
+      + "Kiln's overlay: its readout shows only while \"Draw Kiln's overlay anyway\" is on.",
   ]);
   const sw = page.getByTestId("overlay-anyway");
   await expect(sw).toContainText("Draw Kiln's overlay anyway (may crash at start with frame generation)");

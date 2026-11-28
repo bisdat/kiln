@@ -20,6 +20,12 @@ export function overlayAnyway(values: Json | null | undefined): boolean {
   return !!ui && typeof ui === "object" && !Array.isArray(ui) && (ui as Record<string, Json>).overlay === "on";
 }
 
+/** Kiln's overlay steps aside on its own for this step-aside tool too (and with it the readout it draws): NVIDIA
+ *  Streamline always, OptiScaler where its own ini makes Kiln step aside (GameStatus.graphicsTools, `kilnOverlay` false). */
+export function overlayAsideFor(a: GraphicsStepAside, tools: GraphicsToolNote[]): boolean {
+  return a.kind === "streamline" || (a.kind === "optiscaler" && tools.some((g) => g.engine === "optiscaler" && !g.kilnOverlay));
+}
+
 /** The tools in the game folder next to which Kiln's overlay steps aside on its own, by name: NVIDIA Streamline
  *  (GameStatus.graphicsStepAside, `sl.interposer.dll` in the folder or `Streamline/`, as kiln.ui looks for it), and
  *  OptiScaler where its own ini makes Kiln step aside (GameStatus.graphicsTools, `kilnOverlay` false). */

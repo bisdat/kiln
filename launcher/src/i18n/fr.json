@@ -2848,6 +2848,7 @@
         "unknown": "Un autre outil graphique est dans le dossier du jeu ({file})",
         "frameCap": "La limite d'images et les réglages DLSS de Kiln s'effacent ; l'indicateur fonctionne toujours.",
         "frameCapUpscaler": "La limite d'images, les réglages DLSS et le choix de mise à l'échelle de Kiln s'effacent ; l'indicateur fonctionne toujours.",
+        "overlay": "La limite d'images, les réglages DLSS et le choix de mise à l'échelle de Kiln s'effacent, ainsi que l'overlay de Kiln : l'indicateur ne s'affiche que si « Afficher l'overlay de Kiln quand même » est activé.",
         "dlss": "Les réglages DLSS de Kiln s'effacent ; la limite d'images et l'indicateur fonctionnent toujours.",
         "upscaler": "Les fichiers d'un autre outil de mise à l'échelle sont à côté du jeu ({file})",
         "upscalerOnly": "Le choix de mise à l'échelle de Kiln s'efface ; la limite d'images, les réglages DLSS et l'indicateur fonctionnent toujours."

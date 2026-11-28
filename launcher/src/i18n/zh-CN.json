@@ -3073,6 +3073,7 @@
         "frameCap": "Kiln 暂不应用帧率上限和 DLSS 设置，性能监控照常显示。",
         "dlss": "Kiln 暂不应用 DLSS 设置，帧率上限和性能监控仍可用。",
         "frameCapUpscaler": "Kiln 暂停应用帧率上限、DLSS 设置和超分辨率选项，性能监控照常显示。",
+        "overlay": "Kiln 暂停应用帧率上限、DLSS 设置和超分辨率选项，Kiln 叠加层也会让开：只有开启“仍然绘制 Kiln 叠加层”时才显示性能监控。",
         "upscaler": "游戏目录中有其他超分辨率工具的文件（{file}）",
         "upscalerOnly": "Kiln 暂停应用超分辨率选项，帧率上限、DLSS 设置和性能监控仍可用。"
       },

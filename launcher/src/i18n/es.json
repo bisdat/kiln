@@ -2848,6 +2848,7 @@
         "unknown": "Hay otra herramienta gráfica en la carpeta del juego ({file})",
         "frameCap": "El límite de fotogramas y los ajustes de DLSS de Kiln se hacen a un lado; el indicador sigue funcionando.",
         "frameCapUpscaler": "El límite de fotogramas, los ajustes de DLSS y la elección de escalador de Kiln se hacen a un lado; el indicador sigue funcionando.",
+        "overlay": "El límite de fotogramas, los ajustes de DLSS y la elección de escalador de Kiln se hacen a un lado, y también la superposición de Kiln: el indicador solo se ve mientras «Dibujar la superposición de Kiln de todos modos» esté activado.",
         "dlss": "Los ajustes de DLSS de Kiln se hacen a un lado; el límite de fotogramas y el indicador siguen funcionando.",
         "upscaler": "Los archivos de otra herramienta de escalado están junto al juego ({file})",
         "upscalerOnly": "La elección de escalador de Kiln se hace a un lado; el límite de fotogramas, los ajustes de DLSS y el indicador siguen funcionando."

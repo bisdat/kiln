@@ -3177,6 +3177,7 @@
         "unknown": "Another graphics tool is in the game folder ({file})",
         "frameCap": "Kiln's frame cap and DLSS settings step aside; the readout still works.",
         "frameCapUpscaler": "Kiln's frame cap, DLSS settings and upscaler choice step aside; the readout still works.",
+        "overlay": "Kiln's frame cap, DLSS settings and upscaler choice step aside, and so does Kiln's overlay: its readout shows only while \"Draw Kiln's overlay anyway\" is on.",
         "dlss": "Kiln's DLSS settings step aside; the frame cap and the readout still work.",
         "upscaler": "Another upscaler tool's files are next to the game ({file})",
         "upscalerOnly": "Kiln's upscaler choice steps aside; the frame cap, DLSS settings and readout still work."
