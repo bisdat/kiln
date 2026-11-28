@@ -92,15 +92,28 @@ public sealed class FlyerProfileTests
                 Assert.True(Dist(p, delta) >= f.Radius + 1, $"yaw {yaw}: {Dist(p, delta)} from the moved centre");
                 Assert.True(p.Y >= delta.Y + f.Radius + 1, $"yaw {yaw}: camera y {p.Y} not above the moved body");
             }
-            Assert.True(Dist(p, (0, 2.6, 0)) <= 250, "within 250 m of the rider");
             Assert.Equal(f.Separation, Dist(p, (0, 2.6, 0)), 1e-4);
         }
     }
 
+    // 0.2.0-dev.31.25: Kiln has no cap on a profile's distance or height, nor on the distance from the rider, so a huge
+    // mount is framed from far away instead of being refused (the sample used to refuse H over 100 m, D over 200 m and
+    // the camera more than 250 m from the rider). The reference model's "far too big" mount, radius 1000 m: H 1007.25 m.
     [Theory]
-    [InlineData(0, 0, 0, 1000, 1, 2.6, 25, "H")]          // the reference model's refusal: far too big for v1
-    [InlineData(0, 0, 0, 0, 1, 100, 25, "H")]             // the seat alone puts H over 100 m
-    [InlineData(0, 0, 0, 1, 1, -250, 0, "250")]           // the camera would be more than 250 m from the rider
+    [InlineData(0, 0, 0, 1000, 1, 2.6, 25)]               // the reference model's refusal of old: far too big for v1
+    [InlineData(0, 0, 0, 0, 1, 100, 25)]                  // the seat alone puts H over 100 m
+    [InlineData(0, 0, 0, 1, 1, -250, 0)]                  // the camera more than 250 m from the rider
+    public void A_huge_mount_is_framed_from_far_away_never_refused(float cx, float cy, float cz, float radius, float scale, float seat, float speed)
+    {
+        var f = MountFollow.BuildFlyerProfile(new MountBounds(new Vector3(cx, cy, cz), radius, scale, seat, speed));
+        Assert.True(f.Height >= f.Radius + f.CenterDistance + f.Margin && f.Distance >= f.Radius + f.Height + f.CenterDistance + f.Margin);
+        Assert.True(f.Height > 100 || f.Separation > 250);
+        // the request it makes passes Kiln.Camera's checks (no ArgumentException)
+        _ = CameraRequests.Build(MountFollow.Request(new EntityId(77), f), CameraEndpoint.Local, EntityId.None, "test");
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0, 1e38f, 10, 2.6, 25, "float")]     // H and D do not fit a float: no camera can hold them
     [InlineData(0, 0, 0, -1, 1, 2.6, 25, "bounds")]       // a negative radius
     [InlineData(0, 0, 0, 1, 0, 2.6, 25, "bounds")]        // no scale
     [InlineData(0, 0, 0, 1, 1, 2.6, -1, "bounds")]        // a negative speed

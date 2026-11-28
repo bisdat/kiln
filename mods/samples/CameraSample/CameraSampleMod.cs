@@ -101,8 +101,8 @@ public sealed class CameraSampleMod : Mod
     // Lens alone does not need camera.local_pose or a player transform sample.
     private static CameraOverride LensOnly() => new(Lens: new CameraLens(40), Duration: TimeSpan.FromSeconds(5));
 
-    // Explicit poses; no look-at target or collision query is deferred into the render callback. Use a fresh visual
-    // pose near this player: the native backend still checks every key and derived position against its 250 m bound.
+    // Explicit poses; no look-at target or collision query is deferred into the render callback. The keys may be anywhere
+    // inside the world bound (no distance from the player since 0.2.0-dev.31.25); this sample starts from the view on screen.
     private static CameraOverride TwoKeyPath(CameraPose start) => new(
         Path: new CameraPath([
             new CameraKey(TimeSpan.Zero, start),

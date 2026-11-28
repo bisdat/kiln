@@ -8,8 +8,9 @@
 // them BuildFlyerProfile chooses a height H above the mount's origin and an absolute distance D behind it such that the
 // camera stays at least 1 m outside the sphere while the sample it follows is at most 250 ms old and the mount moves no
 // faster than the stated speed (chapter 03: H = max(seat + 0.75, c + R + M), D = max(8, R + H + c + M), M = 1 + v x
-// 0.25 s). It refuses what v1 cannot hold (H over 100 m, D over 200 m, the camera more than 250 m from the rider) instead
-// of shrinking it: a refused mount rides with the stock camera, never inside its body.
+// 0.25 s). Any size of mount is framed: Kiln has no cap on a profile's distance or height, nor on how far the camera is
+// from the rider (since 0.2.0-dev.31.25; the sample used to refuse H over 100 m, D over 200 m and 250 m from the rider).
+// It only refuses bounds that are not numbers it can use; it never shrinks the view into the body.
 //
 // The view (MountView): FollowHeading on the mount's upright heading, 12 degrees down, no camera collision (it can clip
 // terrain: an outdoor view), a 90 degree lens, a 120 s lease renewed with Restart every 30 s while riding and on a size
@@ -37,7 +38,7 @@ public readonly record struct MountBounds(Vector3 CenterUnscaled, float RadiusUn
 /// <param name="Height">H: metres above the mount's origin (the profile's world-Y offset).</param>
 /// <param name="Distance">D: metres behind, absolute (the profile's distance).</param>
 /// <param name="Rotation">12 degrees down about +X, on the mount's upright heading.</param>
-/// <param name="Separation">How far the camera is from the rider's seat (at most 250 m in v1).</param>
+/// <param name="Separation">How far the camera is from the rider's seat (no limit: a huge mount is framed from far away).</param>
 public sealed record FlyerProfile(double Radius, double CenterDistance, double Margin, double Height, double Distance, Quaternion Rotation, double Separation);
 
 /// <summary>The formula and the request of the S9 riding view.</summary>
@@ -52,8 +53,7 @@ public static class MountFollow
 
     /// <summary>H and D for <paramref name="bounds"/> (chapter 03, S9 addendum).</summary>
     /// <exception cref="ArgumentException">A value is not finite, the radius is negative, the scale is not positive, the speed
-    /// is negative; or the result does not fit v1 (H over 100 m, D over 200 m, more than 250 m from the rider): refused,
-    /// never clamped.</exception>
+    /// is negative, or H or D does not fit a float (no camera can be built from it): refused, never clamped.</exception>
     public static FlyerProfile BuildFlyerProfile(in MountBounds bounds)
     {
         var b = bounds;
@@ -66,16 +66,14 @@ public static class MountFollow
         var m = 1 + v * SampleAgeSeconds;
         var h = Math.Max(seat + 0.75, c + r + m);
         var d = Math.Max(8, r + h + c + m);
-        if (h > 100 || d > 200)
-            throw new ArgumentException($"this mount does not fit a v1 camera profile (H {h:0.##} m of 100, D {d:0.##} m of 200): it keeps the stock camera", nameof(bounds));
+        if (!float.IsFinite((float)h) || !float.IsFinite((float)d))
+            throw new ArgumentException($"mount bounds: H {h} m or D {d} m does not fit a float, so no camera profile can hold it", nameof(bounds));
         var half = DownPitchDegrees * Math.PI / 360;
         var rotation = new Quaternion((float)Math.Sin(half), 0, 0, (float)Math.Cos(half));
         // the camera sits at the pivot (0, H, 0) moved D back along the down-pitched heading: (0, H + D sin 12, -D cos 12)
         // in the heading's axes, whatever the yaw; the rider sits at (0, seat, 0)
         var pitch = 2 * half;
         var separation = Math.Sqrt(Math.Pow(h + d * Math.Sin(pitch) - seat, 2) + Math.Pow(d * Math.Cos(pitch), 2));
-        if (separation > 250)
-            throw new ArgumentException($"the camera would be {separation:0.#} m from the rider (at most 250)", nameof(bounds));
         return new FlyerProfile(r, c, m, h, d, rotation, separation);
     }
 
@@ -133,7 +131,7 @@ public sealed class MountView
     public FlyerProfile Profile => _profile;
 
     /// <summary>Checks the rider's client and the bounds, then asks for the view. Null with <paramref name="why"/> when the
-    /// rider cannot have it (no Kiln client with the parts, or a mount v1 cannot frame): the stock camera stays.</summary>
+    /// rider cannot have it (no Kiln client with the parts, or bounds that are not usable numbers): the stock camera stays.</summary>
     public static MountView? Start(EntityId rider, EntityId mount, in MountBounds bounds, TimeSpan now, out string? why)
     {
         why = null;
@@ -274,7 +272,7 @@ public sealed class MountView
     }
 
     /// <summary>The mount changed size: new numbers, the lease restarted with them.</summary>
-    /// <exception cref="ArgumentException">The new size does not fit v1: the caller stops the view.</exception>
+    /// <exception cref="ArgumentException">The new bounds are not usable numbers: the caller stops the view.</exception>
     public void Resize(in MountBounds bounds, TimeSpan now)
     {
         _profile = MountFollow.BuildFlyerProfile(bounds);
