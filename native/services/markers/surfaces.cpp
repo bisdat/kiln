@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 // kiln.markers' surfaces (chapter 04 §4.5, §4.6; plan S5, S6): at each client Post the client's rows (local and received)
 // are admitted per surface (select.h), their visibility events are made (visibility.h) and the admitted map rows are
-// appended to the game's map list (map_list.h). Rows: markers.map (here), markers.compass, markers.world and
-// markers.nameplates (the drawn surfaces).
+// appended to the game's map list (map_list.h), and written again after every client SimStep (issue 159). Rows:
+// markers.map (here), markers.compass, markers.world and markers.nameplates (the drawn surfaces).
 //
-// Threads: everything here runs on the client world's thread (its Post, its lifecycle), except the frame callback of the
-// drawn surfaces, which only reads an immutable snapshot.
+// Threads: everything here runs on the client world's thread (its Post, its lifecycle, the link after its SimStep), except
+// the frame callback of the drawn surfaces, which only reads an immutable snapshot.
 #include <windows.h>
 
 #include <atomic>
@@ -21,6 +21,7 @@
 #include <tuple>
 #include <vector>
 
+#include "kiln_hook.hpp"
 #include "services/kiln_render.h"
 #include "services/kiln_ui.h"
 
@@ -54,6 +55,7 @@ std::string g_map_reported_text;
 uint64_t g_ui_epoch = 0;          // the client world epoch g_ui belongs to
 uintptr_t g_ui = 0;               // that world's G38UiPlayData
 Appended g_appended;
+MapKeep g_keep;                   // the rows the last client Post wrote, written again after each client SimStep
 
 bool constant(const char* name, int64_t* out) { return g.api->constant && g.api->constant(str(name), out) == KILN_OK; }
 
@@ -238,6 +240,92 @@ void post_map(uint64_t epoch, const std::vector<uint32_t>& order) {
     AppendCall c{ui, g_maprows.data(), static_cast<uint32_t>(g_maprows.size()), 0, ListState::Ok};
     if (!guarded_append(&c)) return latch_map("writing the native map list faulted");
     if (c.state != ListState::Ok) return latch_map("the native map list's header failed its guards (data pointer, capacity or count)");
+    g_keep.set(epoch, g_maprows.data(), static_cast<uint32_t>(g_maprows.size()));
+}
+
+// ---- the end of every client step (GitHub issue 159) ------------------------------------------------------------------
+// The game clears and refills the map list at every client SimStep, once per frame on the main thread: the client world
+// update (client 0xa1fae0) calls SimStep with ticked 0 on frames without a new step, and SimStep runs StepPrograms either
+// way (clear_map_markers_for_ui, then replicate_map_markers_for_ui). The core's Post runs only at the ticked SimSteps
+// (60 Hz), so above 60 fps the map drew the frames in between from a list without Kiln's rows. A link around SimStep
+// writes the last Post's rows again once every client SimStep has returned: StepPrograms has waited for the step's jobs
+// (replicate's chunks among them) by then, and the UI frame that reads the list runs outside SimStep on the same thread.
+// docs/re/map.md, "The list in a frame". Feature markers.client_map_steps; without it the rows are written at the Post
+// only, as before, and kiln.log says so once.
+
+kiln::RawHook g_step_hook;
+int64_t g_world_storage = 0;  // world -> its storage, SimStep's first argument
+int64_t g_storage_kind = 0;   // storage -> its kind byte (KILN_WORLD_*)
+
+// The kind byte of the storage SimStep was called with (the game's live argument), or 0xff if it cannot be read.
+uint8_t storage_kind(uintptr_t storage) {
+    __try {
+        return *reinterpret_cast<const uint8_t*>(storage + static_cast<uintptr_t>(g_storage_kind));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0xff;
+    }
+}
+
+struct RewriteCall {
+    uint8_t* ui;
+    uint64_t epoch;
+    uint32_t written;
+    ListState state;
+};
+
+bool guarded_rewrite(RewriteCall* c) {
+    __try {
+        c->written = rewrite_kept(c->ui, g_layout, g_keep, c->epoch, &g_appended, &c->state);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// After a SimStep returned. Only the client world's, on its own thread, touches the kept rows (the server world of a
+// hosted game steps on its GameServer thread; the prediction world's kind is 1).
+void step_end(uintptr_t storage) {
+    if (storage_kind(storage) != KILN_WORLD_CLIENT || !g.api->on_world_thread(KILN_WORLD_CLIENT)) return;
+    if (g_keep.rows.empty() || !g.sw->map.load()) return;
+    const uintptr_t w = g.api->world(KILN_WORLD_CLIENT);
+    if (!w || storage != w + static_cast<uintptr_t>(g_world_storage)) return;
+    uint64_t epoch = 0;
+    g.store->world_epoch(KILN_WORLD_CLIENT, &epoch);
+    if (!epoch || epoch != g_keep.epoch) return;
+    uint8_t* ui = ui_data(epoch);
+    if (!ui) return;
+    RewriteCall c{ui, epoch, 0, ListState::Ok};
+    if (!guarded_rewrite(&c)) return latch_map("writing the native map list faulted");
+    if (c.state != ListState::Ok) return latch_map("the native map list's header failed its guards (data pointer, capacity or count)");
+}
+
+// SimStep(Storage*, bool ticked): the rest of the chain (the core's Pre, the game's step, the core's Post), then step_end.
+uintptr_t hk_sim_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr_t r9) {
+    const uintptr_t result = g_step_hook.call<uintptr_t>(storage, ticked, r8, r9);
+    try {
+        step_end(storage);
+    } catch (...) {  // never into the game; a fault in the list itself latches the map (step_end)
+    }
+    return result;
+}
+
+// surfaces_ready, once the map list's guards hold: the link before the core's own SimStep link, so it runs after the Post.
+void steps_setup() {
+    if (!g_map_guards) return;
+    uintptr_t sim = 0;
+    if (!g.api->feature(str("markers.client_map_steps")) || g.api->symbol(str("SimStep"), &sim) != KILN_OK || !sim ||
+        !constant("world.storage", &g_world_storage) || g_world_storage <= 0 || !constant("storage.kind", &g_storage_kind) ||
+        g_storage_kind < 0) {
+        logf(KILN_LOG_WARN, "markers: the end of each client step cannot be found on this build (markers.client_map_steps): map "
+                            "icons are written at the client's 60 Hz steps only and can flicker at a higher frame rate");
+        return;
+    }
+    if (!g_step_hook.install(g.api, g.owner, sim, reinterpret_cast<void*>(&hk_sim_step), "markers/SimStep", 0, "kiln")) {
+        logf(KILN_LOG_WARN, "markers: the link after each client step could not be installed (%s): map icons are written at the "
+                            "client's 60 Hz steps only and can flicker at a higher frame rate", g_step_hook.error());
+        return;
+    }
+    logf(KILN_LOG_INFO, "markers: map icons are written again after every client step (markers.client_map_steps)");
 }
 
 // ---- the drawn surfaces: world labels and the compass strip (S6) -------------------------------------------------------
@@ -430,6 +518,7 @@ void surfaces_ready() {
     g_ui_status = g_uiapi && g_uiapi->header.size >= offsetof(KilnUiApi, status) + sizeof(g_uiapi->status) && g_uiapi->status;
     map_setup();
     update_map_row();
+    steps_setup();
     drawn_setup();
     for (const char* name : {kCompass, kWorld}) {
         if (g_drawn_ok)
@@ -448,6 +537,7 @@ void surfaces_world(const KilnWorldEvent& e, std::vector<Note>* notes) {
         uint64_t epoch = 0;
         g.store->world_epoch(KILN_WORLD_CLIENT, &epoch);
         g_vis.clear(epoch, notes);
+        g_keep.clear();
         g_appended = Appended{};
         g_ui = 0;
         g_ui_epoch = 0;
@@ -463,6 +553,7 @@ void surfaces_client_post(std::vector<Note>* notes) {
     uint64_t epoch = 0;
     g.store->world_epoch(KILN_WORLD_CLIENT, &epoch);
     update_map_row();
+    g_keep.clear();  // post_map keeps what it writes at this Post
     update_nameplates_row();
     g.store->snapshot_client(&g_rows);
     if (g_rows.empty() && !g_vis.size() && !g_appended.n) {

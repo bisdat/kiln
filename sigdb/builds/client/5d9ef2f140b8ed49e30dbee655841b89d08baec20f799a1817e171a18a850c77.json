@@ -11,7 +11,7 @@
   "declared": {
     "symbols": 1119,
     "constants": 1159,
-    "features": 300
+    "features": 301
   },
   "features": {
     "abilities.attributes": true,
@@ -146,6 +146,7 @@
     "markers.anchors.client": true,
     "markers.anchors.server": true,
     "markers.client_map": true,
+    "markers.client_map_steps": true,
     "models.chain2.readers": true,
     "models.cloth.readers": true,
     "mods.boot": true,
@@ -3114,7 +3115,8 @@
       "features": {
         "markers.anchors.client": "static",
         "markers.anchors.server": "static",
-        "markers.client_map": "static"
+        "markers.client_map": "static",
+        "markers.client_map_steps": "static"
       }
     },
     "dev28-05a-value-providers": {
