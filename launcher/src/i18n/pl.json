@@ -2554,6 +2554,7 @@
         "other": "{names} wymagają nowszego Kiln."
       },
       "graphicsTool": "Zainstalowano {name} ({file})",
+      "streamlineNote": "Nakładka Kiln w grze ustępuje obok niego: oba podpinają się pod wyświetlanie klatek gry, a razem powodowały awarię gry przy starcie. Skróty klawiszowe Kiln i pozycja Mody nadal działają; okna, HUD-y i strona modów Kiln się nie wyświetlają.",
       "settingAsi": "Jedno ustawienie Steam dla Ultimate ASI Loader",
       "notLoading": "Kiln się nie wczytuje",
       "didNotStart": "Kiln nie wystartował",
@@ -2961,6 +2962,11 @@
         "dlss": "Ustawienia DLSS z Kiln ustępują; limit klatek i odczyt nadal działają.",
         "upscaler": "Obok gry są pliki innego narzędzia do skalowania ({file})",
         "upscalerOnly": "Wybór skalowania z Kiln ustępuje; limit klatek, ustawienia DLSS i odczyt nadal działają."
+      },
+      "overlayAnyway": {
+        "label": "Mimo to rysuj nakładkę Kiln (z generowaniem klatek może to spowodować awarię przy starcie)",
+        "hint": "Od następnego uruchomienia gry okna, HUD-y i strona modów Kiln pojawiają się obok {tools}. Jeśli gra zamknie się wtedy przy starcie, wyłącz to: dopóki jest włączone, Kiln próbuje ponownie przy każdym uruchomieniu.",
+        "hintNoTool": "Nakładka Kiln jest rysowana przy każdym uruchomieniu gry, także po takim, które zamknęło się podczas jej uruchamiania. Wyłącz to, aby Kiln znów decydował sam."
       },
       "labels": {
         "fpsCap": "Limit klatek",

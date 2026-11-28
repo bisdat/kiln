@@ -2783,6 +2783,7 @@
         "other": "{names} need a newer Kiln."
       },
       "graphicsTool": "{name} is installed ({file})",
+      "streamlineNote": "Kiln's in-game overlay steps aside next to it: both hook the game's presents, and together they crashed the game at start. Kiln's key bindings and the Mods entry still work; Kiln's windows, HUDs and Mods page don't show.",
       "settingAsi": "One Steam setting for Ultimate ASI Loader",
       "notLoading": "Kiln is not loading",
       "didNotStart": "Kiln did not start",
@@ -3178,6 +3179,11 @@
         "dlss": "Kiln's DLSS settings step aside; the frame cap and the readout still work.",
         "upscaler": "Another upscaler tool's files are next to the game ({file})",
         "upscalerOnly": "Kiln's upscaler choice steps aside; the frame cap, DLSS settings and readout still work."
+      },
+      "overlayAnyway": {
+        "label": "Draw Kiln's overlay anyway (may crash at start with frame generation)",
+        "hint": "From the next game start, Kiln's windows, HUDs and Mods page show next to {tools}. If the game then closes at start, switch this off: while it is on, Kiln tries again at every start.",
+        "hintNoTool": "Kiln's overlay draws at every game start, also after one that closed while it was starting. Switch this off to let Kiln decide again."
       },
       "labels": {
         "fpsCap": "Frame cap",

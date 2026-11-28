@@ -345,7 +345,9 @@ fn optiscaler_in_the_game_folder_is_found_by_its_contents() {
     let notes = kiln_manage::game::graphics_tools(g);
     assert_eq!(notes.len(), 1);
     assert_eq!((notes[0].engine, notes[0].file.as_str()), (Engine::OptiScaler, "winmm.dll"));
-    assert!(notes[0].text.contains("KILN_UI_OVERLAY"), "{}", notes[0].text);
+    // (0.2.0-dev.31.25) the way to draw it anyway on Windows too: the launcher's switch, kiln.json ui.overlay "on"
+    assert!(notes[0].text.contains("\"Draw Kiln's overlay anyway\"") && notes[0].text.contains("kiln.json ui.overlay \"on\""), "{}", notes[0].text);
+    assert!(!notes[0].text.contains("launch option"), "Steam's launch options cannot set it on Windows: {}", notes[0].text);
     let json = serde_json::to_value(&notes[0]).unwrap();
     assert_eq!(json["engine"], "optiscaler");
     assert!(!notes[0].kiln_overlay && notes[0].text.contains("steps aside") && notes[0].text.contains("OverlayMenu=false"));
@@ -398,6 +400,7 @@ fn optiscaler_ini_decides_kilns_overlay() {
         assert!(parsed.overlay_menu == Some(false) && parsed.frame_gen && !parsed.kiln_overlay_draws(), "{input} -> {output}");
         let note = kiln_manage::engines::optiscaler_overlay_note(&parsed);
         assert!(note.contains("frame generation is set") && note.contains("own queue") && note.contains("FGInput and FGOutput to auto"), "{note}");
+        assert!(note.contains("\"Draw Kiln's overlay anyway\"") && note.contains("kiln.json ui.overlay \"on\""), "{note}");
     }
     for ini in ["[FrameGen]\nFGInput=auto\nFGOutput=fsrfg\n[Menu]\nOverlayMenu=false\n", "[FrameGen]\nFGInput=upscaler\n[Menu]\nOverlayMenu=false\n",
                 "[FrameGen]\nEnabled=true\n[Menu]\nOverlayMenu=false\n"] {

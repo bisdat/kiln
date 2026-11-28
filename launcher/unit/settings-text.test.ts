@@ -28,7 +28,7 @@ test("a comment that opens with the row's name, or a few words, shows the help a
   expect(head("graphics.fpsCap")).toBe("The game renders at most this many frames a second.");
   expect(head("ui.chatHistory")).toBe("Up/Down recall sent lines; Ctrl+R searches them; / commands persist across restarts");
   expect(head("ui.chatCompletion")).toBe("Tab suggests the Kiln commands you may use in the HUD and Social chat");
-  expect(head("ui.overlay")).toBe("Auto or off. Applies from the next game start");
+  expect(head("ui.overlay")).toBe("Auto, off or on. Applies from the next game start");
 });
 
 test("a comment whose part before the colon says what the entry is keeps it", () => {

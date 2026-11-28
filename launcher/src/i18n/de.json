@@ -2468,6 +2468,7 @@
         "other": "{names} brauchen ein neueres Kiln."
       },
       "graphicsTool": "{name} ist installiert ({file})",
+      "streamlineNote": "Kilns Overlay im Spiel tritt daneben zurück: Beide hängen sich in die Bildausgabe des Spiels, und zusammen brachten sie das Spiel beim Start zum Absturz. Kilns Tastenbelegungen und der Mods-Eintrag funktionieren weiter; Kilns Fenster, HUDs und die Mods-Seite werden nicht angezeigt.",
       "settingAsi": "Eine Steam-Einstellung für Ultimate ASI Loader",
       "notLoading": "Kiln lädt nicht",
       "didNotStart": "Kiln ist nicht gestartet",
@@ -2849,6 +2850,11 @@
         "dlss": "Kilns DLSS-Einstellungen treten zurück; Bildratenbegrenzung und Anzeige funktionieren weiter.",
         "upscaler": "Dateien eines anderen Upscaler-Werkzeugs liegen neben dem Spiel ({file})",
         "upscalerOnly": "Kilns Upscaler-Wahl tritt zurück; Bildratenbegrenzung, DLSS-Einstellungen und Anzeige funktionieren weiter."
+      },
+      "overlayAnyway": {
+        "label": "Kilns Overlay trotzdem zeichnen (kann mit Frame-Generierung beim Start abstürzen)",
+        "hint": "Ab dem nächsten Spielstart erscheinen Kilns Fenster, HUDs und die Mods-Seite neben {tools}. Wenn sich das Spiel dann beim Start schließt, schalte dies aus: Solange es an ist, versucht Kiln es bei jedem Start erneut.",
+        "hintNoTool": "Kilns Overlay wird bei jedem Spielstart gezeichnet, auch nach einem Start, der sich beim Starten des Overlays geschlossen hat. Schalte dies aus, damit Kiln wieder selbst entscheidet."
       },
       "labels": {
         "fpsCap": "Bildratenlimit",

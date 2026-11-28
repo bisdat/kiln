@@ -542,6 +542,88 @@ test("OptiScaler next to the game says what Kiln's overlay does on Play", async 
   await expect(banner.getByTestId("graphics-tool-note")).toHaveText("Kiln's in-game overlay steps aside while OptiScaler's own menu is on.");
 });
 
+// (0.2.0-dev.31.25, Soligna, Nexus 301) "Draw Kiln's overlay anyway": kiln.json ui.overlay "on" (kiln.ui draws as with
+// KILN_UI_OVERLAY=1), offered next to the tools Kiln's overlay steps aside for; off removes the key.
+type OverlayMock = { __kilnMock: { kilnJsonValues: () => { ui?: Record<string, unknown> }; setGraphicsStepAside: (t: unknown) => void; setGraphicsTools: (t: unknown) => void } };
+const overlayValue = (page: Page) => page.evaluate(() => (window as unknown as OverlayMock).__kilnMock.kilnJsonValues().ui?.overlay);
+const overlayShot = async (page: Page, name: string) => {
+  if (process.env.SHOTS === "0") return;
+  mkdirSync(SHOTS, { recursive: true });
+  await page.screenshot({ path: join(SHOTS, `${name}.png`) });
+};
+
+test("NVIDIA Streamline next to the game: Play says Kiln's overlay steps aside and offers to draw it anyway", async ({ page }) => {
+  await open(page, "/");
+  const banners = page.locator(".k-hero-banner .k-banner");
+  const banner = banners.filter({ has: page.locator(".k-banner-title", { hasText: /^NVIDIA Streamline is installed/ }) });
+  await expect(banner).toHaveCount(0);
+  await expect(page.getByTestId("overlay-anyway")).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as OverlayMock).__kilnMock.setGraphicsStepAside([
+    { kind: "streamline", file: "Streamline/sl.interposer.dll", frameCap: true, upscaler: true },
+  ]));
+  await expect(banner.locator(".k-banner-title")).toHaveText("NVIDIA Streamline is installed (Streamline/sl.interposer.dll)");
+  await expect(banner.getByTestId("graphics-tool-note")).toHaveText("Kiln's in-game overlay steps aside next to it: both hook the game's presents, and together "
+    + "they crashed the game at start. Kiln's key bindings and the Mods entry still work; Kiln's windows, HUDs and Mods page don't show.");
+  const sw = banner.getByTestId("overlay-anyway");
+  await expect(sw).toContainText("Draw Kiln's overlay anyway (may crash at start with frame generation)");
+  await expect(sw).toContainText("next to NVIDIA Streamline. If the game then closes at start, switch this off");
+  await expect(sw.getByRole("switch")).not.toBeChecked();
+  await sw.locator("label.k-toggle").click();
+  await expect.poll(() => overlayValue(page)).toBe("on");
+  await expect(sw.getByRole("switch")).toBeChecked();
+  await overlayShot(page, "overlay-anyway-play");
+  await sw.locator("label.k-toggle").click();
+  await expect.poll(() => overlayValue(page)).toBeUndefined();
+  await expect(sw.getByRole("switch")).not.toBeChecked();
+  // OptiScaler stepping aside as well: still one switch, under Streamline's banner, naming both
+  await page.evaluate(() => (window as unknown as OverlayMock).__kilnMock.setGraphicsTools([
+    { engine: "optiscaler", file: "winmm.dll", kilnOverlay: false, text: "Kiln's in-game overlay steps aside while OptiScaler's own menu is on." },
+  ]));
+  await expect(page.getByTestId("overlay-anyway")).toHaveCount(1);
+  await expect(sw).toContainText("next to NVIDIA Streamline, OptiScaler.");
+  // OptiScaler alone: the switch under its banner
+  await page.evaluate(() => (window as unknown as OverlayMock).__kilnMock.setGraphicsStepAside([]));
+  const opti = banners.filter({ has: page.locator(".k-banner-title", { hasText: /^OptiScaler is installed/ }) });
+  await expect(banner).toHaveCount(0);
+  await expect(opti.getByTestId("overlay-anyway")).toContainText("next to OptiScaler.");
+  // its own menu off and no frame generation: Kiln draws next to it, nothing to offer
+  await page.evaluate(() => (window as unknown as OverlayMock).__kilnMock.setGraphicsTools([
+    { engine: "optiscaler", file: "winmm.dll", kilnOverlay: true, text: "Kiln's in-game overlay draws next to it." },
+  ]));
+  await expect(opti).toHaveCount(1);
+  await expect(page.getByTestId("overlay-anyway")).toHaveCount(0);
+});
+
+test("Settings, Graphics: Draw Kiln's overlay anyway writes kiln.json ui.overlay \"on\", and stays while it is on", async ({ page }) => {
+  await open(page, "/settings/graphics");
+  // the preview's DLSSTweaks: Kiln's overlay does not step aside for it, nothing to offer
+  await expect(page.getByTestId("graphics-step-aside")).toHaveCount(1);
+  await expect(page.getByTestId("overlay-anyway")).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as OverlayMock).__kilnMock.setGraphicsStepAside([
+    { kind: "streamline", file: "sl.interposer.dll", frameCap: true, upscaler: true },
+  ]));
+  await expect(page.getByTestId("graphics-step-aside")).toHaveText([
+    "NVIDIA Streamline is in the game folder (sl.interposer.dll): Kiln's frame cap, DLSS settings and upscaler choice step aside; the readout still works.",
+  ]);
+  const sw = page.getByTestId("overlay-anyway");
+  await expect(sw).toContainText("Draw Kiln's overlay anyway (may crash at start with frame generation)");
+  await sw.locator("label.k-toggle").click();
+  await expect.poll(() => overlayValue(page)).toBe("on");
+  await overlayShot(page, "overlay-anyway-settings-graphics");
+  // Streamline gone, the setting still on: the switch stays, so it can be switched off
+  await page.evaluate(() => (window as unknown as OverlayMock).__kilnMock.setGraphicsStepAside([]));
+  await expect(sw).toContainText("Kiln's overlay draws at every game start, also after one that closed while it was starting. Switch this off to let Kiln decide again.");
+  await expect(sw.getByRole("switch")).toBeChecked();
+  await sw.locator("label.k-toggle").click();
+  await expect.poll(() => overlayValue(page)).toBeUndefined();
+  await expect(sw).toHaveCount(0);
+  // Advanced, Kiln's file: the same setting, three values
+  await open(page, "/settings/advanced");
+  await expect(page.locator("#sf-ui-overlay option")).toHaveText(["auto", "off", "on"]);
+  await page.locator("#sf-ui-overlay").selectOption("on");
+  await expect.poll(() => overlayValue(page)).toBe("on");
+});
+
 test("Settings, Graphics edits kiln.json's graphics section and says which tools Kiln steps aside for", async ({ page }) => {
   type Mock = { __kilnMock: { kilnJsonValues: () => { graphics?: Record<string, unknown> }; setGraphicsStepAside: (t: unknown) => void } };
   await open(page, "/settings/graphics");

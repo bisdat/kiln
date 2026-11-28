@@ -2468,6 +2468,7 @@
         "other": "{names} richiedono un Kiln più recente."
       },
       "graphicsTool": "{name} è installato ({file})",
+      "streamlineNote": "L'overlay di Kiln nel gioco si fa da parte accanto a esso: entrambi si agganciano alla presentazione dei fotogrammi del gioco, e insieme facevano chiudere il gioco all'avvio. Le scorciatoie di Kiln e la voce Mod funzionano ancora; le finestre, gli HUD e la pagina delle mod di Kiln non vengono mostrati.",
       "settingAsi": "Un'impostazione di Steam per Ultimate ASI Loader",
       "notLoading": "Kiln non si carica",
       "didNotStart": "Kiln non è partito",
@@ -2849,6 +2850,11 @@
         "dlss": "Le impostazioni DLSS di Kiln si fanno da parte; il limite fotogrammi e l'indicatore funzionano ancora.",
         "upscaler": "Accanto al gioco ci sono i file di un altro strumento di upscaling ({file})",
         "upscalerOnly": "La scelta dell'upscaler di Kiln si fa da parte; il limite fotogrammi, le impostazioni DLSS e l'indicatore funzionano ancora."
+      },
+      "overlayAnyway": {
+        "label": "Disegna comunque l'overlay di Kiln (può bloccarsi all'avvio con la generazione fotogrammi)",
+        "hint": "Dal prossimo avvio del gioco, le finestre, gli HUD e la pagina delle mod di Kiln compaiono accanto a {tools}. Se poi il gioco si chiude all'avvio, disattiva questa opzione: finché è attiva, Kiln riprova a ogni avvio.",
+        "hintNoTool": "L'overlay di Kiln viene disegnato a ogni avvio del gioco, anche dopo un avvio che si è chiuso mentre si avviava. Disattiva questa opzione per lasciar decidere di nuovo Kiln."
       },
       "labels": {
         "fpsCap": "Limite fotogrammi",

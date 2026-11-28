@@ -2425,6 +2425,7 @@
         "other": "{names}에는 더 새로운 Kiln이 필요합니다."
       },
       "graphicsTool": "{name} 설치됨 ({file})",
+      "streamlineNote": "Kiln의 게임 내 오버레이는 이것이 있으면 비켜섭니다. 둘 다 게임의 화면 출력에 후킹하며, 함께 쓰면 시작할 때 게임이 충돌했습니다. Kiln의 키 설정과 모드 항목은 계속 작동하지만, Kiln의 창, HUD, 모드 페이지는 표시되지 않습니다.",
       "settingAsi": "Ultimate ASI Loader용 Steam 설정 하나",
       "notLoading": "Kiln이 로드되지 않음",
       "didNotStart": "Kiln이 시작되지 않음",
@@ -2793,6 +2794,11 @@
         "dlss": "Kiln의 DLSS 설정은 비켜섭니다. 프레임 제한과 정보 표시는 계속 작동합니다.",
         "upscaler": "게임 옆에 다른 업스케일러 도구의 파일이 있습니다 ({file})",
         "upscalerOnly": "Kiln의 업스케일러 선택은 비켜섭니다. 프레임 제한, DLSS 설정, 정보 표시는 계속 작동합니다."
+      },
+      "overlayAnyway": {
+        "label": "그래도 Kiln 오버레이 그리기 (프레임 생성과 함께 쓰면 시작할 때 충돌할 수 있음)",
+        "hint": "다음 게임 시작부터 Kiln의 창, HUD, 모드 페이지가 {tools} 옆에서도 표시됩니다. 그 뒤 게임이 시작할 때 꺼지면 이 설정을 끄세요. 켜져 있는 동안 Kiln은 시작할 때마다 다시 시도합니다.",
+        "hintNoTool": "Kiln 오버레이는 시작 중에 꺼진 게임 다음에도 게임을 시작할 때마다 그려집니다. Kiln이 다시 판단하게 하려면 이 설정을 끄세요."
       },
       "labels": {
         "fpsCap": "프레임 제한",
