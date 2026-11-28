@@ -403,7 +403,10 @@ pub const SETTING_FIELDS: [&str; 14] = [
 
 /// What ShroudForge's own reader and schema refuse in one setting's metadata (`raw`: the setting as declared), in words
 /// naming the field and what it expects. ShroudForge's `$defs.setting` in its 1.7 and every 1.8 schema snapshot, and
-/// read_mod_settings.rs: anything those accept passes, fields Kiln does not use included.
+/// read_mod_settings.rs: anything those accept passes, fields Kiln does not use included. Checked here: the fields a
+/// setting may have and every field the reader reads (value, control, applyAt, restartRequired, assetPreparation, the
+/// options and their labels, enabledWhen). Not checked here: the schema's other bounds (the setting's own label and
+/// description, min/max/step, minLength/maxLength, key patterns), which sfi-package's strict model checks.
 fn check_metadata(s: &SfSetting, raw: &serde_json::Value) -> std::result::Result<(), String> {
     if s.value.is_null() || s.value.is_object() {
         return Err(format!("value must be a boolean, text, a number or a list, not {}", kind(&s.value)));
@@ -411,8 +414,18 @@ fn check_metadata(s: &SfSetting, raw: &serde_json::Value) -> std::result::Result
     if let Some(field) = raw.as_object().and_then(|o| o.keys().find(|k| !SETTING_FIELDS.contains(&k.as_str()))) {
         return Err(format!("field {} is not one a setting may have ({})", quoted(field), SETTING_FIELDS.join(", ")));
     }
-    if !matches!(s.apply_at.as_deref(), Some("live" | "restart")) {
-        return Err(format!("applyAt must be \"live\" or \"restart\", not {}", raw.get("applyAt").map_or_else(|| "missing".into(), |v| v.to_string())));
+    // ShroudForge's reader (read_mod_settings.rs) and schema: control is one of its controls, applyAt "live" or "restart"
+    // (absent: restart, or live when restartRequired is false), restartRequired and assetPreparation true or false
+    if let Some(c) = raw.get("control").filter(|c| !c.as_str().is_some_and(|c| CONTROLS.contains(&c))) {
+        return Err(format!("control must be one of {}, not {}", CONTROLS.join(", "), shown(c)));
+    }
+    if let Some(a) = raw.get("applyAt").filter(|a| !matches!(a.as_str(), Some("live" | "restart"))) {
+        return Err(format!("applyAt must be \"live\" or \"restart\", not {}", shown(a)));
+    }
+    for field in ["restartRequired", "assetPreparation"] {
+        if let Some(v) = raw.get(field).filter(|v| !v.is_boolean()) {
+            return Err(format!("{field} must be true or false, not {}", shown(v)));
+        }
     }
     if raw.get("restartRequired").and_then(|v| v.as_bool()).is_some_and(|r| r != (s.apply_at.as_deref() == Some("restart"))) {
         return Err("applyAt and restartRequired must agree (restartRequired: true goes with applyAt \"restart\")".into());
@@ -432,14 +445,30 @@ fn check_metadata(s: &SfSetting, raw: &serde_json::Value) -> std::result::Result
             return Err(format!("option {}'s {why}", quoted(k)));
         }
     }
-    if s.enabled_when.as_ref().is_some_and(|w| w.get("setting").and_then(|v| v.as_str()).is_none() || w.get("equals").is_none()) {
-        return Err("enabledWhen must name a setting and the value it equals ({ \"setting\": key, \"equals\": value })".into());
+    // ShroudForge's SettingCondition (deny_unknown_fields) and schema: the two fields and nothing else
+    if s.enabled_when.as_ref().is_some_and(|w| {
+        w.get("setting").and_then(|v| v.as_str()).is_none() || w.get("equals").is_none() || w.as_object().is_some_and(|o| o.len() > 2)
+    }) {
+        return Err("enabledWhen must name a setting and the value it equals, and nothing else ({ \"setting\": key, \"equals\": value })".into());
     }
     Ok(())
 }
 
 fn article(word: &str) -> &'static str {
     if word.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" }
+}
+
+/// `control`'s values in ShroudForge's `$defs.setting` (its SettingControl).
+pub const CONTROLS: [&str; 12] =
+    ["toggle", "checkbox", "text", "textarea", "number", "slider", "select", "radio", "segmented", "multiselect", "keybind", "color"];
+
+/// A value of a package in a message: its JSON text, at most 60 characters of it.
+fn shown(v: &serde_json::Value) -> String {
+    let text = v.to_string();
+    match text.char_indices().nth(60) {
+        Some((at, _)) => format!("{}...", &text[..at]),
+        None => text,
+    }
 }
 
 /// A key or field name of a package in a message: quoted, and at most 80 characters of it.

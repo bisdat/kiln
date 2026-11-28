@@ -4274,7 +4274,7 @@
         }
       ],
       "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":\"G\",\"icon\":\"star\"}}}}}\n",
-      "errorContains": "\"icon\""
+      "errorContains": "option \"x\"'s label may hold only \"label\" and \"group\", not \"icon\""
     },
     {
       "name": "option-label-text-must-not-be-empty",
@@ -4301,7 +4301,7 @@
         }
       ],
       "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":\"\",\"y\":\"Y\"}}}}\n",
-      "errorContains": "1 to 120 characters"
+      "errorContains": "option \"x\"'s label must be text of 1 to 120 characters"
     },
     {
       "name": "option-label-object-text-over-120-characters",
@@ -4328,7 +4328,7 @@
         }
       ],
       "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL\",\"group\":\"G\"}}}}}\n",
-      "errorContains": "1 to 120 characters"
+      "errorContains": "option \"x\"'s label must be text of 1 to 120 characters"
     },
     {
       "name": "option-group-must-not-be-empty",
@@ -4355,7 +4355,7 @@
         }
       ],
       "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":\"\"}}}}}\n",
-      "errorContains": "1 to 60 characters"
+      "errorContains": "option \"x\"'s group must be text of 1 to 60 characters"
     },
     {
       "name": "option-group-over-60-characters",
@@ -4382,7 +4382,7 @@
         }
       ],
       "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":\"ggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg\"}}}}}\n",
-      "errorContains": "1 to 60 characters"
+      "errorContains": "option \"x\"'s group must be text of 1 to 60 characters"
     },
     {
       "name": "setting-field-outside-schema",
@@ -4409,7 +4409,142 @@
         }
       ],
       "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":\"X\"},\"tooltip\":\"Pick one\"}}}\n",
-      "errorContains": "\"tooltip\""
+      "errorContains": "field \"tooltip\" is not one a setting may have"
+    },
+    {
+      "name": "control-outside-schema",
+      "about": "ShroudForge reads control into its SettingControl (the schema's enum); any other control refuses the mod",
+      "mod": {
+        "id": "control-outside-schema",
+        "name": "control-outside-schema",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"control\":\"dropdown\",\"options\":{\"x\":\"X\"}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"control\":\"dropdown\",\"options\":{\"x\":\"X\"}}}}\n",
+      "errorContains": "control must be one of toggle, checkbox"
+    },
+    {
+      "name": "applyAt-not-text",
+      "about": "ShroudForge (read_mod_settings.rs): applyAt must be a string, live or restart; Kiln took a non-text applyAt as missing",
+      "mod": {
+        "id": "applyAt-not-text",
+        "name": "applyAt-not-text",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"applyAt\":true,\"options\":{\"x\":\"X\"}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"applyAt\":true,\"options\":{\"x\":\"X\"}}}}\n",
+      "errorContains": "applyAt must be \"live\" or \"restart\", not true"
+    },
+    {
+      "name": "restartRequired-not-boolean",
+      "about": "ShroudForge (read_mod_settings.rs): restartRequired must be a boolean; Kiln ignored a non-boolean one",
+      "mod": {
+        "id": "restartRequired-not-boolean",
+        "name": "restartRequired-not-boolean",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"restartRequired\":\"no\",\"options\":{\"x\":\"X\"}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"restartRequired\":\"no\",\"options\":{\"x\":\"X\"}}}}\n",
+      "errorContains": "restartRequired must be true or false, not \"no\""
+    },
+    {
+      "name": "assetPreparation-not-boolean",
+      "about": "ShroudForge (read_mod_settings.rs): assetPreparation must be a boolean",
+      "mod": {
+        "id": "assetPreparation-not-boolean",
+        "name": "assetPreparation-not-boolean",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"assetPreparation\":1,\"options\":{\"x\":\"X\"}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"assetPreparation\":1,\"options\":{\"x\":\"X\"}}}}\n",
+      "errorContains": "assetPreparation must be true or false, not 1"
+    },
+    {
+      "name": "enabledWhen-extra-field",
+      "about": "ShroudForge reads enabledWhen into SettingCondition (deny_unknown_fields; the schema closes it too): setting and equals only",
+      "mod": {
+        "id": "enabledWhen-extra-field",
+        "name": "enabledWhen-extra-field",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":true},\"b\":{\"value\":\"x\",\"options\":{\"x\":\"X\"},\"enabledWhen\":{\"setting\":\"a\",\"equals\":true,\"not\":false}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": false,
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":true},\"b\":{\"value\":\"x\",\"options\":{\"x\":\"X\"},\"enabledWhen\":{\"setting\":\"a\",\"equals\":true,\"not\":false}}}}\n",
+      "errorContains": "enabledWhen must name a setting and the value it equals, and nothing else"
     }
   ],
   "limits": {

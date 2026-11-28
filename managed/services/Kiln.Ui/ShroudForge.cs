@@ -185,18 +185,29 @@ internal static class ShroudForgePackages
         }
     }
 
-    /// <summary>A key or field name of a package in a message: quoted, and at most 80 characters of it (kiln-manage
-    /// <c>quoted</c>).</summary>
-    private static string Quoted(string text)
+    /// <summary>The first <paramref name="max"/> characters of <paramref name="text"/> (never half of one), or null when it
+    /// has no more than that.</summary>
+    private static string? Cut(string text, int max)
     {
         var at = 0;
         var n = 0;
         foreach (var r in text.EnumerateRunes())
         {
-            if (n++ == 80) return "\"" + text[..at] + "\"...";
+            if (n++ == max) return text[..at];
             at += r.Utf16SequenceLength;
         }
-        return "\"" + text + "\"";
+        return null;
+    }
+
+    /// <summary>A key or field name of a package in a message: quoted, and at most 80 characters of it (kiln-manage
+    /// <c>quoted</c>).</summary>
+    private static string Quoted(string text) => Cut(text, 80) is { } cut ? "\"" + cut + "\"..." : "\"" + text + "\"";
+
+    /// <summary>A value of a package in a message: its JSON text, at most 60 characters of it (kiln-manage <c>shown</c>).</summary>
+    private static string Shown(JsonNode? value)
+    {
+        var text = value?.ToJsonString() ?? "null";
+        return Cut(text, 60) is { } cut ? cut + "..." : text;
     }
 
     /// <summary>The length of a text as ShroudForge's schema counts it (jsonschema's minLength and maxLength: characters, not
@@ -356,6 +367,15 @@ internal static class ShroudForgePackages
         // (additionalProperties: false; only unknown top-level fields are tolerated): any other field refuses the mod
         if (meta is not null && meta.Select(kv => kv.Key).FirstOrDefault(f => !SettingFields.Contains(f)) is { } unknown)
             throw new SfEditException($"ShroudForge would refuse setting {key}: field {Quoted(unknown)} is not one a setting may have ({string.Join(", ", SettingFieldNames)})");
+        // ShroudForge's reader (read_mod_settings.rs) and schema: control is one of its controls, applyAt "live" or "restart"
+        // (absent: restart, or live when restartRequired is false), restartRequired and assetPreparation true or false
+        if (meta is not null && meta.ContainsKey("control") && !ControlNames.Contains(Str(meta, "control")))
+            throw new SfEditException($"ShroudForge would refuse setting {key}: control must be one of {string.Join(", ", ControlNames)}, not {Shown(meta["control"])}");
+        if (meta is not null && meta.ContainsKey("applyAt") && Str(meta, "applyAt") is not ("live" or "restart"))
+            throw new SfEditException($"ShroudForge would refuse setting {key}: applyAt must be \"live\" or \"restart\", not {Shown(meta["applyAt"])}");
+        foreach (var field in (string[])["restartRequired", "assetPreparation"])
+            if (meta is not null && meta.ContainsKey(field) && Flag(meta, field) is null)
+                throw new SfEditException($"ShroudForge would refuse setting {key}: {field} must be true or false, not {Shown(meta[field])}");
         var options = new List<SfOption>();
         // ShroudForge's schema: options name at least one choice ("options": {} refuses the mod)
         if (meta is not null && meta.TryGetPropertyValue("options", out var declared) && declared is not JsonObject { Count: > 0 })
@@ -384,14 +404,15 @@ internal static class ShroudForgePackages
         var control = Str(meta, "control");
         if (control is null && options.Count > 0) control = type == "array" ? "multiselect" : "select";
         var applyAt = Str(meta, "applyAt") ?? (Flag(meta, "restartRequired") == false ? "live" : "restart");
-        if (applyAt is not ("live" or "restart") || Flag(meta, "restartRequired") is { } restart && restart != (applyAt == "restart"))
-            throw new SfEditException($"ShroudForge would refuse setting {key}: applyAt must be \"live\" or \"restart\" and agree with restartRequired");
+        if (Flag(meta, "restartRequired") is { } restart && restart != (applyAt == "restart"))
+            throw new SfEditException($"ShroudForge would refuse setting {key}: applyAt and restartRequired must agree (restartRequired: true goes with applyAt \"restart\")");
         if (type == "array" && options.Count == 0) throw new SfEditException($"ShroudForge would refuse setting {key}: a list value needs options naming its choices");
         SfCondition? when = null;
         if (meta is not null && meta.TryGetPropertyValue("enabledWhen", out var condition))
         {
-            if (condition is not JsonObject w || Str(w, "setting") is not { } target || !w.ContainsKey("equals"))
-                throw new SfEditException($"ShroudForge would refuse setting {key}: enabledWhen must name a setting and the value it equals ({{ \"setting\": key, \"equals\": value }})");
+            // ShroudForge's SettingCondition (deny_unknown_fields) and schema: the two fields and nothing else
+            if (condition is not JsonObject w || Str(w, "setting") is not { } target || !w.ContainsKey("equals") || w.Count > 2)
+                throw new SfEditException($"ShroudForge would refuse setting {key}: enabledWhen must name a setting and the value it equals, and nothing else ({{ \"setting\": key, \"equals\": value }})");
             when = new SfCondition(target, w["equals"]?.DeepClone());
         }
         // ShroudForge reads the limits with as_u64: a whole number token (4, not 4.0)
@@ -528,6 +549,9 @@ internal static class ShroudForgePackages
         "min", "max", "step", "minLength", "maxLength", "options",
     ];
     private static readonly HashSet<string> SettingFields = new(SettingFieldNames, StringComparer.Ordinal);
+    // control's values in ShroudForge's $defs.setting (its SettingControl; kiln-manage CONTROLS)
+    private static readonly string[] ControlNames =
+        ["toggle", "checkbox", "text", "textarea", "number", "slider", "select", "radio", "segmented", "multiselect", "keybind", "color"];
 
     /// <summary><see cref="SfPackage.Unused"/>: what ShroudForge accepts and uses that the page does not (a setting field
     /// outside ShroudForge's schema is refused instead: ShroudForge refuses the mod over it).</summary>
