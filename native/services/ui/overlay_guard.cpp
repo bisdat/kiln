@@ -297,8 +297,8 @@ VOID CALLBACK menu_proof(PVOID, BOOLEAN) {
     game_menu_fell_back();
 }
 
-// kiln.json "ui": {"overlay": "off"} (the launcher's Settings, "Kiln"): 0 = drawing off, -1 = Kiln decides
-// (overlay_setting.h). Read once at start; a missing or unreadable file, section or key is -1.
+// kiln.json "ui": {"overlay": "off"} or "on" (the launcher's Settings; overlay_setting.h): 0 = drawing off, 1 = drawing
+// on (as KILN_UI_OVERLAY=1), -1 = Kiln decides. Read once at start; a missing or unreadable file, section or key is -1.
 int kiln_json_overlay() {
     try {
         const auto dir = api_path(KILN_PATH_KILN);
@@ -326,9 +326,18 @@ bool overlay_guard_start() noexcept {
         char option[8] = {};
         const DWORD option_size = GetEnvironmentVariableA("KILN_UI_OVERLAY", option, sizeof option);
         const int environment = option_size == 1 && option[0] == '0' ? 0 : option_size == 1 && option[0] == '1' ? 1 : -1;
-        // kiln.json ui.overlay "off": the same as KILN_UI_OVERLAY=0, for players who cannot set the environment (Steam's
-        // launch options on Windows); KILN_UI_OVERLAY wins over it
+        // kiln.json ui.overlay "off" / "on": the same as KILN_UI_OVERLAY=0 / =1, for players who cannot set the
+        // environment (Steam's launch options on Windows); KILN_UI_OVERLAY wins over it (choose_overlay_mode)
         const int setting = kiln_json_overlay();
+        // The player's switch, whichever decides (-1: none, Kiln decides), and its name for kiln.log. "on" and =1 are one
+        // switch in two places: the same drawing, the same crash guard (the attempt recorded, a death in it counted, the
+        // next start with the switch still on tries again), only the name in kiln.log differs.
+        const int chosen = environment != -1 ? environment : setting;
+        const char* const switch_name = environment == 1 ? "KILN_UI_OVERLAY=1" : environment == 0 ? "KILN_UI_OVERLAY=0"
+            : setting == 1 ? "kiln.json ui.overlay \"on\"" : setting == 0 ? "kiln.json ui.overlay \"off\"" : "";
+        // what the Mods entry (and Ui.Status.Error, the capability rows) adds when Kiln's drawing steps aside for another
+        // layer on the game's presents: the setting that draws it anyway, at the player's own risk
+        const std::string anyway = " (kiln.json ui.overlay \"on\" draws it anyway)";
         auto apply_mode = [&](bool guarded) {
             g_overlay_mode = choose_overlay_mode(false, guarded, sl || optiscaler_off, environment, setting);
             if (!overlay_drawing_on()) {
@@ -336,16 +345,17 @@ bool overlay_guard_start() noexcept {
                 g_overlay_reason += environment == 0 ? "KILN_UI_OVERLAY=0"
                     : environment == -1 && setting == 0 ? "turned off in Kiln's settings (kiln.json ui.overlay)"
                     : guarded ? "an earlier overlay start was interrupted"
-                    : sl ? "NVIDIA Streamline is installed"
-                    : optiscaler.ini.overlay_menu != 0 ? "OptiScaler's own overlay menu is on" : "OptiScaler's frame generation is on";
+                    : sl ? "NVIDIA Streamline is installed" + anyway
+                    : optiscaler.ini.overlay_menu != 0 ? "OptiScaler's own overlay menu is on" + anyway
+                                                       : "OptiScaler's frame generation is on" + anyway;
             }
         };
         apply_mode(false);
         if (optiscaler.found()) {
             const std::string file = utf8(optiscaler.file.filename());
-            if (environment != -1)  // KILN_UI_OVERLAY decides, with or without OptiScaler's menu (its own lines below)
-                logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s; KILN_UI_OVERLAY=%d decides for Kiln's overlay",
-                     file.c_str(), optiscaler_settings(optiscaler).c_str(), environment);
+            if (chosen != -1)  // the player's switch decides, with or without OptiScaler's menu (its own lines below)
+                logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s; %s decides for Kiln's overlay",
+                     file.c_str(), optiscaler_settings(optiscaler).c_str(), switch_name);
             else if (optiscaler.coexists())  // the crash guard may still keep drawing off for this start (its own line)
                 logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: it leaves the game's presents alone, so it does not turn Kiln's overlay drawing off",
                      file.c_str(), optiscaler_settings(optiscaler).c_str());
@@ -353,13 +363,13 @@ bool overlay_guard_start() noexcept {
                 logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: it draws its own overlay in the game's presents and opens its menu with Insert, "
                      "so Kiln's overlay drawing steps aside (keys and the Mods menu still work). For Kiln's overlay, set OverlayMenu=false under [Menu] "
                      "in OptiScaler.ini and leave FGInput and FGOutput under [FrameGen] at auto (OptiScaler's menu and frame generation off, its "
-                     "upscaling on), or KILN_UI_OVERLAY=1 to try both at your own risk",
+                     "upscaling on), or kiln.json ui.overlay \"on\" (or KILN_UI_OVERLAY=1) to try both at your own risk",
                      file.c_str(), optiscaler_settings(optiscaler).c_str());
             else  // its menu off, its frame generation on: its nightly builds since October 2026 run it without the menu
                 logf(KILN_LOG_INFO, "ui: OptiScaler is installed (%s) with %s: with frame generation the game's frames are presented from OptiScaler's "
                      "own queue and swapchain, where Kiln cannot draw, so Kiln's overlay drawing steps aside (keys and the Mods menu still work). "
                      "For Kiln's overlay, set FGInput and FGOutput under [FrameGen] in OptiScaler.ini to auto (frame generation off, its upscaling "
-                     "stays), or KILN_UI_OVERLAY=1 to try at your own risk",
+                     "stays), or kiln.json ui.overlay \"on\" (or KILN_UI_OVERLAY=1) to try at your own risk",
                      file.c_str(), optiscaler_settings(optiscaler).c_str());
         } else if (optiscaler.ini_only) {
             logf(KILN_LOG_INFO, "ui: OptiScaler.ini is in the game folder, but no OptiScaler DLL next to it; Kiln's overlay is not changed by it");
@@ -369,16 +379,17 @@ bool overlay_guard_start() noexcept {
         // start the crash guard keeps off has its own warning below.
         auto say_off = [&](bool guarded) {
             if (overlay_drawing_on() || guarded) return;
-            if (environment == 0 || (environment == -1 && setting == 0)) {
-                logf(KILN_LOG_INFO, "ui: %s; key bindings and the Mods menu still work; KILN_UI_OVERLAY=1 tries drawing at your own risk", g_overlay_reason.c_str());
+            if (chosen == 0) {
+                logf(KILN_LOG_INFO, "ui: %s; key bindings and the Mods menu still work; kiln.json ui.overlay \"on\" or KILN_UI_OVERLAY=1 tries drawing at your own risk",
+                     g_overlay_reason.c_str());
                 return;
             }
             const std::string layer = sl ? std::string("NVIDIA Streamline (sl.interposer.dll, a frame generation mod)")
                 : "OptiScaler (" + utf8(optiscaler.file.filename()) +
                       (optiscaler.ini.overlay_menu != 0 ? ", its own overlay menu on)" : ", its frame generation on)");
             logf(KILN_LOG_INFO, "ui: Kiln's overlay drawing steps aside for %s: it hooks the game's Vulkan presents too. Key bindings "
-                 "still work, and the Mods entry shows the game's own Mods rows (\"Mods: %s\" once chosen); KILN_UI_OVERLAY=1 tries "
-                 "drawing at your own risk", layer.c_str(), g_overlay_reason.c_str());
+                 "still work, and the Mods entry shows the game's own Mods rows (\"Mods: %s\" once chosen); kiln.json ui.overlay \"on\" "
+                 "(the launcher: Draw Kiln's overlay anyway) or KILN_UI_OVERLAY=1 tries drawing at your own risk", layer.c_str(), g_overlay_reason.c_str());
         };
         auto dir = api_path(KILN_PATH_STATE);
         if (dir.empty()) {
@@ -421,8 +432,11 @@ bool overlay_guard_start() noexcept {
         auto start = overlay_guard::begin(record, wrapper_set);
         apply_mode(start.off);
         record = start.record;
-        if (environment == 1) {
-            // Explicit opt-in bypasses OFF for this attempt, preserving failure history.
+        if (chosen == 1) {
+            // Explicit opt-in (KILN_UI_OVERLAY=1, or kiln.json ui.overlay "on" where the variable is not set) bypasses OFF for
+            // this attempt, preserving failure history: the attempt is recorded at vk_install as any other, a death in it is
+            // counted (guarded, then locked) at the next start, and that start, with the switch still on, tries again. Without
+            // the switch the record's guarded or locked state holds again.
             record.phase = overlay_guard::Phase::trying;
             record.stage = overlay_guard::Stage::begun;
         }
@@ -450,15 +464,15 @@ bool overlay_guard_start() noexcept {
             if (record.phase == overlay_guard::Phase::locked) why += "; it failed twice at this stage; delete kiln/state/overlay-start.guard to try again";
             if (sl) why += "; NVIDIA Streamline (a frame generation mod) is installed; it wraps the same graphics calls";
             if (optiscaler.found()) why += "; OptiScaler is installed; it patches the same graphics calls";
-            why += "; KILN_UI_OVERLAY=1 tries drawing at your own risk";
+            why += "; kiln.json ui.overlay \"on\" or KILN_UI_OVERLAY=1 tries drawing at your own risk";
             logf(KILN_LOG_WARN, "ui: %s", why.c_str());
 
         }
         if (!overlay_drawing_on())
             say_off(start.off);
-        else if (environment == 1 && (sl || optiscaler_off || start.off))
-            logf(KILN_LOG_WARN, "ui: KILN_UI_OVERLAY=1: trying overlay drawing despite %s; the crash guard records this attempt",
-                 start.off ? "an interrupted start" : sl ? "Streamline" : "OptiScaler's own overlay");
+        else if (chosen == 1 && (sl || optiscaler_off || start.off))
+            logf(KILN_LOG_WARN, "ui: %s: trying overlay drawing despite %s; the crash guard records this attempt",
+                 switch_name, start.off ? "an interrupted start" : sl ? "Streamline" : "OptiScaler's own overlay");
         return !overlay_drawing_on();
     } catch (...) { error(); return !overlay_drawing_on(); }
 }

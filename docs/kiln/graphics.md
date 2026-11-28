@@ -242,8 +242,11 @@ the Graphics page, when another tool does the same (the files are looked up in t
 | another tool's upscaler DLLs next to the game (`amd_fidelityfx_*.dll`, `libxess*.dll`), or the game's FSR 3 pass already patched | stays | stays | aside |
 | Kiln's overlay hooks off (`KILN_UI_OVERLAY=0`, kiln.json `ui.overlay` "off", the crash guard) | aside | aside | aside |
 
-The readout stays where Kiln's overlay draws. Kiln never patches over another tool's hook and never changes another
-loader's files or mods. The launcher's Graphics card names the same tools from the game folder, and which of Kiln's
+The readout stays where Kiln's overlay draws. Kiln's overlay itself steps aside for NVIDIA Streamline and for OptiScaler
+with its own menu or frame generation, unless the player switches on "Draw Kiln's overlay anyway" (kiln.json
+`ui.overlay` "on", since 0.2.0-dev.31.25: [ui.md](ui.md#drawing-it-anyway-kilnjson-on-and-kiln_ui_overlay1)); the
+readout then draws, and the frame cap, the DLSS settings and the upscaler still step aside for those tools as in the
+table. Kiln never patches over another tool's hook and never changes another loader's files or mods. The launcher's Graphics card names the same tools from the game folder, and which of Kiln's
 tools step aside for each (`GameStatus.graphicsStepAside`, with `upscaler` for the third column). Example log line:
 > graphics: frame cap 60 fps, DLSS preset K; Kiln's frame cap and DLSS settings step aside for OptiScaler (dxgi.dll)
 

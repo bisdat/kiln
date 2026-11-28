@@ -21,7 +21,14 @@ int main() {
     setting(R"({"ui": {"overlay": "off"}})", 0);
     setting("// the player's kiln.json\n{\"policy\": \"verified-only\", /* Kiln's look */ \"ui\": {\"look\": \"game\", \"overlay\": \"off\"}}", 0);
     setting(R"({"ui": {"overlay": "auto"}})", -1);
-    setting(R"({"ui": {"overlay": "on"}})", -1);  // no force-on from the file: KILN_UI_OVERLAY=1 only
+    // (0.2.0-dev.31.25, Soligna) "on": the same as KILN_UI_OVERLAY=1, for Windows players (Steam's launch options cannot
+    // set the variable there): the drawing on next to NVIDIA Streamline, OptiScaler and a guarded or locked crash guard
+    setting(R"({"ui": {"overlay": "on"}})", 1);
+    setting("// the player's kiln.json\n{\"ui\": {/* frame generation */ \"overlay\": \"on\", \"look\": \"game\"}}", 1);
+    setting(R"({"ui": {"overlay": "ON"}})", -1);  // the values are exact, as "off" is
+    setting(R"({"ui": {"overlay": true}})", -1);
+    setting(R"({"ui": {"overlay": 1}})", -1);
+    setting(R"({"overlay": "on"})", -1);  // top level: not the ui section
     setting(R"({"ui": {"overlay": "OFF"}})", -1);
     setting(R"({"ui": {"overlay": false}})", -1);
     setting(R"({"ui": {"chatHistory": true}})", -1);
@@ -34,6 +41,15 @@ int main() {
     assert(choose_overlay_mode(false, false, false, -1, overlay_setting(R"({"ui": {"overlay": "off"}})")) == OverlayMode::drawing_off);
     assert(choose_overlay_mode(false, false, false, 1, 0) == OverlayMode::on);
     assert(choose_overlay_mode(false, false, false, -1, overlay_setting(R"({"ui": {"overlay": "auto"}})")) == OverlayMode::on);
+    // the setting "on", KILN_UI_OVERLAY unset: drawing on next to Streamline (or OptiScaler) and a guarded start, as with
+    // KILN_UI_OVERLAY=1; KILN_UI_OVERLAY=0 still wins over it, and KILN_UI_DISABLE=1 over both
+    const int on = overlay_setting(R"({"ui": {"overlay": "on"}})");
+    for (bool guard : {false, true}) for (bool sl : {false, true}) {
+        assert(choose_overlay_mode(false, guard, sl, -1, on) == choose_overlay_mode(false, guard, sl, 1, -1));
+        assert(choose_overlay_mode(false, guard, sl, -1, on) == OverlayMode::on);
+        assert(choose_overlay_mode(false, guard, sl, 0, on) == OverlayMode::drawing_off);
+        assert(choose_overlay_mode(true, guard, sl, -1, on) == OverlayMode::disabled);
+    }
     // kiln.json "ui": {"chatHistory": ..., "chatCompletion": ...} (chat_setting.h): history off and completion on by
     // default (0.2.0-dev.29.22), each only switched by its own boolean
     unsigned chats = 0;

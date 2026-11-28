@@ -30,6 +30,7 @@ import { useUpdate } from "../api/update";
 import { rich, t, useT } from "../i18n";
 import { ArchText, Banner, Button, Cones, Field, KeyValue, Modal, PathPicker, TaskProgress, errorText, toast } from "../ui";
 import { StartModal, UnknownBuild, useStartSetup, useStartWord } from "../components/GameStart";
+import { OverlayAnyway, overlayAsideTools } from "../components/OverlayAnyway";
 import { SendToSupport } from "../community/parts";
 import { crashLine, useCrash, useCrashNotice } from "../community/crash";
 import { ShareDock } from "../crucible/Share";
@@ -422,11 +423,30 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
       </Banner>,
     );
   }
-  // (dev.29.18) a graphics tool next to the game that changes what Kiln's overlay does (OptiScaler): what to expect
-  for (const g of s?.runtime.installed ? s.graphicsTools ?? [] : []) {
+  // (dev.29.18) a graphics tool next to the game that changes what Kiln's overlay does (OptiScaler): what to expect.
+  // (0.2.0-dev.31.25) NVIDIA Streamline too (GameStatus.graphicsStepAside: Kiln's overlay always steps aside for it), and
+  // under the first banner whose tool makes Kiln's overlay step aside, the player's switch to draw it anyway
+  // (components/OverlayAnyway: kiln.json ui.overlay "on"), once.
+  const tools = s?.runtime.installed ? s.graphicsTools ?? [] : [];
+  const streamline = s?.runtime.installed ? s.graphicsStepAside?.find((a) => a.kind === "streamline") : undefined;
+  const overlayTools = s?.runtime.installed ? overlayAsideTools(s.graphicsStepAside ?? [], tools) : [];
+  let anyway = overlayTools.length > 0;
+  if (streamline) {
+    out.push(
+      <Banner key="gfx-streamline" tone="info" fold={`graphics-tool:streamline:${streamline.file}`} title={t("play.banner.graphicsTool", { name: "NVIDIA Streamline", file: streamline.file })}>
+        <span data-testid="graphics-tool-note">{t("play.banner.streamlineNote")}</span>
+        {anyway && <OverlayAnyway gameId={game.id} tools={overlayTools} />}
+      </Banner>,
+    );
+    anyway = false;
+  }
+  for (const g of tools) {
+    const here = anyway && g.engine === "optiscaler" && !g.kilnOverlay;
+    if (here) anyway = false;
     out.push(
       <Banner key={`gfx-${g.engine}`} tone="info" fold={`graphics-tool:${g.engine}:${g.file}`} title={t("play.banner.graphicsTool", { name: g.engine === "optiscaler" ? "OptiScaler" : g.engine, file: g.file })}>
         <span data-testid="graphics-tool-note">{g.text}</span>
+        {here && <OverlayAnyway gameId={game.id} tools={overlayTools} />}
       </Banner>,
     );
   }

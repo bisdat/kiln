@@ -2468,6 +2468,7 @@
         "other": "{names} nécessitent un Kiln plus récent."
       },
       "graphicsTool": "{name} est installé ({file})",
+      "streamlineNote": "De lui-même, l'overlay de Kiln dans le jeu s'efface à côté de lui : tous deux s'accrochent à l'affichage des images du jeu, et ensemble ils faisaient planter le jeu au démarrage. Les raccourcis de Kiln et l'entrée Mods fonctionnent alors toujours ; les fenêtres, les HUD et la page Mods de Kiln ne s'affichent pas.",
       "settingAsi": "Un réglage Steam pour Ultimate ASI Loader",
       "notLoading": "Kiln ne se charge pas",
       "didNotStart": "Kiln n'a pas démarré",
@@ -2849,6 +2850,11 @@
         "dlss": "Les réglages DLSS de Kiln s'effacent ; la limite d'images et l'indicateur fonctionnent toujours.",
         "upscaler": "Les fichiers d'un autre outil de mise à l'échelle sont à côté du jeu ({file})",
         "upscalerOnly": "Le choix de mise à l'échelle de Kiln s'efface ; la limite d'images, les réglages DLSS et l'indicateur fonctionnent toujours."
+      },
+      "overlayAnyway": {
+        "label": "Afficher l'overlay de Kiln quand même (peut planter au démarrage avec la génération d'images)",
+        "hint": "Dès le prochain démarrage du jeu, les fenêtres, les HUD et la page Mods de Kiln s'affichent à côté de {tools}. Si le jeu se ferme alors au démarrage, désactivez ceci : tant que c'est activé, Kiln réessaie à chaque démarrage.",
+        "hintNoTool": "L'overlay de Kiln s'affiche à chaque démarrage du jeu, même après un démarrage qui s'est fermé pendant son lancement. Désactivez ceci pour laisser Kiln décider de nouveau."
       },
       "labels": {
         "fpsCap": "Limite d'images",

@@ -300,13 +300,15 @@ mod kiln_graphics_tests {
     }
 
     /// (dev.29.18) kiln.json "ui": {"overlay": "off"} (Settings, the kiln.json card): Kiln's overlay drawing off, as
-    /// KILN_UI_OVERLAY=0 (native/services/ui/overlay_setting.h reads it); "auto" by default, nothing else is taken.
+    /// KILN_UI_OVERLAY=0 (native/services/ui/overlay_setting.h reads it); "auto" by default. (0.2.0-dev.31.25) "on": drawn
+    /// anyway, as KILN_UI_OVERLAY=1 (Settings, Graphics and the Play page: "Draw Kiln's overlay anyway" writes it, and
+    /// switching that off removes the key); nothing else is taken.
     #[test]
     fn the_overlay_switch_is_set_and_checked() {
         let schema = kiln_snapshot();
         let e = schema.entries.iter().find(|e| e.path == "ui.overlay").expect("ui.overlay in the snapshot");
         assert_eq!(e.default, json!("auto"));
-        assert_eq!(serde_json::to_value(&e.options).unwrap(), json!(["auto", "off"]));
+        assert_eq!(serde_json::to_value(&e.options).unwrap(), json!(["auto", "off", "on"]));
         assert!(e.requires_restart, "kiln.ui reads it at the game's start");
         let dir = std::env::temp_dir().join(format!("kiln-launcher-overlay-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -318,10 +320,17 @@ mod kiln_graphics_tests {
         assert_eq!(doc.values["ui"]["look"], "game");
         assert!(doc.errors.is_empty() && doc.text.contains("// keep me"), "{:?}", doc.errors);
         // (an enum also takes its option's index and any case, as Kiln.Api's ConfigSchema does: written as "off" then)
-        for bad in [json!("on"), json!(false), json!(2)] {
+        for bad in [json!("yes"), json!(true), json!(false), json!(3)] {
             assert!(kiln_set(&path, "ui.overlay", Some(&bad)).is_err(), "{bad}");
         }
         assert_eq!(kiln_set(&path, "ui.overlay", Some(&json!("OFF"))).unwrap().values["ui"]["overlay"], "off");
+        // "on", written exactly so: kiln.ui takes the value as it is ("ON" would be Kiln deciding)
+        let doc = kiln_set(&path, "ui.overlay", Some(&json!("on"))).unwrap();
+        assert_eq!(doc.values["ui"]["overlay"], "on");
+        assert!(doc.errors.is_empty() && doc.text.contains("// keep me") && doc.values["ui"]["look"] == "game", "{:?}", doc.errors);
+        assert_eq!(kiln_set(&path, "ui.overlay", Some(&json!("On"))).unwrap().values["ui"]["overlay"], "on");
+        assert_eq!(kiln_set(&path, "ui.overlay", Some(&json!(2))).unwrap().values["ui"]["overlay"], "on");
+        assert_eq!(kiln_setting_line("g", "ui.overlay", Some(&json!("on"))), "kiln.json of g: ui.overlay = on");
         let doc = kiln_set(&path, "ui.overlay", None).unwrap();
         assert!(doc.values["ui"].get("overlay").is_none());
         let _ = std::fs::remove_dir_all(&dir);

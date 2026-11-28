@@ -2468,6 +2468,7 @@
         "other": "{names} precisam de um Kiln mais novo."
       },
       "graphicsTool": "{name} está instalado ({file})",
+      "streamlineNote": "Por conta própria, o overlay do Kiln no jogo dá passagem ao lado dele: os dois se ligam à apresentação de quadros do jogo, e juntos faziam o jogo travar ao iniciar. Nesse caso, os atalhos do Kiln e a entrada Mods continuam funcionando; as janelas, os HUDs e a página de mods do Kiln não aparecem.",
       "settingAsi": "Uma configuração da Steam para o Ultimate ASI Loader",
       "notLoading": "O Kiln não está carregando",
       "didNotStart": "O Kiln não iniciou",
@@ -2849,6 +2850,11 @@
         "dlss": "As configurações de DLSS do Kiln dão passagem; o limite de quadros e o painel de desempenho continuam funcionando.",
         "upscaler": "Os arquivos de outra ferramenta de upscaler estão junto do jogo ({file})",
         "upscalerOnly": "A escolha de upscaler do Kiln dá passagem; o limite de quadros, as configurações de DLSS e o painel de desempenho continuam funcionando."
+      },
+      "overlayAnyway": {
+        "label": "Desenhar o overlay do Kiln mesmo assim (pode travar ao iniciar com geração de quadros)",
+        "hint": "A partir do próximo início do jogo, as janelas, os HUDs e a página de mods do Kiln aparecem ao lado de {tools}. Se o jogo então fechar ao iniciar, desative isto: enquanto estiver ativado, o Kiln tenta de novo a cada início.",
+        "hintNoTool": "O overlay do Kiln é desenhado em todo início do jogo, também depois de um que fechou enquanto ele iniciava. Desative isto para o Kiln voltar a decidir."
       },
       "labels": {
         "fpsCap": "Limite de quadros",

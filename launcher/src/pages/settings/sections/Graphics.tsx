@@ -1,4 +1,6 @@
-// Settings > Graphics, for the selected game (a client): the tools Kiln's graphics tools step aside for, at the top;
+// Settings > Graphics, for the selected game (a client): the tools Kiln's graphics tools step aside for, at the top, and
+// under them (0.2.0-dev.31.25) "Draw Kiln's overlay anyway" next to a tool Kiln's overlay steps aside for (NVIDIA
+// Streamline, OptiScaler with its menu or frame generation) or while kiln.json ui.overlay is "on" (components/OverlayAnyway);
 // Kiln's graphics tools (kiln.json's "graphics" section: frame cap, DLSS preset and render size, readout); "Behind the
 // game's FSR 3": the upscaler Kiln runs in place of the game's FSR 3 (graphics.upscaler, graphics.amdUpscaler), what runs
 // now or ran in the last game (GameStatus.graphicsState) or what will run, and the offer of the chosen vendor's files;
@@ -6,6 +8,7 @@
 import type { GameId, GraphicsNow, GraphicsStepAside, Json } from "../../../api/commands";
 import { useGame, useGameStatus } from "../../../api/hooks";
 import { graphicsAsideText, graphicsLabels, graphicsSchema, isGraphicsPath, UPSCALER_PATHS } from "../../../components/GraphicsSettings";
+import { OverlayAnyway, overlayAnyway, overlayAsideTools } from "../../../components/OverlayAnyway";
 import { UpscalerFilesList, useUpscalerFiles, type UpscalerFiles } from "../../../components/UpscalerSettings";
 import { AMD_MODES, UPSCALER_CHOICES, amdModeOf, choiceOf, upscalerView } from "../../../components/upscalerStatus";
 import { useT } from "../../../i18n";
@@ -39,6 +42,9 @@ function Graphics({ gameId }: { gameId: GameId }) {
   const installed = status.data?.runtime.installed;
   const aside = status.data?.graphicsStepAside ?? [];
   const doc = k.doc.data;
+  // the switch next to the tools Kiln's overlay steps aside for, and while it is on without one (so it can go off again)
+  const overlayTools = overlayAsideTools(aside, status.data?.graphicsTools ?? []);
+  const offerOverlay = !!installed && (overlayTools.length > 0 || overlayAnyway(doc?.values));
   const schema = doc?.schema ? graphicsSchema(doc.schema) : null;
   const ids = (schema?.entries ?? []).map((e) => `kj:${e.path}`);
   const shown = v.hits ? schema && { ...schema, entries: schema.entries.filter((e) => v.hits!.has(`kj:${e.path}`)) } : schema;
@@ -47,13 +53,14 @@ function Graphics({ gameId }: { gameId: GameId }) {
   const running = !!status.data?.running;
   return (
     <>
-      {!v.hits && aside.length > 0 && (
+      {!v.hits && (aside.length > 0 || offerOverlay) && (
         <div className="k-stack k-st-notes" style={{ gap: 6 }}>
           {aside.map((a) => (
             <Banner key={`${a.kind}-${a.file}`} tone="info">
               <span data-testid="graphics-step-aside">{graphicsAsideText(a)}</span>
             </Banner>
           ))}
+          {offerOverlay && <OverlayAnyway gameId={gameId} tools={overlayTools} />}
         </div>
       )}
       <Group id="graphics" items={ids} hint={t("settings.groups.graphicsHint")} more={moreBeyond(t("settings.groups.graphicsHint"), textOr("settings.groups.graphicsMore", "settings.graphics.sub"))}>

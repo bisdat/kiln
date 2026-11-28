@@ -435,7 +435,9 @@ int main() {
         expect(kui::overlay_guard_start(), "the overlay's drawing steps aside for Streamline");
         expect(count_logged("Kiln's overlay drawing steps aside for NVIDIA Streamline (sl.interposer.dll, a frame generation mod)") == 1,
                "one line names it");
-        expect(logged("the Mods entry shows the game's own Mods rows (\"Mods: the overlay's drawing is off: NVIDIA Streamline is installed\""),
+        // (0.2.0-dev.31.25) the Mods entry names the setting that draws it anyway
+        expect(logged("the Mods entry shows the game's own Mods rows (\"Mods: the overlay's drawing is off: NVIDIA Streamline is installed "
+                      "(kiln.json ui.overlay \"on\" draws it anyway)\""),
                "and says what the Mods entry does");
         expect(!kui::overlay_menu_ask() && guard_host::timers.empty(), "the Mods entry: the game's own Mods rows, nothing watched");
     });
@@ -463,6 +465,123 @@ int main() {
                !logged("steps aside"), "the switch's own line, no layer named");
         expect(!kui::overlay_menu_ask(), "the game's own Mods rows");
     });
+
+    // ---- 0.2.0-dev.31.25 (Soligna, Nexus 301): kiln.json "ui": {"overlay": "on"}, the same as KILN_UI_OVERLAY=1 ----
+    // Steam's launch options on Windows cannot set the variable, so the launcher writes the setting. One sequence, run once
+    // with each switch, NVIDIA Streamline next to the game: the attempt dies at hooks installed twice (the crash guard
+    // counts both, and locks), the start without the switch keeps the lock, the switch on again draws and completes it.
+    // The records on the disk after each start, and what the drawing does in each, must be the same for both switches.
+    const auto kiln_json = g_root / "game/kiln/kiln.json";
+    const auto streamline = g_root / "game/sl.interposer.dll";
+    auto set_json = [&](const char* text) {
+        if (text) std::ofstream(kiln_json, std::ios::binary) << text;
+        else std::filesystem::remove(kiln_json);
+    };
+    auto switched_on = [&](bool by_file) {
+        std::vector<std::string> records;
+        reset();
+        std::ofstream(streamline, std::ios::binary) << "Streamline";
+        const std::string sl_id = kui::overlay_guard::detect_wrappers(g_root / "game").identity;
+        auto rec_sl = [&](const char* fields) { return std::string("4 ") + fields + " 0.2.0-dev.29.19 " + sl_id + "\n"; };
+        const std::string who = by_file ? "kiln.json ui.overlay \"on\"" : "KILN_UI_OVERLAY=1";
+        const std::string run = by_file ? " (kiln.json)" : " (KILN_UI_OVERLAY=1)";
+        set_json(by_file ? R"({"ui": {"look": "game", "overlay": "on"}})" : nullptr);
+        auto on = [by_file] {
+            if (!by_file) setenv("KILN_UI_OVERLAY", "1", 1);  // this start's process only
+        };
+        start("switched on next to Streamline, dies at hooks installed", [&] {
+            on();
+            expect(!kui::overlay_guard_start(), "the overlay's drawing is on next to Streamline" + run);
+            expect(logged("ui: " + who + ": trying overlay drawing despite Streamline; the crash guard records this attempt"),
+                   "kiln.log names the switch" + run);
+            expect(!logged("steps aside"), "no step-aside line" + run);
+            stages(Stage::hooks);
+        });
+        records.push_back(record_text());
+        expect(records.back() == rec_sl("1 1 0 0 0"), "the attempt is recorded, got " + records.back() + run);
+        start("switched on after a death", [&] {
+            on();
+            expect(!kui::overlay_guard_start(), "the switch draws despite the interrupted start" + run);
+            expect(logged("ui: " + who + ": trying overlay drawing despite an interrupted start; the crash guard records this attempt"),
+                   "kiln.log says so" + run);
+            expect(!logged("stays off for this start"), "no guarded start" + run);
+            stages(Stage::hooks);
+        });
+        records.push_back(record_text());
+        expect(records.back() == rec_sl("1 1 1 1 0"), "an attempt with the first death kept, got " + records.back() + run);
+        start("switched on after two deaths at one stage", [&] {
+            on();
+            expect(!kui::overlay_guard_start(), "the switch draws despite the lock" + run);
+            stages(Stage::hooks);
+        });
+        records.push_back(record_text());
+        expect(records.back() == rec_sl("1 1 1 2 0"), "two deaths counted, got " + records.back() + run);
+        set_json(nullptr);
+        start("the switch taken away", [&] {
+            expect(kui::overlay_guard_start(), "without the switch the lock holds" + run);
+            expect(logged("it failed twice at this stage") && logged("kiln.json ui.overlay \"on\" or KILN_UI_OVERLAY=1 tries drawing at your own risk"),
+                   "the lock's warning names both switches" + run);
+            kui::overlay_guard_exit();
+        });
+        records.push_back(record_text());
+        expect(records.back() == rec_sl("4 1 1 2 0"), "locked, got " + records.back() + run);
+        set_json(by_file ? R"({"ui": {"overlay": "on"}})" : nullptr);
+        start("switched on again, draws", [&] {
+            on();
+            expect(!kui::overlay_guard_start(), "on again" + run);
+            stages(Stage::swapchain);
+            draw_frames();
+            kui::overlay_guard_exit();
+        });
+        records.push_back(record_text());
+        expect(records.back() == rec_sl("0 6 1 0 0"), "60 drawn frames complete it and clear the history, got " + records.back() + run);
+        std::filesystem::remove(streamline);
+        set_json(nullptr);
+        return records;
+    };
+    const auto by_environment = switched_on(false), by_file = switched_on(true);
+    expect(by_environment == by_file, "kiln.json ui.overlay \"on\" and KILN_UI_OVERLAY=1 leave the same records at every start");
+
+    // Precedence: KILN_UI_OVERLAY (0 or 1) wins over kiln.json ui.overlay, as it does over "off".
+    reset();
+    std::ofstream(streamline, std::ios::binary) << "Streamline";
+    set_json(R"({"ui": {"overlay": "on"}})");
+    start("KILN_UI_OVERLAY=0 over kiln.json \"on\"", [&] {
+        setenv("KILN_UI_OVERLAY", "0", 1);
+        expect(kui::overlay_guard_start(), "the variable turns the drawing off");
+        expect(logged("ui: the overlay's drawing is off: KILN_UI_OVERLAY=0; key bindings and the Mods menu still work"), "its own line");
+    });
+    set_json(R"({"ui": {"overlay": "auto"}})");
+    start("kiln.json \"auto\" next to Streamline", [&] {
+        expect(kui::overlay_guard_start(), "Kiln decides: steps aside for Streamline");
+        expect(logged("NVIDIA Streamline is installed (kiln.json ui.overlay \"on\" draws it anyway)"), "the reason names the setting");
+    });
+    std::filesystem::remove(streamline);
+    set_json(R"({"ui": {"overlay": "off"}})");
+    start("KILN_UI_OVERLAY=1 over kiln.json \"off\"", [&] {
+        setenv("KILN_UI_OVERLAY", "1", 1);
+        expect(!kui::overlay_guard_start(), "the variable turns the drawing on");
+        expect(!logged("trying overlay drawing despite"), "nothing to try despite: no line");
+    });
+    // next to OptiScaler with its own menu: the setting decides, as the variable does
+    std::ofstream(g_root / "game/version.dll", std::ios::binary) << "MZ...OptiScaler.ini...";
+    std::ofstream(g_root / "game/OptiScaler.ini", std::ios::binary) << "[Menu]\nOverlayMenu=auto\n";
+    set_json(R"({"ui": {"overlay": "on"}})");
+    start("kiln.json \"on\" next to OptiScaler's menu", [&] {
+        expect(!kui::overlay_guard_start(), "the setting draws next to OptiScaler's menu");
+        expect(logged("ui: OptiScaler is installed (version.dll) with OverlayMenu=auto (on), no frame generation in OptiScaler.ini; "
+                      "kiln.json ui.overlay \"on\" decides for Kiln's overlay"), "kiln.log says the setting decides");
+        expect(!logged("steps aside"), "no step-aside line");
+        expect(logged("ui: kiln.json ui.overlay \"on\": trying overlay drawing despite OptiScaler's own overlay"), "and that it tries");
+    });
+    set_json(nullptr);
+    start("OptiScaler's menu, no setting", [&] {
+        expect(kui::overlay_guard_start(), "steps aside");
+        expect(logged("\"Mods: the overlay's drawing is off: OptiScaler's own overlay menu is on (kiln.json ui.overlay \"on\" draws it anyway)\""),
+               "the Mods entry names the setting");
+    });
+    std::filesystem::remove(g_root / "game/version.dll");
+    std::filesystem::remove(g_root / "game/OptiScaler.ini");
 
     std::filesystem::remove_all(g_root);
     std::printf("overlay_guard_host: %u checks, %u failures\n", g_checks, g_failures);

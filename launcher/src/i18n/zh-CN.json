@@ -2706,6 +2706,7 @@
         "other": "{names} 需要更高版本的 Kiln。"
       },
       "graphicsTool": "已安装 {name}（{file}）",
+      "streamlineNote": "Kiln 的游戏内叠加层会在它旁边自动让开：两者都挂钩游戏的画面呈现，同时使用时曾导致游戏在启动时崩溃。此时 Kiln 的按键绑定和“模组”入口仍可使用；Kiln 的窗口、HUD 和模组页面不会显示。",
       "settingAsi": "为 Ultimate ASI Loader 配置 Steam",
       "notLoading": "Kiln 未加载",
       "didNotStart": "Kiln 未启动",
@@ -3073,6 +3074,11 @@
         "frameCapUpscaler": "Kiln 暂停应用帧率上限、DLSS 设置和超分辨率选项，性能监控照常显示。",
         "upscaler": "游戏目录中有其他超分辨率工具的文件（{file}）",
         "upscalerOnly": "Kiln 暂停应用超分辨率选项，帧率上限、DLSS 设置和性能监控仍可用。"
+      },
+      "overlayAnyway": {
+        "label": "仍然绘制 Kiln 叠加层（与帧生成同时使用时可能在启动时崩溃）",
+        "hint": "从下次启动游戏起，Kiln 的窗口、HUD 和模组页面会与 {tools} 一同显示。如果游戏随后在启动时关闭，请关闭此项：开启期间，Kiln 每次启动都会重试。",
+        "hintNoTool": "Kiln 叠加层会在每次启动游戏时绘制，包括在叠加层启动过程中关闭的那次之后。关闭此项可让 Kiln 重新自行决定。"
       },
       "labels": {
         "fpsCap": "帧率上限",
