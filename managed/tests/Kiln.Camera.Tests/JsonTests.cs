@@ -54,6 +54,16 @@ public sealed class JsonTests
         Assert.Equal(request with { Profile = request.Profile! with { Rotation = null } }, Read(Write(request with { Profile = request.Profile! with { Rotation = null } })));
     }
     [Fact]
+    public void A_top_down_base_view_from_300_m_reads_from_json()
+    {
+        // 0.2.0-dev.31.25: no distance or size caps beyond the world bound
+        var json = """{"profile":{"follow":0,"distance":300,"offsetLocal":[0,0,150],"offsetWorldY":277,"rotationMode":"FixedWorld","rotation":[0.70710677,0,0,0.70710677]},"lens":{"fieldOfViewDegrees":170},"shake":{"amplitudeMetres":2,"frequencyHz":45,"falloff":0}}""";
+        var request = Read(json);
+        Assert.Equal((300f, 150f, 277f, 170f, 2f, 45f), (request.Profile!.Distance, request.Profile.OffsetLocal.Z, request.Profile.OffsetWorldY, request.Lens!.FieldOfViewDegrees,
+            request.Shake!.AmplitudeMetres, request.Shake.FrequencyHz));
+        Assert.Equal(request, Read(Write(request)));
+    }
+    [Fact]
     public void Mode_names_are_exact_and_no_world_or_capability_is_needed()
     {
         var request = new CameraOverride(Mode: new(CameraMode.PlayerCameraBuildingFirstPerson, CameraTransitionOverride.CameraTransitionLerpSpeed), InputPolicy: CameraInputPolicy.StockMode);
@@ -83,7 +93,9 @@ public sealed class JsonTests
     [InlineData("""{"lens":{"fieldOfViewDegrees":40},"inputPolicy":0}""")]
     [InlineData("""{"lens":{"fieldOfViewDegrees":40},"inputPolicy":"0"}""")]
     [InlineData("""{"lens":{}}""")]
-    [InlineData("""{"lens":{"fieldOfViewDegrees":161}}""")]
+    [InlineData("""{"lens":{"fieldOfViewDegrees":180}}""")]
+    [InlineData("""{"profile":{"follow":1,"distance":-1,"offsetLocal":[0,0,0]}}""")]
+    [InlineData("""{"shake":{"amplitudeMetres":-0.5,"frequencyHz":2,"falloff":0}}""")]
     [InlineData("""{"mode":{"mode":"PlayerCameraBuildingFirstPerson"},"inputPolicy":"VisualOnly"}""")]
     [InlineData("""{"profile":{"follow":1,"distance":10,"offsetLocal":[0,0,0],"lockRotation":true}}""")]
     [InlineData("""{"profile":{"follow":1,"distance":10,"offsetLocal":[0,0]}}""")]

@@ -42,7 +42,11 @@ public sealed class SchemaTests
     [InlineData("""{"lens":{"fieldOfViewDegrees":40},"duration":120001}""")]
     [InlineData("""{"lens":{"fieldOfViewDegrees":40},"priority":1001}""")]
     [InlineData("""{"lens":{"fieldOfViewDegrees":40},"inputPolicy":"visualonly"}""")]
-    [InlineData("""{"lens":{"fieldOfViewDegrees":161}}""")]
+    [InlineData("""{"lens":{"fieldOfViewDegrees":180}}""")]
+    [InlineData("""{"lens":{"fieldOfViewDegrees":0.5}}""")]
+    [InlineData("""{"profile":{"follow":12,"distance":-1,"offsetLocal":[0,0,0]}}""")]
+    [InlineData("""{"shake":{"amplitudeMetres":-0.5,"frequencyHz":2,"falloff":0}}""")]
+    [InlineData("""{"path":{"keys":[{"at":0,"pose":{"position":[0,-1000001,0],"rotation":[0,0,0,1]}}]}}""")]
     [InlineData("""{"mode":{"mode":"PlayerCameraDefault"}}""")]
     [InlineData("""{"mode":{"mode":"PlayerCameraDefault"},"inputPolicy":"StockMode","lens":{"fieldOfViewDegrees":40}}""")]
     [InlineData("""{"mode":{"mode":"PlayerCameraDefault"},"inputPolicy":"StockMode","blend":{"in":1,"out":0}}""")]
@@ -55,6 +59,14 @@ public sealed class SchemaTests
     public void Profile_and_shake_keep_units_and_arrays()
     {
         Check("""{"profile":{"follow":12,"distance":20,"offsetLocal":[0,1,0],"offsetWorldY":2,"rotationMode":"FollowHeading","rotation":[0,0,0,1],"collision":"None"},"shake":{"amplitudeMetres":0.5,"frequencyHz":30,"falloff":100,"seed":4294967295}}""", true);
+    }
+    [Fact]
+    public void Far_big_and_strong_values_are_valid_shapes()
+    {
+        // 0.2.0-dev.31.25: no distance or size caps beyond the world bound
+        Check("""{"profile":{"follow":0,"distance":300,"offsetLocal":[0,0,150],"offsetWorldY":277,"rotationMode":"FixedWorld","rotation":[0.70710677,0,0,0.70710677]},"lens":{"fieldOfViewDegrees":170},"shake":{"amplitudeMetres":2,"frequencyHz":45,"falloff":0}}""", true);
+        Check("""{"profile":{"follow":0,"distance":0,"offsetLocal":[0,0,0]},"shake":{"amplitudeMetres":0,"frequencyHz":0,"falloff":0}}""", true);
+        Check("""{"path":{"keys":[{"at":0,"pose":{"position":[5000,300,-1000000],"rotation":[0,0,0,1]},"fieldOfViewDegrees":1},{"at":100,"pose":{"position":[0,300,0],"rotation":[0,0,0,1]},"fieldOfViewDegrees":179}]}}""", true);
     }
     [Fact]
     public void Path_lens_consistency_and_key_limits_match_the_codec()

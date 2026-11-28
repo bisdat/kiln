@@ -18,7 +18,10 @@ internal readonly struct CameraBuilt(CameraNative.Request request, CameraNative.
 internal static class CameraRequests
 {
     public const int DefaultDurationMs = 10_000;
+    // Only guards that protect the game (0.2.0-dev.31.25: no arbitrary limits): finite numbers, the world bound on positions
+    // (the engine's 32.32 metres and float maths; native cam_math.h says why), unit rotations, a lens the projection takes.
     private const double MaxMetres = 1_000_000;
+    private const float MinLensDegrees = 1, MaxLensDegrees = 179;  // inside the 0.01 rad margin from 0 and 180 degrees
 
     /// <exception cref="ArgumentException">The request is not one the service takes.</exception>
     public static CameraBuilt Build(CameraOverride request, CameraEndpoint endpoint, EntityId player, string api)
@@ -99,11 +102,10 @@ internal static class CameraRequests
         {
             if (!Enum.IsDefined(profile.RotationMode)) throw Bad($"Profile.RotationMode {profile.RotationMode} is not a rotation mode");
             if (profile.Collision != CameraCollisionPolicy.None) throw Bad("Profile.Collision: this version has no camera collision (None)");
-            if (!float.IsFinite(profile.Distance) || profile.Distance < 0.25f || profile.Distance > 200f) throw Bad($"Profile.Distance {profile.Distance} is not 0.25 to 200 metres");
+            if (!float.IsFinite(profile.Distance) || profile.Distance < 0f) throw Bad($"Profile.Distance {profile.Distance} is not a finite distance of 0 metres or more");
             var o = profile.OffsetLocal;
-            if (!float.IsFinite(o.X) || !float.IsFinite(o.Y) || !float.IsFinite(o.Z) || (double)o.X * o.X + (double)o.Y * o.Y + (double)o.Z * o.Z > 100.0 * 100.0)
-                throw Bad("Profile.OffsetLocal is not a finite vector of at most 100 metres");
-            if (!float.IsFinite(profile.OffsetWorldY) || MathF.Abs(profile.OffsetWorldY) > 100f) throw Bad($"Profile.OffsetWorldY {profile.OffsetWorldY} is not -100 to 100 metres");
+            if (!float.IsFinite(o.X) || !float.IsFinite(o.Y) || !float.IsFinite(o.Z)) throw Bad("Profile.OffsetLocal is not a finite vector");
+            if (!float.IsFinite(profile.OffsetWorldY)) throw Bad($"Profile.OffsetWorldY {profile.OffsetWorldY} is not a finite number of metres");
             var q = Unit(profile.Rotation ?? Quaternion.Identity, "Profile.Rotation", api);
             if (profile.RotationMode == CameraRotationMode.FreeOrbit && (MathF.Abs(q.X) > 1e-5f || MathF.Abs(q.Y) > 1e-5f || MathF.Abs(q.Z) > 1e-5f))
                 throw Bad("Profile.Rotation stays identity with RotationMode.FreeOrbit: the view keeps the game's own orbit");
@@ -115,8 +117,8 @@ internal static class CameraRequests
         }
         if (request.Shake is { } shake)
         {
-            if (!float.IsFinite(shake.AmplitudeMetres) || shake.AmplitudeMetres < 0f || shake.AmplitudeMetres > 0.5f) throw Bad($"Shake.AmplitudeMetres {shake.AmplitudeMetres} is not 0 to 0.5");
-            if (!float.IsFinite(shake.FrequencyHz) || shake.FrequencyHz < 0.1f || shake.FrequencyHz > 30f) throw Bad($"Shake.FrequencyHz {shake.FrequencyHz} is not 0.1 to 30");
+            if (!float.IsFinite(shake.AmplitudeMetres) || shake.AmplitudeMetres < 0f) throw Bad($"Shake.AmplitudeMetres {shake.AmplitudeMetres} is not a finite 0 or more");
+            if (!float.IsFinite(shake.FrequencyHz) || shake.FrequencyHz < 0f) throw Bad($"Shake.FrequencyHz {shake.FrequencyHz} is not a finite 0 or more");
             var falloff = Millis(shake.Falloff, "Shake.Falloff", api);
             if (falloff > r.DurationMs) throw Bad("Shake.Falloff is longer than Duration");
             r.Shake = new CameraNative.Shake { Amplitude = shake.AmplitudeMetres, Frequency = shake.FrequencyHz, FalloffMs = falloff, Seed = shake.Seed };
@@ -134,7 +136,8 @@ internal static class CameraRequests
 
     private static float Lens(float degrees, string what, string api)
     {
-        if (!float.IsFinite(degrees) || degrees < 5f || degrees > 160f) throw new ArgumentException($"{api}: {what} {degrees} is not 5 to 160 degrees", "request");
+        if (!float.IsFinite(degrees) || degrees < MinLensDegrees || degrees > MaxLensDegrees)
+            throw new ArgumentException($"{api}: {what} {degrees} is not {MinLensDegrees} to {MaxLensDegrees} degrees", "request");
         return degrees;
     }
 

@@ -125,8 +125,9 @@ public enum CameraEndReason
     PeerDisconnected = 9,
     /// <summary>The client stopped hearing from the server (no heartbeat for 3 seconds) and let the camera go.</summary>
     AuthorityTimeout = 10,
-    /// <summary>A safety limit stopped it after it was shown: a value out of bounds, a position too far from the player,
-    /// or the player's or target's position not updated for 250 ms.</summary>
+    /// <summary>A safety limit stopped it after it was shown: a camera that left the world bound (±1,000,000 m on each
+    /// axis) or is not a finite view, the followed target's position not updated for 250 ms, or a frame that did not show
+    /// what was written.</summary>
     SafetyRejected = 11,
     /// <summary>The player's client did not answer an update within 3 seconds.</summary>
     TransportTimeout = 12,
@@ -180,7 +181,8 @@ public enum CameraReason
     SnapshotBusy = 19,
     /// <summary>The newest snapshot is older than 250 ms: the game is paused or not drawing.</summary>
     SnapshotStale = 20,
-    /// <summary>A value is out of its range (a position too far from the player, a lens, distance or time out of bounds).</summary>
+    /// <summary>A value is out of its range: a camera outside the world bound (±1,000,000 m on each axis) or not a finite
+    /// view, a lens outside 1 to 179 degrees, a negative distance, a time out of bounds.</summary>
     Bounds = 21,
     /// <summary>Too many camera requests wait already: ask again in a later step.</summary>
     RateLimit = 22,
@@ -221,7 +223,7 @@ public readonly record struct CameraLease(ulong Value, CameraEndpoint Endpoint, 
 public sealed partial record CameraPose(WorldPosition Position, Quaternion Rotation);
 
 /// <summary>A field of view, alone or next to a path, profile or shake.</summary>
-/// <param name="FieldOfViewDegrees">The vertical field of view, 5 to 160 degrees.</param>
+/// <param name="FieldOfViewDegrees">The vertical field of view, 1 to 179 degrees.</param>
 public sealed record CameraLens(float FieldOfViewDegrees);
 
 /// <summary>One key of a <see cref="CameraPath"/>.</summary>
@@ -232,16 +234,17 @@ public sealed record CameraKey(TimeSpan At, CameraPose Pose, float? FieldOfViewD
 
 /// <summary>A camera that moves through keys (a cutscene): positions go in straight lines, orientations the short way
 /// round; before the first key and after the last the camera stays on that key.</summary>
-/// <param name="Keys">1 to 256 keys with rising times; each within 250 metres of the player.</param>
+/// <param name="Keys">1 to 256 keys with rising times, anywhere within ±1,000,000 metres on each axis (no distance from
+/// the player).</param>
 public sealed record CameraPath(IReadOnlyList<CameraKey> Keys);
 
 /// <summary>A camera that follows an entity at a fixed distance. It has no collision: it can clip terrain and
 /// buildings.</summary>
 /// <param name="Follow">The entity to follow; <see cref="EntityId.None"/>: the local player.</param>
-/// <param name="Distance">Metres from the pivot to the camera, 0.25 to 200. Not added to the game's own distance, and
+/// <param name="Distance">Metres from the pivot to the camera, 0 or more. Not added to the game's own distance, and
 /// not scaled with the target.</param>
-/// <param name="OffsetLocal">The pivot's offset from the target in the target's own axes, at most 100 metres long.</param>
-/// <param name="OffsetWorldY">The pivot's offset straight up, -100 to 100 metres.</param>
+/// <param name="OffsetLocal">The pivot's offset from the target in the target's own axes, metres.</param>
+/// <param name="OffsetWorldY">The pivot's offset straight up, metres.</param>
 /// <param name="RotationMode">Where the orientation comes from.</param>
 /// <param name="Rotation">See <see cref="CameraRotationMode"/>; null is identity.</param>
 /// <param name="Collision">Only <see cref="CameraCollisionPolicy.None"/>.</param>
@@ -254,8 +257,8 @@ public sealed record CameraProfile(EntityId Follow, float Distance, Vector3 Offs
 }
 
 /// <summary>A shake that moves the camera without turning it. Equal seeds give equal shakes.</summary>
-/// <param name="AmplitudeMetres">The largest displacement, 0 to 0.5 metres.</param>
-/// <param name="FrequencyHz">0.1 to 30.</param>
+/// <param name="AmplitudeMetres">The largest displacement, 0 metres or more.</param>
+/// <param name="FrequencyHz">0 or more.</param>
 /// <param name="Falloff">The shake fades over this last part of the duration; zero: full strength until the end.</param>
 /// <param name="Seed">Picks the shake's phases.</param>
 public sealed record CameraShake(float AmplitudeMetres, float FrequencyHz, TimeSpan Falloff, uint Seed = 0);

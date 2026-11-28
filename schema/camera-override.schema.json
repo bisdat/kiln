@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://frostdev.io/kiln/schema/camera-override.schema.json",
   "title": "Kiln camera override (since mod API 0.2.17)",
-  "description": "The CameraOverride authored record. Times are integer milliseconds, enum names are exact, positions/vectors/quaternions are arrays. CameraOverride.FromJson also checks semantic rules that JSON Schema cannot express: unit quaternions, vector norms, increasing key times, last key <= duration, falloff <= duration and total blends <= duration. Runtime pose safety uses the local player's current sample and a 250 metre bound; this is not a collision system.",
+  "description": "The CameraOverride authored record. Times are integer milliseconds, enum names are exact, positions/vectors/quaternions are arrays. CameraOverride.FromJson also checks semantic rules that JSON Schema cannot express: unit quaternions, increasing key times, last key <= duration, falloff <= duration and total blends <= duration. Since 0.2.0-dev.31.25 there is no distance bound from the player and no cap on profile distances, offsets or shake strength: the runtime checks every derived camera against the same +-1,000,000 metre world bound; this is not a collision system.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -47,10 +47,10 @@
   ],
   "$defs": {
     "time": { "type": "integer", "minimum": 0, "maximum": 120000 },
-    "fov": { "type": "number", "minimum": 5, "maximum": 160, "description": "Vertical degrees." },
+    "fov": { "type": "number", "minimum": 1, "maximum": 179, "description": "Vertical degrees, inside the 0.01 rad margin from 0 and 180 the projection takes." },
     "quaternion": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "number" }, "description": "Finite [x,y,z,w]; norm squared must be nonzero and within 0.001 of one. Accepted native copies are normalized." },
-    "position": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "minimum": -1000000, "maximum": 1000000 }, "description": "World metres [x,y,z]; the runtime checks the 250 metre local-player separation too." },
-    "offset": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "minimum": -100, "maximum": 100 }, "description": "Target-local unscaled physical metres [x,y,z], vector norm at most 100." },
+    "position": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "minimum": -1000000, "maximum": 1000000 }, "description": "World metres [x,y,z], within the +-1,000,000 metre world bound; no distance from the player." },
+    "offset": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number" }, "description": "Target-local unscaled physical metres [x,y,z], finite." },
     "pose": { "type": "object", "additionalProperties": false, "required": ["position", "rotation"], "properties": { "position": { "$ref": "#/$defs/position" }, "rotation": { "$ref": "#/$defs/quaternion" } } },
     "lens": { "type": "object", "additionalProperties": false, "required": ["fieldOfViewDegrees"], "properties": { "fieldOfViewDegrees": { "$ref": "#/$defs/fov" } } },
     "blend": { "type": "object", "additionalProperties": false, "required": ["in", "out"], "properties": { "in": { "$ref": "#/$defs/time" }, "out": { "$ref": "#/$defs/time" } }, "description": "Whole-request blends; in + out must fit the effective duration. Mode takes only zero blends." },
@@ -58,9 +58,9 @@
       "type": "object", "additionalProperties": false, "required": ["follow", "distance", "offsetLocal"],
       "properties": {
         "follow": { "type": "integer", "minimum": 0, "maximum": 4294967295, "description": "Kiln entity id; zero means the local player, never a stock camera's incidental target." },
-        "distance": { "type": "number", "minimum": 0.25, "maximum": 200, "description": "Absolute unscaled metres, not an addition to the natural boom." },
+        "distance": { "type": "number", "minimum": 0, "description": "Absolute unscaled metres, 0 or more, not an addition to the natural boom." },
         "offsetLocal": { "$ref": "#/$defs/offset" },
-        "offsetWorldY": { "type": "number", "minimum": -100, "maximum": 100, "default": 0 },
+        "offsetWorldY": { "type": "number", "default": 0, "description": "Metres straight up, finite." },
         "rotationMode": { "enum": ["FreeOrbit", "FollowHeading", "FixedWorld"], "default": "FreeOrbit" },
         "rotation": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/quaternion" }], "description": "Null means identity. FreeOrbit requires identity; FollowHeading uses a heading-local offset; FixedWorld uses an absolute quaternion." },
         "collision": { "const": "None", "default": "None", "description": "No collision queries; authored views may clip terrain and objects." }
@@ -69,8 +69,8 @@
     "shake": {
       "type": "object", "additionalProperties": false, "required": ["amplitudeMetres", "frequencyHz", "falloff"],
       "properties": {
-        "amplitudeMetres": { "type": "number", "minimum": 0, "maximum": 0.5, "description": "Maximum vector displacement, not per-axis amplitude; translation only." },
-        "frequencyHz": { "type": "number", "minimum": 0.1, "maximum": 30 },
+        "amplitudeMetres": { "type": "number", "minimum": 0, "description": "Maximum vector displacement, not per-axis amplitude; translation only." },
+        "frequencyHz": { "type": "number", "minimum": 0 },
         "falloff": { "$ref": "#/$defs/time", "description": "Fade over the last falloff milliseconds; zero holds full amplitude. Must not exceed duration." },
         "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295, "default": 0 }
       }

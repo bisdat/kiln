@@ -197,8 +197,9 @@ internal static class CameraWire
     }
 
     /// <summary>The checks both ends make on a request (§4.4, §4.6): known part bits and at least one, exact enums,
-    /// the lens source's structure, key counts, times, priority, finite floats and the context-free numeric limits. The
-    /// limits that need the world (250 m from the local player, the selected lens) are native kiln.camera's.
+    /// the lens source's structure, key counts, times, priority, finite floats and the numeric limits that protect the
+    /// game (the world bound, unit rotations, a lens of 1 to 179 degrees, no negative distance or shake; no caps on
+    /// sizes or distances since 0.2.0-dev.31.25). The cameras derived from a request are native kiln.camera's to check.
     /// Returns <see cref="CameraReasons.None"/>, or the reason a peer answers with.</summary>
     public static ushort Validate(CameraWireRequest r, int maxKeys = CameraWireAbi.MaxKeys)
     {
@@ -220,19 +221,18 @@ internal static class CameraWire
         {
             if (r.RotationMode > CameraWireAbi.FixedWorld || r.Collision != CameraWireAbi.CollisionNone) return bad;
             if (!Finite(r.Distance, r.OffsetX, r.OffsetY, r.OffsetZ, r.OffsetWorldY, r.RotX, r.RotY, r.RotZ, r.RotW)) return bad;
-            if (r.Distance is < 0.25f or > 200f || Math.Abs(r.OffsetWorldY) > 100f) return bounds;
-            if (Math.Sqrt((double)r.OffsetX * r.OffsetX + (double)r.OffsetY * r.OffsetY + (double)r.OffsetZ * r.OffsetZ) > 100) return bounds;
+            if (r.Distance < 0f) return bounds;
             if (!UnitQuaternion(r.RotX, r.RotY, r.RotZ, r.RotW)) return bounds;
         }
         if (lens && r.LensSource == CameraWireAbi.LensConstant)
         {
             if (!float.IsFinite(r.FovDegrees)) return bad;
-            if (r.FovDegrees is < 5f or > 160f) return bounds;
+            if (r.FovDegrees is < 1f or > 179f) return bounds;
         }
         if (r.Has(CameraWireAbi.PartShake))
         {
             if (!Finite(r.Amplitude, r.Frequency)) return bad;
-            if (r.Amplitude is < 0f or > 0.5f || r.Frequency is < 0.1f or > 30f || r.FalloffMs > r.DurationMs) return bounds;
+            if (r.Amplitude < 0f || r.Frequency < 0f || r.FalloffMs > r.DurationMs) return bounds;
         }
         if (r.Has(CameraWireAbi.PartPath))
         {
@@ -247,7 +247,7 @@ internal static class CameraWire
                 // §4.3: the first key at 0, then strictly increasing exact milliseconds, the last at most Duration
                 if ((i == 0 && k.AtMs != 0) || k.AtMs > r.DurationMs || (i > 0 && k.AtMs <= last)) return bounds;
                 last = k.AtMs;
-                if (r.LensSource == CameraWireAbi.LensKeys ? k.Fov is < 5f or > 160f : k.Fov != 0f) return r.LensSource == CameraWireAbi.LensKeys ? bounds : bad;
+                if (r.LensSource == CameraWireAbi.LensKeys ? k.Fov is < 1f or > 179f : k.Fov != 0f) return r.LensSource == CameraWireAbi.LensKeys ? bounds : bad;
             }
         }
         else if (r.Keys.Length != 0) return bad;

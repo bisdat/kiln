@@ -121,7 +121,8 @@ public sealed class CameraWireTests
     public static TheoryData<string> Corruptions() => ["parts 32", "parts 0", "policy 3", "lens source 3", "rotation 3", "collision 1", "fov NaN",
         "camera id 46", "transition 3", "timing 2", "path and profile", "mode and lens", "keyed fov without keys", "first key not at 0",
         "keys out of order", "key after duration", "infinite position", "quaternion not unit", "duration 0", "duration 120001",
-        "blends past duration", "priority 1001", "distance 0.2", "shake amplitude 0.6", "falloff past duration", "lens 4 degrees"];
+        "blends past duration", "priority 1001", "distance -0.2", "shake amplitude -0.1", "shake frequency -1", "falloff past duration",
+        "lens 0.5 degrees", "lens 179.5 degrees", "key past the world bound"];
 
     [Theory]
     [MemberData(nameof(Corruptions))]
@@ -151,10 +152,13 @@ public sealed class CameraWireTests
             "duration 120001" => Requests.Lens(durationMs: 120001),
             "blends past duration" => Requests.Lens(durationMs: 1000) with { BlendInMs = 600, BlendOutMs = 500 },
             "priority 1001" => Requests.Lens() with { Priority = 1001 },
-            "distance 0.2" => Requests.Profile() with { Distance = 0.2f },
-            "shake amplitude 0.6" => Requests.Profile() with { Amplitude = 0.6f },
+            "distance -0.2" => Requests.Profile() with { Distance = -0.2f },
+            "shake amplitude -0.1" => Requests.Profile() with { Amplitude = -0.1f },
+            "shake frequency -1" => Requests.Profile() with { Frequency = -1 },
             "falloff past duration" => Requests.Profile() with { FalloffMs = 9000 },
-            "lens 4 degrees" => Requests.Lens(4),
+            "lens 0.5 degrees" => Requests.Lens(0.5f),
+            "lens 179.5 degrees" => Requests.Lens(179.5f),
+            "key past the world bound" => Requests.Path(1, 1000) with { Keys = [Requests.Path(1, 1000).Keys[0] with { Y = -1_000_000.5 }] },
             _ => throw new ArgumentException(what),
         };
         if (what != "timing 2") Assert.NotEqual(CameraReasons.None, CameraWire.Validate(r));
@@ -163,6 +167,24 @@ public sealed class CameraWireTests
         var body = Raw(kind, r, what == "timing 2" ? (byte)2 : (byte)0);
         Assert.False(CameraWire.TryMutation(kind, body, CameraWireAbi.MaxBody, 256, out _));
         Assert.False(CameraWire.TryHeaderOnly(body[..83], CameraWireAbi.MaxBody, out _));
+    }
+
+    // 0.2.0-dev.31.25: no distance or size caps beyond the world bound (both ends check the same numbers)
+    [Fact]
+    public void Far_big_and_strong_values_travel_and_decode()
+    {
+        var top = Requests.Profile() with
+        {
+            Distance = 300, OffsetX = 0, OffsetY = 0, OffsetZ = 150, OffsetWorldY = 277, Amplitude = 2, Frequency = 45,
+            Parts = CameraWireAbi.PartProfile | CameraWireAbi.PartShake | CameraWireAbi.PartLens, LensSource = CameraWireAbi.LensConstant, FovDegrees = 170,
+        };
+        var far = Requests.Path(2, 1000) with { Keys = [.. Requests.Path(2, 1000).Keys.Select((k, i) => k with { X = 5000 * i, Y = 300, Z = -1_000_000, Fov = i == 0 ? 1 : 179 })] };
+        foreach (var r in new[] { top, far, Requests.Lens(1), Requests.Lens(179), Requests.Profile() with { Distance = 0, Frequency = 0, Amplitude = 0 } })
+        {
+            Assert.Equal(CameraReasons.None, CameraWire.Validate(r));
+            Assert.True(CameraWire.TryMutation(CameraMessage.Apply, Raw(CameraMessage.Apply, r, 0), CameraWireAbi.MaxBody, 256, out var m));
+            Assert.Equal((r.Distance, r.OffsetWorldY, r.Amplitude, r.FovDegrees), (m!.Request!.Distance, m.Request.OffsetWorldY, m.Request.Amplitude, m.Request.FovDegrees));
+        }
     }
 
     // CameraWire.Mutation encodes whatever it is given (validation is Submit's and the receiver's): the test's sender

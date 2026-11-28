@@ -71,11 +71,11 @@ public sealed class RequestTests
     }
 
     [Fact]
-    public void A_lens_is_5_to_160_degrees()
+    public void A_lens_is_1_to_179_degrees()
     {
-        Assert.Equal(5f, Local(new CameraOverride(Lens: new CameraLens(5))).Request.FovDegrees);
-        Assert.Equal(160f, Local(new CameraOverride(Lens: new CameraLens(160))).Request.FovDegrees);
-        foreach (var bad in new[] { 4.99f, 160.01f, float.NaN, float.PositiveInfinity, 0f, -40f }) Bad(new CameraOverride(Lens: new CameraLens(bad)));
+        // the whole degrees inside the 0.01 rad margin from 0 and 180 that the projection takes (0.2.0-dev.31.25; was 5 to 160)
+        foreach (var good in new[] { 1f, 4.99f, 160.01f, 170f, 179f }) Assert.Equal(good, Local(new CameraOverride(Lens: new CameraLens(good))).Request.FovDegrees);
+        foreach (var bad in new[] { 0.99f, 179.01f, float.NaN, float.PositiveInfinity, 0f, -40f, 180f }) Bad(new CameraOverride(Lens: new CameraLens(bad)));
     }
 
     [Fact]
@@ -108,7 +108,10 @@ public sealed class RequestTests
         Assert.Equal([50f, 70f], keyed.Keys.Select(k => k.FovDegrees));
         Bad(Path(Key(0, 1, 50), Key(1, 2)));
         Bad(Path(Key(0, 1), Key(1, 2, 50)));
-        Bad(Path(Key(0, 1, 50), Key(1, 2, 170)));
+        Assert.Equal([50f, 170f], Local(Path(Key(0, 1, 50), Key(1, 2, 170))).Keys.Select(k => k.FovDegrees));
+        Bad(Path(Key(0, 1, 50), Key(1, 2, 179.5f)));
+        // no distance from the player: keys 300 m up and 5 km away are taken; the world bound stays
+        Assert.Equal(5000.0, Local(Path(Key(0, 300), Key(1, 300) with { Pose = new CameraPose(new WorldPosition(5000, 300, -1_000_000), Quaternion.Identity) })).Keys[1].Pose.X);
         Bad(Path(Key(0, 1, 50)) with { Lens = new CameraLens(40) });
         Assert.Equal(CameraNative.LensConstant, Local(Path(Key(0, 1)) with { Lens = new CameraLens(40) }).Request.LensSource);   // a static lens over a plain path
         Bad(Path(Key(0, 1)) with { Profile = new CameraProfile(EntityId.None, 8, Vector3.Zero) });   // a path or a profile
@@ -125,13 +128,17 @@ public sealed class RequestTests
         var free = new CameraProfile(EntityId.None, 0.25f, Vector3.Zero);
         Assert.False(free.LockRotation);
         Assert.Equal(1f, Local(Follow(free)).Request.Profile.Qw);   // a null rotation is identity
-        Assert.Equal(200f, Local(Follow(free with { Distance = 200 })).Request.Profile.Distance);
-        Bad(Follow(free with { Distance = 0.24f }));
-        Bad(Follow(free with { Distance = 200.5f }));
+        // no size caps (0.2.0-dev.31.25): any finite distance of 0 or more, any finite offsets (a top-down view of a base)
+        foreach (var d in new[] { 0f, 0.24f, 200f, 200.5f, 300f, 5000f }) Assert.Equal(d, Local(Follow(free with { Distance = d })).Request.Profile.Distance);
+        Bad(Follow(free with { Distance = -0.01f }));
         Bad(Follow(free with { Distance = float.NaN }));
-        Bad(Follow(free with { OffsetLocal = new Vector3(80, 80, 0) }));   // the vector's length, not each axis
-        Assert.Equal(100f, Local(Follow(free with { OffsetLocal = new Vector3(0, 100, 0) })).Request.Profile.OffsetY);
-        Bad(Follow(free with { OffsetWorldY = 100.5f }));
+        Bad(Follow(free with { Distance = float.PositiveInfinity }));
+        Assert.Equal(80f, Local(Follow(free with { OffsetLocal = new Vector3(80, 80, 0) })).Request.Profile.OffsetY);
+        Assert.Equal(150f, Local(Follow(free with { OffsetLocal = new Vector3(0, 0, 150) })).Request.Profile.OffsetZ);
+        Bad(Follow(free with { OffsetLocal = new Vector3(0, float.NaN, 0) }));
+        Assert.Equal(277f, Local(Follow(free with { OffsetWorldY = 277 })).Request.Profile.OffsetWorldY);
+        Assert.Equal(-100.5f, Local(Follow(free with { OffsetWorldY = -100.5f })).Request.Profile.OffsetWorldY);
+        Bad(Follow(free with { OffsetWorldY = float.NegativeInfinity }));
         Bad(Follow(free with { Collision = (CameraCollisionPolicy)1 }));
         Bad(Follow(free with { RotationMode = (CameraRotationMode)3 }));
         Bad(Follow(free with { Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, 0.5f) }));   // a free orbit keeps the game's orientation
@@ -143,15 +150,18 @@ public sealed class RequestTests
     }
 
     [Fact]
-    public void A_shake_is_small_and_fades_inside_the_duration()
+    public void A_shake_is_any_finite_strength_and_fades_inside_the_duration()
     {
         CameraOverride Shake(float a, float f, double falloff = 0) => new(Shake: new CameraShake(a, f, TimeSpan.FromSeconds(falloff)), Duration: TimeSpan.FromSeconds(2));
         Assert.Equal(CameraNative.PartShake, Local(Shake(0.5f, 30, 2)).Request.Parts);
         Assert.Equal(0f, Local(Shake(0, 0.1f)).Request.Shake.Amplitude);
-        Bad(Shake(0.51f, 1));
+        // no caps on strength or speed (0.2.0-dev.31.25; were 0.5 m and 0.1 to 30 Hz)
+        Assert.Equal((2f, 45f), (Local(Shake(2, 45)).Request.Shake.Amplitude, Local(Shake(2, 45)).Request.Shake.Frequency));
+        Assert.Equal(0.09f, Local(Shake(0.1f, 0.09f)).Request.Shake.Frequency);
+        Assert.Equal(0f, Local(Shake(0.1f, 0)).Request.Shake.Frequency);
         Bad(Shake(-0.1f, 1));
-        Bad(Shake(0.1f, 0.09f));
-        Bad(Shake(0.1f, 30.5f));
+        Bad(Shake(0.1f, -1));
+        Bad(Shake(0.1f, float.PositiveInfinity));
         Bad(Shake(0.1f, 1, 2.001));   // longer than the duration
         Bad(Shake(float.NaN, 1));
     }

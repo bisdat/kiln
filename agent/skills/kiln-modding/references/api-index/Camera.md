@@ -62,7 +62,7 @@ enum: VisualOnly, StockMode, AimToo
 
 ## CameraLens `0.2.17` — A field of view, alone or next to a path, profile or shake.
 - `CameraLens(float FieldOfViewDegrees)`
-- `FieldOfViewDegrees { get; init; } -> float` — The vertical field of view, 5 to 160 degrees.
+- `FieldOfViewDegrees { get; init; } -> float` — The vertical field of view, 1 to 179 degrees.
 
 ## CameraMode `0.2.17` — A stock camera mode of the game, for `Camera.SetMode`.
 enum: EntityCamera, PlayerCameraSpawning, PlayerCameraSpawningDolly, PlayerCameraRespawning, PlayerCameraDefault, PlayerCameraDefaultTarget, PlayerCameraSprintingTarget, PlayerCameraSprinting, PlayerCameraRangedBowDefault, PlayerCameraRangedBowSneaking, PlayerCameraRangedStaffDefault, PlayerCameraRangedStaffSneaking, PlayerCameraHipfire, PlayerCameraHipfireStaffChanneling, PlayerCameraHipfireStaffChannelingTarget, PlayerCameraExecute, PlayerCameraIdle, PlayerCameraSneaking, PlayerCameraSitting, PlayerCameraCooking, PlayerCameraClimbing, PlayerCameraHookShot, PlayerCameraGlider, PlayerCameraSwimming, PlayerCameraDiving, PlayerCameraHeadDivingStart, PlayerCameraHeadDivingDefault, PlayerCameraDialogue, PlayerCameraAltar, PlayerCameraMotherFlame, PlayerCameraObelisk, PlayerCameraShroudForge, PlayerCameraBuildingAltar, PlayerCameraBuildingAreaDepositProp, PlayerCameraBuildingFirstPerson, PlayerCameraBuildingFirstPersonSneak, PlayerCameraBuildingThirdPerson, PlayerCameraBuildingFlySparkMode, PlayerCameraBuildingFlySparkModeSprinting, PlayerCameraFishing, PlayerCameraFishingHardFocusFloat, PlayerCameraFishingSoftFocusFloat, PlayerCameraFishingVictory, PlayerCameraFreeAimWandDefault, PlayerCameraFreeAimWandSprinting, PlayerCameraFreeAimWandSneaking
@@ -89,7 +89,7 @@ enum: EntityCamera, PlayerCameraSpawning, PlayerCameraSpawningDolly, PlayerCamer
 
 ## CameraPath `0.2.17` — A camera that moves through keys (a cutscene): positions go in straight lines, orientations the short way round; before the first key and after the last the camera...
 - `CameraPath(IReadOnlyList<CameraKey> Keys)`
-- `Keys { get; init; } -> IReadOnlyList<CameraKey>` — 1 to 256 keys with rising times; each within 250 metres of the player.
+- `Keys { get; init; } -> IReadOnlyList<CameraKey>` — 1 to 256 keys with rising times, anywhere within +/-1,000,000 metres on each axis (no distance from the player).
 
 ## CameraPose `0.2.17` — Where a camera is and where it looks: +Z of `Rotation` is forward, +Y up.
 - `CameraPose(WorldPosition Position, Quaternion Rotation)`
@@ -100,11 +100,11 @@ enum: EntityCamera, PlayerCameraSpawning, PlayerCameraSpawningDolly, PlayerCamer
 ## CameraProfile `0.2.17` — A camera that follows an entity at a fixed distance.
 - `CameraProfile(EntityId Follow, float Distance, Vector3 OffsetLocal, float OffsetWorldY = 0, CameraRotationMode RotationMode = CameraRotationMode.FreeOrbit, Quaternion? Rotation = null, CameraCollisionPolicy Collision = CameraCollisionPolicy.None)`
 - `Collision { get; init; } -> CameraCollisionPolicy` — Only `CameraCollisionPolicy.None`.
-- `Distance { get; init; } -> float` — Metres from the pivot to the camera, 0.25 to 200.
+- `Distance { get; init; } -> float` — Metres from the pivot to the camera, 0 or more.
 - `Follow { get; init; } -> EntityId` — The entity to follow; `EntityId.None`: the local player.
 - `LockRotation { get; } -> bool` — Whether the profile fixes the orientation (any mode but `CameraRotationMode.FreeOrbit`).
-- `OffsetLocal { get; init; } -> Vector3` — The pivot's offset from the target in the target's own axes, at most 100 metres long.
-- `OffsetWorldY { get; init; } -> float` — The pivot's offset straight up, -100 to 100 metres.
+- `OffsetLocal { get; init; } -> Vector3` — The pivot's offset from the target in the target's own axes, metres.
+- `OffsetWorldY { get; init; } -> float` — The pivot's offset straight up, metres.
 - `Rotation { get; init; } -> Quaternion?` — See `CameraRotationMode`; null is identity.
 - `RotationMode { get; init; } -> CameraRotationMode` — Where the orientation comes from.
 
@@ -135,9 +135,9 @@ enum: FreeOrbit, FollowHeading, FixedWorld
 
 ## CameraShake `0.2.17` — A shake that moves the camera without turning it.
 - `CameraShake(float AmplitudeMetres, float FrequencyHz, TimeSpan Falloff, uint Seed = 0)`
-- `AmplitudeMetres { get; init; } -> float` — The largest displacement, 0 to 0.5 metres.
+- `AmplitudeMetres { get; init; } -> float` — The largest displacement, 0 metres or more.
 - `Falloff { get; init; } -> TimeSpan` — The shake fades over this last part of the duration; zero: full strength until the end.
-- `FrequencyHz { get; init; } -> float` — 0.1 to 30.
+- `FrequencyHz { get; init; } -> float` — 0 or more.
 - `Seed { get; init; } -> uint` — Picks the shake's phases.
 
 ## CameraTransitionOverride `0.2.17` — How the game moves into a locked stock mode.
