@@ -136,3 +136,47 @@ fn engine_boot_counts_survive_state_read_and_serialization() {
     assert_eq!(wire["eml"], 2); assert_eq!(wire["set"], 1); assert_eq!(wire["flame"], 3);
     assert!(wire.get("shroudtopia").is_none());
 }
+
+/// sosmic (0.2.0-dev.31.25): the Settings window's Open button shows `open_file`, the file the engine reads, only once it
+/// is there: shroudtopia.json in the profile's config folder, and for ShroudForge the copy in the game's mods folder,
+/// never the Library's.
+#[test]
+fn settings_name_the_file_to_open_only_once_it_is_there_and_never_the_library_copy() {
+    let f = Fixture::new("open-file");
+    let put = |dir: &std::path::Path, name: &str, bytes: &[u8]| {
+        std::fs::create_dir_all(dir.join(name).parent().unwrap()).unwrap();
+        std::fs::write(dir.join(name), bytes).unwrap();
+    };
+    let cfg = f.root.join("config");
+    let folder = f.root.join("mod");
+    put(&folder, "mod.json", br#"{"id":"map","name":"Pretty Map","shroudtopia":{"default":{"zoom":2}}}"#);
+    let file = engine_mods::shroudtopia_file(&cfg);
+    let s = engine_mods::settings(ModKind::Shroudtopia, "map", None, &cfg, Some(&folder)).unwrap();
+    assert_eq!((s.file.as_deref(), s.open_file.as_deref()), (Some(file.to_str().unwrap()), None), "no shroudtopia.json yet");
+    assert!(serde_json::to_value(&s).unwrap().get("openFile").is_none());
+    engine_mods::set_setting(ModKind::Shroudtopia, "map", "zoom", &serde_json::json!(3), None, &cfg, Some(&folder)).unwrap();
+    let s = engine_mods::settings(ModKind::Shroudtopia, "map", None, &cfg, Some(&folder)).unwrap();
+    assert_eq!(s.open_file.as_deref(), Some(file.to_str().unwrap()));
+    assert_eq!(serde_json::to_value(&s).unwrap()["openFile"], file.to_str().unwrap());
+
+    let src = f.root.join("src/HoardersHelper");
+    put(&src, "mod.json", br#"{"id":"HoardersHelper","name":"Hoarders Helper","version":"1.0.0"}"#);
+    put(&src, "extended.mod.json", br#"{"schemaVersion":1,"launcher":"SF","enabled":true,"settings":{"speed":{"label":"Speed","control":"slider","min":1,"max":10,"value":3}}}"#);
+    put(&src, "src/mod.lua", b"return {}");
+    let r = library::import(&f.dirs, &[src.clone()], &mut NoProgress).unwrap();
+    let h = r.imported.iter().find(|x| x.kind == ModKind::ShroudForge).cloned().unwrap_or_else(|| panic!("{r:?}"));
+    let lib = library::path_of(&f.dirs, &h).unwrap();
+    let game = f.game();
+    // not in the game's mods folder: the Library's defaults show, and there is nothing to open
+    let s = engine_mods::settings(ModKind::ShroudForge, &h.id, Some(&game.path), &cfg, Some(&lib)).unwrap();
+    assert_eq!(s.file.as_deref().map(PathBuf::from), Some(lib.join("extended.mod.json")), "{s:?}");
+    assert_eq!(s.open_file, None);
+    // the copy in the game's mods folder (here the player's own): the one ShroudForge runs
+    let own = game.path.join("mods/hoardershelper");
+    put(&own, "mod.json", &std::fs::read(src.join("mod.json")).unwrap());
+    put(&own, "extended.mod.json", &std::fs::read(src.join("extended.mod.json")).unwrap());
+    put(&own, "src/mod.lua", b"return {}");
+    let s = engine_mods::settings(ModKind::ShroudForge, &h.id, Some(&game.path), &cfg, Some(&lib)).unwrap();
+    assert_eq!(s.open_file.as_deref().map(PathBuf::from), Some(own.join("extended.mod.json")), "{s:?}");
+    assert!(s.own_folder, "{s:?}");
+}
