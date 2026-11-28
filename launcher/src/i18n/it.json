@@ -2468,7 +2468,7 @@
         "other": "{names} richiedono un Kiln più recente."
       },
       "graphicsTool": "{name} è installato ({file})",
-      "streamlineNote": "L'overlay di Kiln nel gioco si fa da parte accanto a esso: entrambi si agganciano alla presentazione dei fotogrammi del gioco, e insieme facevano chiudere il gioco all'avvio. Le scorciatoie di Kiln e la voce Mod funzionano ancora; le finestre, gli HUD e la pagina delle mod di Kiln non vengono mostrati.",
+      "streamlineNote": "Da solo, l'overlay di Kiln nel gioco si fa da parte accanto a esso: entrambi si agganciano alla presentazione dei fotogrammi del gioco, e insieme facevano chiudere il gioco all'avvio. Le scorciatoie di Kiln e la voce Mod allora funzionano ancora; le finestre, gli HUD e la pagina delle mod di Kiln non vengono mostrati.",
       "settingAsi": "Un'impostazione di Steam per Ultimate ASI Loader",
       "notLoading": "Kiln non si carica",
       "didNotStart": "Kiln non è partito",

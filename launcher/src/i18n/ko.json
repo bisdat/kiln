@@ -2425,7 +2425,7 @@
         "other": "{names}에는 더 새로운 Kiln이 필요합니다."
       },
       "graphicsTool": "{name} 설치됨 ({file})",
-      "streamlineNote": "Kiln의 게임 내 오버레이는 이것이 있으면 비켜섭니다. 둘 다 게임의 화면 출력에 후킹하며, 함께 쓰면 시작할 때 게임이 충돌했습니다. Kiln의 키 설정과 모드 항목은 계속 작동하지만, Kiln의 창, HUD, 모드 페이지는 표시되지 않습니다.",
+      "streamlineNote": "Kiln의 게임 내 오버레이는 이것이 있으면 스스로 비켜섭니다. 둘 다 게임의 화면 출력에 후킹하며, 함께 쓰면 시작할 때 게임이 충돌했습니다. 그때도 Kiln의 키 설정과 모드 항목은 계속 작동하지만, Kiln의 창, HUD, 모드 페이지는 표시되지 않습니다.",
       "settingAsi": "Ultimate ASI Loader용 Steam 설정 하나",
       "notLoading": "Kiln이 로드되지 않음",
       "didNotStart": "Kiln이 시작되지 않음",

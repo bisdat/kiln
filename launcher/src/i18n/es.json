@@ -2468,7 +2468,7 @@
         "other": "{names} necesitan un Kiln más reciente."
       },
       "graphicsTool": "{name} está instalado ({file})",
-      "streamlineNote": "La superposición de Kiln en el juego se hace a un lado junto a él: ambos se enganchan a la presentación de fotogramas del juego, y juntos hacían que el juego se cerrara al iniciar. Los atajos de teclado de Kiln y la entrada Mods siguen funcionando; las ventanas, los HUD y la página de mods de Kiln no se muestran.",
+      "streamlineNote": "Por sí sola, la superposición de Kiln en el juego se hace a un lado junto a él: ambos se enganchan a la presentación de fotogramas del juego, y juntos hacían que el juego se cerrara al iniciar. Entonces los atajos de teclado de Kiln y la entrada Mods siguen funcionando; las ventanas, los HUD y la página de mods de Kiln no se muestran.",
       "settingAsi": "Un ajuste de Steam para Ultimate ASI Loader",
       "notLoading": "Kiln no se está cargando",
       "didNotStart": "Kiln no se inició",

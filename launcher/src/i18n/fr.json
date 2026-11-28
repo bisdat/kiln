@@ -2468,7 +2468,7 @@
         "other": "{names} nécessitent un Kiln plus récent."
       },
       "graphicsTool": "{name} est installé ({file})",
-      "streamlineNote": "L'overlay de Kiln dans le jeu s'efface à côté de lui : tous deux s'accrochent à l'affichage des images du jeu, et ensemble ils faisaient planter le jeu au démarrage. Les raccourcis de Kiln et l'entrée Mods fonctionnent toujours ; les fenêtres, les HUD et la page Mods de Kiln ne s'affichent pas.",
+      "streamlineNote": "De lui-même, l'overlay de Kiln dans le jeu s'efface à côté de lui : tous deux s'accrochent à l'affichage des images du jeu, et ensemble ils faisaient planter le jeu au démarrage. Les raccourcis de Kiln et l'entrée Mods fonctionnent alors toujours ; les fenêtres, les HUD et la page Mods de Kiln ne s'affichent pas.",
       "settingAsi": "Un réglage Steam pour Ultimate ASI Loader",
       "notLoading": "Kiln ne se charge pas",
       "didNotStart": "Kiln n'a pas démarré",

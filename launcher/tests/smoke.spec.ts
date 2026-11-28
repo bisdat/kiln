@@ -562,8 +562,8 @@ test("NVIDIA Streamline next to the game: Play says Kiln's overlay steps aside a
     { kind: "streamline", file: "Streamline/sl.interposer.dll", frameCap: true, upscaler: true },
   ]));
   await expect(banner.locator(".k-banner-title")).toHaveText("NVIDIA Streamline is installed (Streamline/sl.interposer.dll)");
-  await expect(banner.getByTestId("graphics-tool-note")).toHaveText("Kiln's in-game overlay steps aside next to it: both hook the game's presents, and together "
-    + "they crashed the game at start. Kiln's key bindings and the Mods entry still work; Kiln's windows, HUDs and Mods page don't show.");
+  await expect(banner.getByTestId("graphics-tool-note")).toHaveText("On its own, Kiln's in-game overlay steps aside next to it: both hook the game's presents, and "
+    + "together they crashed the game at start. Kiln's key bindings and the Mods entry then still work; Kiln's windows, HUDs and Mods page don't show.");
   const sw = banner.getByTestId("overlay-anyway");
   await expect(sw).toContainText("Draw Kiln's overlay anyway (may crash at start with frame generation)");
   await expect(sw).toContainText("next to NVIDIA Streamline. If the game then closes at start, switch this off");

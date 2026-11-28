@@ -2468,7 +2468,7 @@
         "other": "{names} brauchen ein neueres Kiln."
       },
       "graphicsTool": "{name} ist installiert ({file})",
-      "streamlineNote": "Kilns Overlay im Spiel tritt daneben zurück: Beide hängen sich in die Bildausgabe des Spiels, und zusammen brachten sie das Spiel beim Start zum Absturz. Kilns Tastenbelegungen und der Mods-Eintrag funktionieren weiter; Kilns Fenster, HUDs und die Mods-Seite werden nicht angezeigt.",
+      "streamlineNote": "Von sich aus tritt Kilns Overlay im Spiel daneben zurück: Beide hängen sich in die Bildausgabe des Spiels, und zusammen brachten sie das Spiel beim Start zum Absturz. Kilns Tastenbelegungen und der Mods-Eintrag funktionieren dann weiter; Kilns Fenster, HUDs und die Mods-Seite werden nicht angezeigt.",
       "settingAsi": "Eine Steam-Einstellung für Ultimate ASI Loader",
       "notLoading": "Kiln lädt nicht",
       "didNotStart": "Kiln ist nicht gestartet",

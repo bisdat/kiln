@@ -2706,7 +2706,7 @@
         "other": "{names} 需要更高版本的 Kiln。"
       },
       "graphicsTool": "已安装 {name}（{file}）",
-      "streamlineNote": "Kiln 的游戏内叠加层会在它旁边自动让开：两者都挂钩游戏的画面呈现，同时使用时曾导致游戏在启动时崩溃。Kiln 的按键绑定和“模组”入口仍可使用；Kiln 的窗口、HUD 和模组页面不会显示。",
+      "streamlineNote": "Kiln 的游戏内叠加层会在它旁边自动让开：两者都挂钩游戏的画面呈现，同时使用时曾导致游戏在启动时崩溃。此时 Kiln 的按键绑定和“模组”入口仍可使用；Kiln 的窗口、HUD 和模组页面不会显示。",
       "settingAsi": "为 Ultimate ASI Loader 配置 Steam",
       "notLoading": "Kiln 未加载",
       "didNotStart": "Kiln 未启动",

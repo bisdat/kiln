@@ -2783,7 +2783,7 @@
         "other": "{names} need a newer Kiln."
       },
       "graphicsTool": "{name} is installed ({file})",
-      "streamlineNote": "Kiln's in-game overlay steps aside next to it: both hook the game's presents, and together they crashed the game at start. Kiln's key bindings and the Mods entry still work; Kiln's windows, HUDs and Mods page don't show.",
+      "streamlineNote": "On its own, Kiln's in-game overlay steps aside next to it: both hook the game's presents, and together they crashed the game at start. Kiln's key bindings and the Mods entry then still work; Kiln's windows, HUDs and Mods page don't show.",
       "settingAsi": "One Steam setting for Ultimate ASI Loader",
       "notLoading": "Kiln is not loading",
       "didNotStart": "Kiln did not start",
