@@ -59,6 +59,7 @@
 
 #include "greeneye_internal.h"
 #include "original_code.h"
+#include "start_notes.h"
 
 using kgreeneye::Log;
 using kgreeneye::Narrow;
@@ -76,6 +77,7 @@ struct Generation {
     const GreeneyeHot* api = nullptr;
     GreeneyeHot hotApi{};
     ULONGLONG begin = 0; // when it started
+    StartNotes notes;    // its finds and reads while it started (start_notes.h)
 };
 
 struct Mod {
@@ -288,6 +290,12 @@ bool ReadOriginalCode(std::vector<uint8_t>& out, std::string& why)
     const code::Identity id{reinterpret_cast<uintptr_t>(base), nt->FileHeader.TimeDateStamp,
         nt->OptionalHeader.SizeOfImage, static_cast<uint32_t>(text - base), textSize};
     return code::OriginalText(view.bytes, static_cast<size_t>(size.QuadPart), id, text, out, why, &ReadPointer);
+}
+
+// The notes of the generation starting on this thread (the loader's own safe-point hook included), else null.
+StartNotes* CurrentNotes()
+{
+    return g_staging ? &g_staging->notes : nullptr;
 }
 
 // Kiln's verified view of the exe file's code (kiln.hooks read_original), set by the plugin before the mods start.
@@ -1195,6 +1203,8 @@ std::string StartMod(const ModInfo& info, bool* started)
     std::string outcome;
     Activate(g, outcome);
     bool ok = mod.active.load() == g;
+    if (const std::string note = g->notes.Line(ok, CodeSource()); !note.empty())
+        Log("%s: %s", info.name.c_str(), note.c_str());
     if (g_side == kGreeneyeClient && info.id == "quick-deposit") {
         auto state = [&](const char* pattern) {
             uint8_t* target = Find(pattern, nullptr);

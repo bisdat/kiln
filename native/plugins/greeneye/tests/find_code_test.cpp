@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include "../src/original_code.h"
+#include "../src/start_notes.h"
 
 static std::vector<uint8_t> file, live;
 static std::string scenario;
@@ -70,6 +71,8 @@ bool KilnView(uintptr_t at, void* out, size_t n) {
     std::memcpy(out, file.data() + raw + (at - start), n);
     return true;
 }
+StartNotes notes; // the starting mod's notes (hot.cpp: the generation starting on this thread)
+StartNotes* CurrentNotes() { return &notes; }
 bool ReadKilnCode(std::vector<uint8_t>& out, std::string& why) {
     const code::Identity id{reinterpret_cast<uintptr_t>(live.data()) - rva, 42, static_cast<uint32_t>(image_size), rva, mapped_size};
     return code::OriginalTextFrom(&KilnView, 0x300, id, live.data(), out, why, &ReadPointer);
@@ -123,7 +126,8 @@ int main(int argc, char** argv) {
     fixture();
     const bool reads = scenario.rfind("read-", 0) == 0 && scenario != "read-fault";
     if (reads) read_fixture();
-    if (scenario == "read-hooked" || scenario == "read-first" || scenario == "read-dense") hook_operands();
+    if (scenario == "read-hooked" || scenario == "read-first" || scenario == "read-dense" || scenario == "read-notes")
+        hook_operands();
     if (scenario == "read-first") {
         // A mod may read before its first find: the read makes the code find matches.
         check(same(mod_read(call + 1, 4), file.data() + raw + call + 1), "a read before any find sees the file's call operand");
@@ -308,6 +312,33 @@ int main(int argc, char** argv) {
               "kiln.log names both reasons");
     }
     if (scenario == "plain") check(hot::CodeSource() == "exe file", "kiln.log says the code is the exe file's");
+    if (scenario == "read-notes") {
+        hot::notes = {};
+        hot::Find(caller_pattern, nullptr);
+        hot::Find("DE AD BE EF 01", nullptr);
+        hot::Find(global_pattern, nullptr);
+        mod_read(call, 5);
+        mod_read(global + 3, 4);
+        mod_read(0x180, 8); // a read of unhooked code is no note
+        check(hot::notes.finds == 3 && hot::notes.missed == 1 && hot::notes.missedPatterns.size() == 1 &&
+              hot::notes.missedPatterns[0] == "DE AD BE EF 01", "find's answers are noted");
+        // the first byte that read differently: the call's operand (its E8 stayed), the displacement
+        check(hot::notes.unhooked == 2 && hot::notes.unhookedRvas.size() == 2 && hot::notes.unhookedRvas[0] == rva + call + 1 &&
+              hot::notes.unhookedRvas[1] == rva + global + 3, "reads under another module's hook are noted with the RVA");
+        check(hot::notes.Line(false, "exe file") ==
+              "while starting it asked find for 3 signatures in the game's code (exe file); not found: 1 (\"DE AD BE EF 01\"); "
+              "2 reads returned the game's own bytes under another module's hook (rva 0x4504, 0x1603)",
+              "the line for a mod that did not start names the signature it missed");
+        check(hot::notes.Line(true, "exe file") ==
+              "2 reads returned the game's own bytes under another module's hook (rva 0x4504, 0x1603)",
+              "the line for a started mod names only the reads");
+        hot::StartNotes all_found;
+        all_found.Find("48 8B", true);
+        check(all_found.Line(false, "live: x") == "while starting it asked find for 1 signature in the game's code (live: x), "
+              "and every one was found; so it declined for a reason of its own (see its lines above)",
+              "a mod that found everything and declined says so");
+        check(hot::StartNotes{}.Line(true, "exe file").empty(), "a started mod without such reads gets no line");
+    }
     if (scenario == "live-patch")
         check(mod_read(site + 4, 1)[0] == 0x54, "a read of an in-place patch returns the patched byte");
     if (scenario == "unreadable")

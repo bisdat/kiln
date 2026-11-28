@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Included by hot.cpp and the host test, with TextSection, ImageSpan, ReadOriginalCode, ReadKilnCode, ReadLive,
-// ReadPointer and jumppatch available.
+// ReadPointer, CurrentNotes (start_notes.h) and jumppatch available.
 uint8_t* g_text = nullptr;
 size_t g_textSize = 0;
 std::once_flag g_canonicalOnce;
@@ -80,7 +80,7 @@ std::string CodeSource()
     return g_codeFromKiln ? "exe file (Kiln's view; the plugin's own read: " + g_codeNote + ")" : "exe file";
 }
 
-uint8_t* Find(const char* pattern, void* module)
+uint8_t* FindCode(const char* pattern, void* module)
 {
     if (module && module != GetModuleHandleW(nullptr))
         return nullptr; // only the exe's code
@@ -105,6 +105,14 @@ uint8_t* Find(const char* pattern, void* module)
     if (!found && !g_codeFromFile)
         found = jumppatch::FindBehindHook(g_canonical.data(), size, pat.data(), n);
     return found ? g_text + (found - text) : nullptr;
+}
+
+// host->find: FindCode, noted for the starting mod's line in kiln.log.
+uint8_t* Find(const char* pattern, void* module)
+{
+    uint8_t* found = FindCode(pattern, module);
+    if (StartNotes* notes = CurrentNotes()) notes->Find(pattern, found != nullptr);
+    return found;
 }
 
 // host->read: the code find matches (kiln#157). The live bytes with Greeneye's own hooks laid back and, while that code
@@ -138,9 +146,14 @@ void Read(const void* p, void* out, size_t n)
     for (const auto& run : changed) recorded += run.len;
     if (recorded != d.bytes) return;
     auto* dst = static_cast<uint8_t*>(out) + (lo - at);
+    const uint8_t* live = window.data() + (lo - from);
     std::memcpy(dst, g_canonical.data() + (lo - text), hi - lo);
     for (const auto& run : changed) {
         const uintptr_t a = (std::max)(from + run.rva, lo), b = (std::min)(from + run.rva + run.len, hi);
         if (a < b) std::memcpy(dst + (a - lo), window.data() + (a - from), b - a);
+    }
+    if (StartNotes* notes = CurrentNotes()) {
+        const auto first = std::mismatch(dst, dst + (hi - lo), live).first;
+        if (first != dst + (hi - lo)) notes->Read(static_cast<uint32_t>(lo + (first - dst) - g_imageBase));
     }
 }
