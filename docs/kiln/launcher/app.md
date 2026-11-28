@@ -1127,7 +1127,9 @@ Taskbars, docks and app menus show the launcher with Kiln's icon (`launcher/src-
     Bazzite, Silverblue and Kinoite `/home` is a link to `/var/home`, so Gear Lever's `/var/home/<user>/AppImages/...`
     and the launcher's `/home/<user>/AppImages/...` are one file. Quotes, the spec's escapes and field codes are read.
 
-  Someone else's file is never changed or removed (a `kiln-launcher.desktop` without Kiln's line included). The icons
+  Someone else's file is never changed or removed (a `kiln-launcher.desktop` without Kiln's line included). A file under
+  Kiln's own desktop id `kiln-launcher.desktop` never counts as the other entry (menus show one entry per id): someone
+  else's there stays as before #156, left alone and offered for replacing by the switch. The icons
   stay up to date: the NoDisplay nxm and `kiln://` handler entries (`kiln-launcher-nxm.desktop`,
   `kiln-launcher-links.desktop`, written by their own code and untouched by this) name `Icon=kiln-launcher`, and they
   keep working whatever the menu entry does. The window's taskbar icon then comes from the integrator's entry:

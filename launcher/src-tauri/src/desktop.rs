@@ -324,8 +324,9 @@ impl Integration {
     /// - `DESKTOPINTEGRATION` set (not empty, `0`, `false` or `no`): the AppImage convention Gear Lever, AppImageLauncher
     ///   and appimaged follow when they start an AppImage they integrated;
     /// - an app menu entry (Type=Application, not NoDisplay, not Hidden, not shadowed by an earlier folder's file with
-    ///   the same desktop id, not Kiln's own marked entry) whose `Exec` or `TryExec` names the same file once both paths
-    ///   are resolved (/home a link to /var/home on Fedora Atomic and Bazzite).
+    ///   the same desktop id, not Kiln's own marked entry, not under Kiln's own desktop id `kiln-launcher.desktop`) whose
+    ///   `Exec` or `TryExec` names the same file once both paths are resolved (/home a link to /var/home on Fedora Atomic
+    ///   and Bazzite).
     pub fn find(&self, appimage: &Path) -> Option<Integrator> {
         if let Some(v) = self.env.as_deref().map(str::trim)
             && !v.is_empty()
@@ -339,8 +340,11 @@ impl Integration {
             let mut files = Vec::new();
             desktop_files(dir, "", 0, &mut files);
             for (id, file) in files {
-                // the first folder's file with a desktop id is the one menus show (or hide)
-                if !seen.insert(id) {
+                // the first folder's file with a desktop id is the one menus show (or hide). Kiln's own id is never
+                // another entry, whoever wrote it: menus show one entry under it (Kiln's in the user's folder shadows a
+                // package's), and someone else's kiln-launcher.desktop there is `Found::Foreign`, left as it is and
+                // offered for replacing in Settings, as before #156
+                if !seen.insert(id.clone()) || id == DESKTOP_ID {
                     continue;
                 }
                 if let Some(text) = read_small(&file)
@@ -857,9 +861,22 @@ mod tests {
         let gear = Integration { env: Some("1".into()), dirs: vec![apps(&p)] };
         assert_eq!(apply(&p, &gear, a, true).unwrap(), Done::Integrated { removed: false });
         assert_eq!(std::fs::read_to_string(p.desktop_file()).unwrap(), theirs);
-        // and that file, which starts this AppImage, is itself an integrator's entry
+        // that file starts this AppImage, but it is no integrator's entry: it has Kiln's own desktop id, so menus show it
+        // in place of Kiln's (one entry either way). It stays someone else's file, as before #156: left as it is, and
+        // Settings offers to replace it
         let none = Integration { env: None, dirs: vec![apps(&p)] };
-        assert_eq!(none.find(a), Some(Integrator::Entry(p.desktop_file())));
+        assert_eq!(none.find(a), None);
+        assert_eq!(apply(&p, &none, a, false).unwrap(), Done::Foreign);
+        assert_eq!(std::fs::read_to_string(p.desktop_file()).unwrap(), theirs);
+        let info = info_at(&p, a, true, none.find(a).as_ref());
+        assert!(info.foreign && info.integrator.is_none(), "{info:?}");
+        // the same id in a system folder (a package's) is shadowed by the user's file: not another entry either
+        std::fs::remove_file(p.desktop_file()).unwrap();
+        let sys = root.join("usr/share/applications");
+        write(&sys.join(DESKTOP_ID), theirs);
+        let both = Integration { env: None, dirs: vec![apps(&p), sys] };
+        assert_eq!(both.find(a), None);
+        assert_eq!(apply(&p, &both, a, false).unwrap(), Done::Written);
         std::fs::remove_dir_all(&root).unwrap();
     }
 
