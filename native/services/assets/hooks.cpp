@@ -26,6 +26,7 @@
 #include <cstdio>
 
 #include "assets.h"
+#include "ioring_gate.h"
 #include "vfx_preflight.h"
 #include "kiln_hook.hpp"
 
@@ -384,6 +385,7 @@ struct IoPath {
     const char* ptr;
     size_t len;
 };
+extern std::atomic<HANDLE> g_port;  // below: the IOCP Kiln's container joined (hk_CreateIoCompletionPort)
 struct IoCfg {
     IoPath* paths;
     uint64_t count;
@@ -420,6 +422,13 @@ void* __fastcall hk_io_create(void* platform, IoCfg* cfg) {
     }
     LOGI("assets: async IO queue %p: %llu game container(s) + Kiln's as #%u (%s)", q,
          static_cast<unsigned long long>(old_count), g_container_index, g_container_utf8.c_str());
+    // The game's ReadFile + IOCP queue joins every container to its port while it makes the queue (the line above follows
+    // "joined the IO completion port"). A queue that joined none reads the containers some other way (the I/O ring:
+    // ioring_gate.h), and Kiln answers none of those reads: every blob it serves reads as the end of an empty file.
+    if (!g_port.load())
+        LOGW("assets: Kiln's container did not join the async IO queue's completion port: the game reads it another way (the "
+             "Windows 11 I/O ring?), so the blobs Kiln serves (mods' models, materials, VFX) cannot be read; the game's "
+             "--disable-ioring launch option makes it use the queue Kiln serves");
     return q;
 }
 
@@ -427,13 +436,28 @@ void* __fastcall hk_io_create(void* platform, IoCfg* cfg) {
 using CreateFileWFn = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 using CreateIoCompletionPortFn = HANDLE(WINAPI*)(HANDLE, HANDLE, ULONG_PTR, DWORD);
 using ReadFileFn = BOOL(WINAPI*)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
+using GetProcAddressFn = FARPROC(WINAPI*)(HMODULE, LPCSTR);
 CreateFileWFn g_CreateFileW = nullptr;
 CreateIoCompletionPortFn g_CreateIoCompletionPort = nullptr;
 ReadFileFn g_ReadFile = nullptr;
+GetProcAddressFn g_GetProcAddress = nullptr;
+std::atomic<uint32_t> g_ioring_refused{0};
+bool g_ioring_gate = false;  // the GetProcAddress slot is hk_GetProcAddress's (install_content_hooks)
 std::atomic<HANDLE> g_file{nullptr};
 std::atomic<HANDLE> g_port{nullptr};
 std::atomic<ULONG_PTR> g_port_key{0};
 std::atomic<uint64_t> g_reads{0}, g_read_bytes{0}, g_read_misses{0};
+
+// The game's lookups of the I/O ring API (ioring_gate.h): not found, so its async IO takes the ReadFile + IOCP queue that
+// Kiln's container is answered on. Every other name, and an ordinal, passes through to the import as it was.
+FARPROC WINAPI hk_GetProcAddress(HMODULE module, LPCSTR name) {
+    if (!ioring_api_name(name)) return g_GetProcAddress(module, name);
+    if (g_ioring_refused.fetch_add(1, std::memory_order_relaxed) == 0)
+        LOGI("assets: the game asked for the I/O ring API (%s): not found, so it reads its containers, Kiln's among them, "
+             "through ReadFile and its completion port, as with its --disable-ioring launch option", name);
+    SetLastError(ERROR_PROC_NOT_FOUND);
+    return nullptr;
+}
 
 bool same_path(LPCWSTR a, const std::wstring& b) {
     if (!a || b.empty()) return false;
@@ -834,6 +858,7 @@ bool install_content_hooks(std::string* why) {
         g_CreateFileW = reinterpret_cast<CreateFileWFn>(GetProcAddress(k32, "CreateFileW"));
         g_CreateIoCompletionPort = reinterpret_cast<CreateIoCompletionPortFn>(GetProcAddress(k32, "CreateIoCompletionPort"));
         g_ReadFile = reinterpret_cast<ReadFileFn>(GetProcAddress(k32, "ReadFile"));
+        g_GetProcAddress = reinterpret_cast<GetProcAddressFn>(GetProcAddress(k32, "GetProcAddress"));
         void* a = patch_iat("KERNEL32.dll", "CreateFileW", reinterpret_cast<void*>(&hk_CreateFileW));
         void* b = patch_iat("KERNEL32.dll", "CreateIoCompletionPort", reinterpret_cast<void*>(&hk_CreateIoCompletionPort));
         void* c = patch_iat("KERNEL32.dll", "ReadFile", reinterpret_cast<void*>(&hk_ReadFile));
@@ -842,12 +867,25 @@ bool install_content_hooks(std::string* why) {
         if (c) g_ReadFile = reinterpret_cast<ReadFileFn>(c);
         ok = a && b && c && g_CreateFileW && g_CreateIoCompletionPort && g_ReadFile;
         if (!ok) w = "import slots CreateFileW / CreateIoCompletionPort / ReadFile not found";
+        // Before the game makes its async IO (GameFramework "AsyncIo", after Kiln's boot): its I/O ring lookups fail, so it
+        // reads through the three imports above (KR-KZRX). Without this slot the content path still runs; Windows 11 then
+        // reads Kiln's container through the ring, which hk_io_create says.
+        if (ok && g_GetProcAddress) {
+            if (void* d = patch_iat("KERNEL32.dll", "GetProcAddress", reinterpret_cast<void*>(&hk_GetProcAddress))) {
+                g_GetProcAddress = reinterpret_cast<GetProcAddressFn>(d);
+                g_ioring_gate = true;
+            } else
+                LOGW("assets: the game's GetProcAddress import slot was not found: on Windows 11 the game may read Kiln's "
+                     "container through the I/O ring, where Kiln cannot answer it");
+        }
     }
     if (ok) ok = hook(h_cmap, Y.cmap, &hk_cmap, "KfcContentMap", &w) && hook(h_io_create, Y.io_create, &hk_io_create, "AsyncIoCreate", &w);
     g_content_on = ok;
     *why = w;
     return ok;
 }
+
+bool ioring_gate_on() { return g_ioring_gate; }
 
 bool verify_content_map(std::string* why) {
     GameBlob tmp;

@@ -1072,7 +1072,12 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         std::string why;
         if (install_resource_hooks(&why)) {
             LOGI("assets: resource service hooked");
-            if (install_content_hooks(&why)) LOGI("assets: content reader hooked"); else LOGW("assets: content off: %s", why.c_str());
+            if (install_content_hooks(&why))
+                LOGI("assets: content reader hooked; %s", ioring_gate_on()
+                         ? "the game's async IO is kept off the Windows 11 I/O ring (its lookups are not found), so it reads Kiln's container through the queue Kiln serves"
+                         : "the game's async IO could NOT be kept off the Windows 11 I/O ring: there, blobs Kiln serves read as an empty file (the game's --disable-ioring launch option avoids it)");
+            else
+                LOGW("assets: content off: %s", why.c_str());
             if (g_client) {
                 if (install_ui_hooks(&why)) LOGI("assets: UI icon cache hooked"); else LOGW("assets: UI icons off: %s", why.c_str());
             }

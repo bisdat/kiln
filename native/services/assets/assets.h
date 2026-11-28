@@ -131,6 +131,7 @@ bool install_resource_hooks(std::string* why);
 bool install_content_hooks(std::string* why);
 bool install_ui_hooks(std::string* why);
 bool verify_content_map(std::string* why);  // the game's map reads the way hooks.cpp assumes
+bool ioring_gate_on();  // the game's I/O ring lookups are refused, so it reads through the queue Kiln serves (ioring_gate.h)
 bool resources_on();
 bool content_hooks_on();  // blobs may be registered (served once the container opens)
 bool content_on();        // the container is live too

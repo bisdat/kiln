@@ -21,6 +21,17 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -I"$here/platform" -I"$here/.." \
   -I"$here/../../../core/abi" -I"$out" "$here/test_catalog_index.cpp" -o "$out/test_catalog_index" -pthread
 "$out/test_catalog_index"
 
+# KR-KZRX: the production hk_GetProcAddress (the game's I/O ring lookups are not found, so Windows 11 reads Kiln's container
+# through the ReadFile + IOCP queue Kiln answers), and install_content_hooks puts it in the game's GetProcAddress import slot.
+sed -n '/^FARPROC WINAPI hk_GetProcAddress(/,/^}/p' "$here/../hooks.cpp" > "$out/ioring_gate.inc"
+[ -s "$out/ioring_gate.inc" ] || { echo "FAIL ioring.hook: hooks.cpp has no hk_GetProcAddress"; exit 1; }
+grep -qF 'patch_iat("KERNEL32.dll", "GetProcAddress", reinterpret_cast<void*>(&hk_GetProcAddress))' "$here/../hooks.cpp" ||
+  { echo "FAIL ioring.install: install_content_hooks does not patch the game's GetProcAddress import"; exit 1; }
+echo "PASS ioring.install: install_content_hooks patches the game's GetProcAddress import"
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$here/.." -I"$out" \
+  "$here/test_ioring_gate.cpp" -o "$out/test_ioring_gate"
+"$out/test_ioring_gate"
+
 g++ -std=c++20 -O1 -g -Wall -Wextra -DKILN_ASSETS_CATALOG_TEST -fsanitize=address,undefined -fno-sanitize-recover=undefined \
   -I"$here/platform" -I"$here/.." -I"$here/../../../core/abi" -I"$here/../../../third_party" \
   "$here/test_store.cpp" "$here/../store.cpp" "$here/../catalog.cpp" "$here/../util.cpp" -o "$out/test_store" -pthread
