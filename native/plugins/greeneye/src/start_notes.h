@@ -34,7 +34,9 @@ struct StartNotes {
     }
 
     // The line for kiln.log after the start, empty when there is nothing to say. `code`: where find's code came from.
-    std::string Line(bool started, const std::string& code) const
+    // `declined`: GreeneyeModStart returned false by itself; a mod that crashed, had a hook refused or failed its commit
+    // did not, and the outcome logged after this line says why.
+    std::string Line(bool started, const std::string& code, bool declined) const
     {
         std::string places;
         for (uint32_t rva : unhookedRvas) {
@@ -48,8 +50,11 @@ struct StartNotes {
                                                  places + ")"
                                            : std::string();
         if (started) return reads;
-        std::string line = "while starting it asked find for " + std::to_string(finds) +
-                           (finds == 1 ? " signature" : " signatures") + " in the game's code (" + code + ")";
+        if (!finds && !unhooked && !declined) return {}; // failed before it asked anything: the outcome says it all
+        // without a find the code was never read: no source to name
+        std::string line = !finds ? std::string("while starting it asked find for no signatures")
+                                  : "while starting it asked find for " + std::to_string(finds) +
+                                        (finds == 1 ? " signature" : " signatures") + " in the game's code (" + code + ")";
         if (missed) {
             line += "; not found: " + std::to_string(missed);
             for (size_t i = 0; i < missedPatterns.size(); ++i) line += (i ? ", \"" : " (\"") + missedPatterns[i] + "\"";
@@ -58,7 +63,7 @@ struct StartNotes {
             line += ", and every one was found";
         }
         if (!reads.empty()) line += "; " + reads;
-        if (!missed) line += "; so it declined for a reason of its own (see its lines above)";
+        if (!missed && declined) line += "; so it declined for a reason of its own (see its lines above)";
         return line;
     }
 };

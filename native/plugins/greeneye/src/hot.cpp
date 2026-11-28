@@ -78,6 +78,7 @@ struct Generation {
     GreeneyeHot hotApi{};
     ULONGLONG begin = 0; // when it started
     StartNotes notes;    // its finds and reads while it started (start_notes.h)
+    bool declined = false; // GreeneyeModStart returned false by itself: no fault, every hook taken
 };
 
 struct Mod {
@@ -989,8 +990,10 @@ void Activate(Generation* g, std::string& outcome)
             why = "crashed while starting (0x" + std::to_string(fault) + ")";
         else if (g_stagingFailed)
             why = "a hook could not be installed";
-        else
+        else {
             why = "did not start";
+            g->declined = true;
+        }
         Decline(g, why, reload, outcome);
         return;
     }
@@ -1203,7 +1206,7 @@ std::string StartMod(const ModInfo& info, bool* started)
     std::string outcome;
     Activate(g, outcome);
     bool ok = mod.active.load() == g;
-    if (const std::string note = g->notes.Line(ok, CodeSource()); !note.empty())
+    if (const std::string note = g->notes.Line(ok, CodeSource(), g->declined); !note.empty())
         Log("%s: %s", info.name.c_str(), note.c_str());
     if (g_side == kGreeneyeClient && info.id == "quick-deposit") {
         auto state = [&](const char* pattern) {

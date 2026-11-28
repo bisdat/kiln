@@ -325,19 +325,29 @@ int main(int argc, char** argv) {
         // the first byte that read differently: the call's operand (its E8 stayed), the displacement
         check(hot::notes.unhooked == 2 && hot::notes.unhookedRvas.size() == 2 && hot::notes.unhookedRvas[0] == rva + call + 1 &&
               hot::notes.unhookedRvas[1] == rva + global + 3, "reads under another module's hook are noted with the RVA");
-        check(hot::notes.Line(false, "exe file") ==
+        check(hot::notes.Line(false, "exe file", true) ==
               "while starting it asked find for 3 signatures in the game's code (exe file); not found: 1 (\"DE AD BE EF 01\"); "
               "2 reads returned the game's own bytes under another module's hook (rva 0x4504, 0x1603)",
               "the line for a mod that did not start names the signature it missed");
-        check(hot::notes.Line(true, "exe file") ==
+        check(hot::notes.Line(true, "exe file", false) ==
               "2 reads returned the game's own bytes under another module's hook (rva 0x4504, 0x1603)",
               "the line for a started mod names only the reads");
         hot::StartNotes all_found;
         all_found.Find("48 8B", true);
-        check(all_found.Line(false, "live: x") == "while starting it asked find for 1 signature in the game's code (live: x), "
+        check(all_found.Line(false, "live: x", true) == "while starting it asked find for 1 signature in the game's code (live: x), "
               "and every one was found; so it declined for a reason of its own (see its lines above)",
               "a mod that found everything and declined says so");
-        check(hot::StartNotes{}.Line(true, "exe file").empty(), "a started mod without such reads gets no line");
+        // A mod that crashed, had a hook refused or failed its commit did not decline: the outcome after the line says why.
+        check(all_found.Line(false, "live: x", false) == "while starting it asked find for 1 signature in the game's code (live: x), "
+              "and every one was found",
+              "a mod that found everything and failed for another reason is not said to have declined");
+        // Without a find the code was never read: the line names no source (CodeSource would say "live: " then).
+        check(hot::StartNotes{}.Line(false, "live: ", true) ==
+              "while starting it asked find for no signatures; so it declined for a reason of its own (see its lines above)",
+              "a mod that asked find for nothing names no code source");
+        check(hot::StartNotes{}.Line(false, "live: ", false).empty(),
+              "a mod that failed before asking anything (no GreeneyeModStart, an early crash) gets no line");
+        check(hot::StartNotes{}.Line(true, "exe file", false).empty(), "a started mod without such reads gets no line");
     }
     if (scenario == "live-patch")
         check(mod_read(site + 4, 1)[0] == 0x54, "a read of an in-place patch returns the patched byte");

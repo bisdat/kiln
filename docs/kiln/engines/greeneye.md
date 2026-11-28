@@ -48,16 +48,19 @@ is in its own log.
 
 **When a mod does not start (since 0.2.0-dev.31.26, kiln#157).** A mod that returns false from `GreeneyeModStart`
 often logs only its own words ("unsupported game signatures"). Kiln then adds what the mod asked of it while it
-started, one line before the mod's `did not start`, for example:
+started, one line before the mod's outcome (`did not start`), for example (a made-up mod):
 
-    [greeneye] Hollow Halls Progression: while starting it asked find for 31 signatures in the game's code (exe file); not found: 1 ("48 8B 05 ?? ?? ?? ??..."); 2 reads returned the game's own bytes under another module's hook (rva 0xc2b450, 0x2dd74e)
+    [greeneye] Some Mod: while starting it asked find for 12 signatures in the game's code (exe file); not found: 1 ("48 8B 05 ?? ?? ?? ?? 48 85 C0 74 ?? 8B 48 10"); 2 reads returned the game's own bytes under another module's hook (rva 0x40e5f6, 0x87ba02)
 
-It counts the signatures, names up to four that `find` did not find (a pattern longer than 72 characters is cut), and
-names up to four places where `read` returned the game's bytes from under another module's hook (below). The code in
-brackets is where `find`'s code came from: `exe file`; `exe file (Kiln's view; the plugin's own read: <why>)`; or
-`live: <why>`, the snapshot of the live code when neither view of the exe could be had. When every signature was found,
-the line ends with "so it declined for a reason of its own": the mod's own lines before it say which. A mod that starts
-gets the line only when one of its reads saw through such a hook, without the signature count.
+It counts the signatures, names up to four that `find` did not find (a pattern longer than 72 characters is cut to 69
+and "..."), and names up to four places where `read` returned the game's bytes from under another module's hook
+(below). The code in brackets is where `find`'s code came from: `exe file`; `exe file (Kiln's view; the plugin's own
+read: <why>)`; or `live: <why>`, the snapshot of the live code when neither view of the exe could be had. A mod that
+asked `find` for nothing gets "asked find for no signatures", without a source. When every signature was found and the
+mod itself returned false, the line ends with "so it declined for a reason of its own": the mod's own lines before it
+say which. A mod that crashed, had a hook refused or failed for another reason on Kiln's side gets the line without
+that ending (the outcome after it says why), and no line when it asked nothing at all. A mod that starts gets the line
+only when one of its reads saw through such a hook, without the signature count.
 
 ## Which mods load
 
