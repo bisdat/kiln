@@ -703,7 +703,7 @@ case ignored. Table and markers: `engines::ENGINES` ([engines.md](../engines.md)
 | `shroudlink` | `shroudlink` | chain | load |
 | `ember` | `ember-loader`, `ember_loader` | chain | load |
 | `modloaderproxy` | `modloader-proxy.dll`, `chainloader.ini` | chain | load |
-| `ultimateasiloader` | export or text `IsUltimateASILoader` | chained as `..\xinput9_1_0.dll` next to the game (refused when that name is taken) | load |
+| `ultimateasiloader` | export or text `IsUltimateASILoader` | chained as `..\xinput9_1_0.dll` next to the game (refused when another file has that name; when it is Ultimate ASI Loader too, the newer copy runs there and the other goes to the backup: engines.md, Installer) | load |
 | `aldrich`, `livemap`, `sharedxp`, `reshade` | `aldrich` / `livemap.ini` / `xpshare.ini` / `reshade` | chain | load |
 | `optiscaler` | `optiscaler.ini`, `optiscaler.log` (checked before ReShade: OptiScaler can load ReShade); its other names `d3d12.dll`, `wininet.dll`, `winhttp.dll`, `OptiScaler.asi` are found by `engines::optiscaler_in`, never by `scan_proxies` (dev.29.18) | chain | load |
 | `chainloader` | `dinput8-chain.ini` | chain | load |
@@ -1290,6 +1290,9 @@ cooks nothing); `vanilla` and `no-mods`, nothing. Neither step refuses the start
    `refuse_pending`): a start the launcher tracks (Kiln or Vanilla) for which Steam was asked (or the direct start
    made), its game process not seen, less than 5 minutes (`STEAM_WAIT_MS`) since the ask; or another `launch_play` /
    `launch_confirm` inside its own start for the game. The pending start's record is left as it is.
+   (0.2.0-dev.31.next, KR-NXM5) Every mode but `vanilla`: refuse (`refused`, `detail: {ualOverProxy: true}`) when Kiln's
+   receipt is there but `dinput8.dll` is Ultimate ASI Loader again (another mod manager re-deployed it over Kiln's
+   proxy; `install::ual_over_proxy`). The sentence says so and points to Repair on the Runtime page.
 2. Mode `profile`: nothing to write (Steam's Play button does the same). Modes `vanilla`/`no-mods`: write
    play-once.ini. Mode `once`: render the profile into `kiln/profile.once.json` (+ `kiln/chain/once.ini`: its dllmain
    natives and its chain plan, so the single start follows this profile's compat rules and late list), then

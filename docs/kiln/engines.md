@@ -49,7 +49,23 @@ Kiln owns only `dinput8.dll`.
 - Every other kind: chained. The installer moves the DLL to `kiln/chain/<word>-dinput8.dll` and adds it to
   `chain.ini [chain]`. Occupied chain names always get a numbered suffix, even for identical bytes, directories or
   dangling links. Ultimate ASI Loader runs only under names it knows, so it is chained as `xinput9_1_0.dll` next
-  to the game (`..\xinput9_1_0.dll` in chain.ini). If that name is taken (case ignored, even identical bytes), the install is refused.
+  to the game (`..\xinput9_1_0.dll` in chain.ini). If another file has that name (case ignored, a folder or a link
+  as well), the install is refused.
+- Ultimate ASI Loader under both names (0.2.0-dev.31.next, KR-NXM5): `dinput8.dll` is Ultimate ASI Loader and
+  `xinput9_1_0.dll` is Ultimate ASI Loader too (its `IsUltimateASILoader` export). Usually an earlier install chained
+  it and another mod manager (Multi DLL Installer, Vortex) wrote it back over Kiln's proxy; the player can also have
+  put both there. Install and Repair are not refused. The newer copy, by the file version in its VS_VERSION_INFO,
+  runs as `xinput9_1_0.dll`; with the same bytes, the same or no version, the chained copy stays. The other copy goes
+  to the install's backup (`kiln/backups/install-*/` and the launcher's second copy), Kiln's proxy becomes
+  `dinput8.dll`, and `..\xinput9_1_0.dll` is added to `chain.ini [chain]` when it is not there. The install result's
+  `warnings`, the launcher's install notes and the log say which copy went where and that another mod manager likely
+  re-deployed it. Receipt: the copy that went to the backup is a `replaced` entry of `dinput8.dll` (`backed-up`,
+  engine `ultimateasiloader`). When the newer copy took the chained name, an earlier install's `chained` entry
+  names the newer bytes, so uninstall puts the newer one back as `dinput8.dll`; without such an entry both originals
+  are recorded and uninstall restores both. A re-deploy after that is caught at Play: every start but vanilla is
+  refused with "dinput8.dll is Ultimate ASI Loader again instead of Kiln's loader ... Repair Kiln on the Runtime
+  page" (`install::ual_over_proxy`, error detail `ualOverProxy`), instead of a start without Kiln. The Runtime page
+  lists `dinput8.dll` among the changed files, and a support report has `proxy-not-kiln`.
   Ultimate ASI Loader that comes later, from the Library, goes to the same place at profile activation ([Files in the
   game folder](#files-in-the-game-folder)).
 - DLLs under any other proxy name are never moved. EML's `dbghelp.dll`, Shroudtopia's `winmm.dll` and SET's
