@@ -171,7 +171,8 @@ Each header `{data,count,capacity,grow,allocator}` is 40 B; **data=header+0x28**
 Capacity stores C `0x83761d/3d/5d/7d` set 1024, not EMF's 0x4000 corruption-screen ceiling. Grow callback
 `0x840d40` → `0x86b070` refuses because allocator `+0x20=0`. `MapEntry* append(MapList*)` C `0x302970` returns null
 when full, increments count on success, and does not zero every byte. Mod-owned appends must initialize the whole
-entry and synchronize after completed client jobs, not in a render callback/parallel copier.
+entry and synchronize after completed client jobs, not in a render callback/parallel copier, and at every client
+SimStep, not only the ticked ones ("The list in a frame" below).
 
 MapEntry 0xa0 B: entity u32 `+0`, opaque second key `+4`, **marker loca ID** u32 `+8`, signed 32.32 XYZ
 `+0x10/+0x18/+0x20`, range floats `+0x28/+0x2c`, typeId u32 `+0x30`, visibility byte `+0x34`, LocaTagComponent
@@ -190,6 +191,51 @@ Custom cache is reset and fully rebuilt on each generation change; entries above
 Counts were normal/label/special 833/6/1; custom 0→528 on opening map→529 after adding a pin. Initial zero was lazy
 cache state, not an empty save. [seen, session 2] Local append produced a copied icon and yellow diamond, removed
 within 3 s after stopping injection; no hover-name tooltip. Existing Render world label stayed world-locked.
+
+### The list in a frame (GitHub #159; client 26430625 `5d9ef2f1…`) [static]
+
+Read 2026-11-28 from the client exe (objdump and a .pdata/xref scan, never run), for cykel-far's report that Kiln's map
+icons flickered. Pinned by `tools/sigport/tests/test_markers_map_steps.py`. In one frame, on the main thread:
+
+1. **The client world update** `0xa1fae0` (reached from `0xa1fad0` for a world in state 2; the client frame `0x87a290`
+   calls it at `0x87a8f9`, docs/re/client.md): `ticked = step counter [world+0xe17e9c] != previous [world+0xe17ea0]`
+   (`0xa1fb2e`). When ticked it steps the prediction world first (`0xa00de0`). Then `SimStep(storage, ticked)` at
+   `0xa1fc9e`, **on frames without a new step too** (ticked 0); only when byte `[world+0x15f55cc]` is set is that
+   SimStep skipped (`0xa1fc8d`; the byte's meaning was not followed).
+2. **SimStep** `0xa2c660` uses ticked once: the input apply `0x9653e0` (`0xa2c6a5`), a server-world function. The
+   programs run when the world's byte `+0xe17959` is set (`0xa2c6c7`, as storage `+0xe17031`), which createWorld copies
+   from its config `+0x44` (`0x983213`) and the client world's config sets to 1 (`0x84d064`). StepPrograms `0x9ade50`
+   runs until it returns true (`0xa2c87a`).
+3. **StepPrograms** selects programs by their flags (client bit `0x1`; SYSTEM always; the others when an archetype
+   matches) with no clock or interval test. clear_map_markers_for_ui (`0x304470`, flags 5, CLIENT | SYSTEM) and
+   replicate_map_markers_for_ui (`0x3161b0`, flags `0x201`, CLIENT | CHUNKED: slices on the world's task queue) both
+   sys-write G38UiPlayData, so they never overlap. Before its only return StepPrograms waits for the whole queue
+   (`WaitTaskGroup` `0x8f0b30` at `0x9ae686`, on `world+0xe17960`, the queue WaitWorldJobs waits for).
+4. **Kiln's Post** of the client world runs when SimStep returns, and only for a ticked step: the core's tick link
+   passes the others through without Pre or Post (`native/core/src/tick.cpp`, `hk_sim_step`). The client clock is
+   60 Hz.
+5. **The UI frame** runs outside SimStep on the same thread: the GameUiSystem update `0xa4fb40` calls GameUiFrame
+   `0xbd0f90` through `[system+0xf60]` (registered at `0x85333d`). UI code reaches the list through UiApp `0x283f4a8`
+   (`+0xd0` GameUiData, its `+0x38` the G38UiPlayData). PlayStateUi `0xc603d0` → the HUD screen dispatcher `0xbe87d0`
+   → the map tab `0xc2e190` (reads count and data at `0xc2e418`, `0xc2e5c7`, `0xc2e9c0`) → the map canvas `0xc36070`.
+   There, when the normal count grew past the largest it saw (`0xc36280`), `0xd76830` walks the normal, special and
+   label lists; the **marker layer** `0xda4770` (called at `0xc362db`) is rebuilt only when one of the four list counts
+   or the custom-pin generations (`+0x36e9f8`, `+0x36e9fc`) differ from the ones it was built from (`0xda47a4..0xda47fd`),
+   and it keeps **pointers to the entries** (`0xda4a43`): positions are read from the slots each frame. Other readers
+   in the UI frame: `0xd24f50` and `0xd61370` (HUD), the compass lookup `0xd3cbf0` (by entry `+8`, so Kiln's id-0 rows
+   never match).
+
+So above 60 fps most frames ran a SimStep that cleared and refilled the list without Kiln's rows, and no Post followed.
+The normal count went N+k at a ticked step and N at the next, the marker layer was rebuilt each time, and Kiln's icons
+were in some frames only (cykel-far's count check, N against N+2, is what this predicts). It was not a race inside a
+step: the Post was right after the refill, but it skipped most of the steps. Kiln's own compass strip and world labels
+do not share this: they draw from a snapshot that lasts until the next Post.
+
+**The fix (the 31.x patch after 0.2.0-dev.31.26):** kiln.markers keeps the rows its last Post wrote and writes them again after every client
+SimStep returns: a kiln.hooks link on SimStep before the core's own (sigdb feature `markers.client_map_steps`), so after
+the step's join and before a UI frame can read the list again. The count stays N+k, the layer's entry pointers stay on Kiln's slots while N
+is stable, and a moved marker's slot is written again at every step. `append_rows`' in-place rewrite now matters only
+when no SimStep ran in between (the skipped step above). Without the feature the rows are written at the Post only.
 
 ### Compass, projection and names [static] [refl]
 
