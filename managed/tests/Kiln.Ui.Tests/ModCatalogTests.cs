@@ -1203,6 +1203,26 @@ public sealed class ModCatalogTests : IDisposable
         Assert.True(eml.Help is null || !eml.Help.Contains("ShroudForge", StringComparison.Ordinal), eml.Help);
     }
 
+    /// <summary>kiln-eml says ShroudForge runs the package while kiln-shroudforge's status of this start is missing (Kiln does
+    /// not know ShroudForge's state, so the row stays EML): it must not also say that its ShroudForge settings do nothing
+    /// (review of 0.2.0-dev.31.24).</summary>
+    [Fact]
+    public void An_eml_row_that_shroudforge_runs_does_not_say_its_settings_do_nothing()
+    {
+        var mods = Dir("mods");
+        var boxes = EmlPackage("mineral-production-boxes", WhitelistExt, kilns: false);
+        Profile(new() { ["eml"] = [new { id = "mineral-production-boxes", version = "0.3.1", path = boxes }] });
+        Write("eml.json", new
+        {
+            format = 1, pid = Pid, phase = "aside", aside = "ShroudForge owns startup asset patching and runs EML packages in its mods folder",
+            mods = new[] { new { id = "mineral-production-boxes", source = "profile", path = boxes, state = "own-loader",
+                reason = $"runs under ShroudForge (its own loader): its ShroudForge switch is on (hand-installed mod at {boxes})" } },
+        });
+        var row = Mod(Read(), "eml", "mineral-production-boxes");
+        Assert.Equal(ModRunState.Loaded, row.State);
+        Assert.True(row.Help is null || !row.Help.Contains("only ShroudForge reads", StringComparison.Ordinal), row.Help);
+    }
+
     [Fact]
     public void A_failed_shroudforge_preparation_does_not_leave_eml_rows_loaded()
     {

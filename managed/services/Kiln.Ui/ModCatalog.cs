@@ -1308,17 +1308,23 @@ internal static class ModCatalog
 
     /// <summary>EML rows that still run as EML mods (kiln-eml, or EML's own loader) though their package is ShroudForge's
     /// (<see cref="IsSfOwned"/>): no ShroudForge runs them this start, so their ShroudForge settings do nothing, and the
-    /// row says so.</summary>
+    /// row says so. Not a row kiln-eml says ShroudForge runs (<see cref="RunsUnderSf"/>: the group could not take it, as
+    /// when kiln-shroudforge's status of this start is missing).</summary>
     private static void SfSettingsUnused(Builder b)
     {
         if (!b.Mods.TryGetValue("eml", out var rows)) return;
         for (var i = 0; i < rows.Count; i++)
-            if (rows[i] is { State: ModRunState.Loaded or ModRunState.Waiting } m && IsSfOwned(m.Folder))
+            if (rows[i] is { State: ModRunState.Loaded or ModRunState.Waiting } m && !RunsUnderSf(m) && IsSfOwned(m.Folder))
             {
                 var said = KilnText.T("catalog.sf.settings_unused");
                 rows[i] = m with { Help = m.Help is { Length: > 0 } h ? $"{h} {said}" : said };
             }
     }
+
+    /// <summary>kiln-eml's row says ShroudForge runs the package (own-loader, "runs under ShroudForge (hosted by Kiln)" or
+    /// "(its own loader)": kiln-eml discover.rs aside_entries).</summary>
+    private static bool RunsUnderSf(CatalogMod m) =>
+        m.Word == "own-loader" && m.Reason?.Contains("under ShroudForge", StringComparison.Ordinal) == true;
 
     /// <summary>A legacy EML package in ShroudForge's folder (mod.json and src/mod.lua, no extended.mod.json, no other
     /// engine's manifest, not a copy Kiln placed for another kind): its mod.json's id, name and version, switched off.</summary>
