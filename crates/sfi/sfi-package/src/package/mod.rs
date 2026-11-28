@@ -153,7 +153,7 @@ impl Package {
         for setting in &mut manifest.settings {
             setting.apply_at_explicit = explicit.contains(&setting.key);
         }
-        extension::validate_manifest(&manifest)?;
+        extension::validate_manifest(&manifest, options.version)?;
         Ok(Self {
             documents,
             manifest,

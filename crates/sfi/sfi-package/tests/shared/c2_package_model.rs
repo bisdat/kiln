@@ -144,6 +144,29 @@ pub fn every_control_capability_and_registered_link_has_a_labeled_case() {
     let p = parse(&manifest(), &e).unwrap();
     assert_eq!(p.manifest.links.0.len(), 15);
 }
+/// ShroudForge 1.8.1's link registry (mod_link_order.json, 0581d72e) adds community-discord and video-youtube, and its
+/// starter mod (docs/examples/starter-mod) carries both: the 1.8 dialect reads them, 1.7.9 still refuses them.
+pub fn the_18_dialect_reads_the_discord_and_youtube_links() {
+    let mut e = extension();
+    e["links"] = json!({"community-discord":"https://discord.com/invite/example","video-youtube":"https://www.youtube.com/"});
+    let read = |e: &Value, version| {
+        Package::parse(
+            manifest().to_string().as_bytes(),
+            Some(e.to_string().as_bytes()),
+            ParseOptions { version, ..ParseOptions::default() },
+        )
+    };
+    let p = read(&e, SourceVersion::Sf180).unwrap();
+    assert_eq!(p.manifest.links.0.len(), 2);
+    assert_eq!(
+        read(&e, SourceVersion::Sf179).err().as_deref(),
+        Some("unsupported mod link 'community-discord'")
+    );
+    // still HTTPS only (the schema's pattern says so first)
+    e["links"] = json!({"community-discord":"http://discord.com/invite/example"});
+    let error = read(&e, SourceVersion::Sf180).err().unwrap();
+    assert!(error.contains("https://"), "{error}");
+}
 pub fn strict_documents_preserve_bytes_order_duplicates_and_numeric_representation() {
     let raw = b"{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"z\":1,\"a\":-0,\"z\":2,\"n\":1e2}}\r\n";
     let p = Package::parse(

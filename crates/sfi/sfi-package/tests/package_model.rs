@@ -13,6 +13,11 @@ fn every_control_capability_and_registered_link_has_a_labeled_case() {
 }
 
 #[test]
+fn the_18_dialect_reads_the_discord_and_youtube_links() {
+    assertions::the_18_dialect_reads_the_discord_and_youtube_links();
+}
+
+#[test]
 fn strict_documents_preserve_bytes_order_duplicates_and_numeric_representation() {
     assertions::strict_documents_preserve_bytes_order_duplicates_and_numeric_representation();
 }
