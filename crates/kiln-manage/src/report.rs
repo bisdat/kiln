@@ -1792,7 +1792,8 @@ pub fn build(input: &ReportInput) -> Report {
     // decides the same from the same OptiScaler.ini: native/services/ui/overlay_optiscaler.h)
     for g in crate::game::graphics_tools(&game) {
         let _ = writeln!(k, "Graphics tool: {} ({}): Kiln's overlay {}", g.engine.name(), g.file,
-            if g.kiln_overlay { "draws next to it (its own menu and frame generation are off in OptiScaler.ini)" } else { "drawing steps aside" });
+            if g.kiln_overlay { "draws next to it (its own menu and frame generation are off in OptiScaler.ini)" }
+            else if crate::game::overlay_anyway(&game) { "is drawn anyway (kiln.json ui.overlay \"on\")" } else { "drawing steps aside" });
         cx.find("optiscaler", Level::Info, format!("{} is installed ({}). {}", g.engine.name(), g.file, g.text));
         // its settings (OverlayMenu, frame generation), and the tail of its own log when it writes one ([Log]
         // LogToFile=true; it can grow large, so a log's budget, as for the other tools' logs), under their names on disk

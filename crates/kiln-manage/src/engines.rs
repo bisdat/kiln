@@ -113,6 +113,27 @@ impl OptiScalerIni {
 
 /// What a player can expect from Kiln's in-game overlay next to OptiScaler with these settings (the Play page's note).
 pub fn optiscaler_overlay_note(ini: &OptiScalerIni) -> String {
+    optiscaler_overlay_note_for(ini, false)
+}
+
+/// [`optiscaler_overlay_note`], with "Draw Kiln's overlay anyway" on or not (`anyway`: the game's kiln.json ui.overlay
+/// "on", [`crate::game::overlay_anyway`]). On, Kiln does not step aside for OptiScaler's menu or frame generation
+/// (0.2.0-dev.31.25): the note says so, the risk, and how to undo it.
+pub fn optiscaler_overlay_note_for(ini: &OptiScalerIni, anyway: bool) -> String {
+    if anyway && !ini.kiln_overlay_draws() {
+        if ini.overlay_menu == Some(false) {
+            return "\"Draw Kiln's overlay anyway\" is on (kiln.json ui.overlay \"on\"), so Kiln tries its in-game overlay although \
+                    OptiScaler's frame generation is set in OptiScaler.ini (FGInput and FGOutput under [FrameGen]), at your own risk: the \
+                    game's frames are then presented from OptiScaler's own queue, where Kiln cannot draw, so its windows can still go off \
+                    during a session. If the game closes at start, switch it off in the launcher."
+                .into();
+        }
+        return "\"Draw Kiln's overlay anyway\" is on (kiln.json ui.overlay \"on\"), so Kiln's in-game overlay draws although \
+                OptiScaler's own menu is on (its default; both open with Insert), at your own risk. If the game closes at start, switch \
+                it off in the launcher. For both without that risk, set OverlayMenu=false under [Menu] in OptiScaler.ini and leave \
+                FGInput and FGOutput under [FrameGen] at auto."
+            .into();
+    }
     if ini.kiln_overlay_draws() {
         return "OptiScaler's own overlay menu is off in OptiScaler.ini (OverlayMenu=false) and no frame generation is set, so Kiln's \
                 in-game overlay draws next to it."

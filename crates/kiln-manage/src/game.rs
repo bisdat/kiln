@@ -255,7 +255,8 @@ pub struct GraphicsToolNote {
     /// What to expect from Kiln's overlay, one or two sentences for the Play page (its title names the tool and file).
     pub text: String,
     /// Kiln's overlay draws next to it (OptiScaler: its own overlay menu off in OptiScaler.ini); false: kiln.ui's
-    /// drawing steps aside on its own.
+    /// drawing steps aside on its own (unless the player draws it anyway, kiln.json ui.overlay "on": `text` says so; the
+    /// launcher keeps offering that switch next to it).
     pub kiln_overlay: bool,
 }
 
@@ -266,13 +267,28 @@ pub fn graphics_tools(game_dir: &Path) -> Vec<GraphicsToolNote> {
             let ini = crate::engines::OptiScalerIni::read(game_dir);
             GraphicsToolNote {
                 engine: crate::engines::Engine::OptiScaler,
-                text: crate::engines::optiscaler_overlay_note(&ini),
+                text: crate::engines::optiscaler_overlay_note_for(&ini, overlay_anyway(game_dir)),
                 kiln_overlay: ini.kiln_overlay_draws(),
                 file,
             }
         })
         .into_iter()
         .collect()
+}
+
+/// The largest kiln.json read for [`overlay_anyway`] (the file is a few KiB; kiln.ui reads it whole).
+const KILN_JSON_MAX: u64 = 1 << 20;
+
+/// (0.2.0-dev.31.25) "Draw Kiln's overlay anyway": the game's `kiln/kiln.json` has `"ui": {"overlay": "on"}`, the value
+/// exactly as kiln.ui takes it (native/services/ui/overlay_setting.h: "ON", true or a broken file are Kiln deciding).
+/// `KILN_UI_OVERLAY` in the game's environment, which wins over it there, is not known here.
+pub fn overlay_anyway(game_dir: &Path) -> bool {
+    let f = game_dir.join(crate::paths::game::KILN).join("kiln.json");
+    std::fs::metadata(&f).is_ok_and(|m| m.is_file() && m.len() <= KILN_JSON_MAX)
+        && std::fs::read_to_string(&f)
+            .ok()
+            .and_then(|t| crate::jsonc::parse(&t).ok())
+            .is_some_and(|v| v.pointer("/ui/overlay").and_then(|o| o.as_str()) == Some("on"))
 }
 
 /// `GameStatus.other_folder_profile`: the id of another data folder's profile active in the game, and the data folder

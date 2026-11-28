@@ -427,6 +427,42 @@ fn optiscaler_ini_decides_kilns_overlay() {
     assert!(OptiScalerIni::read(&big.0).kiln_overlay_draws(), "up to the limit it is read");
 }
 
+/// (0.2.0-dev.31.25 review) With "Draw Kiln's overlay anyway" on (the game's kiln/kiln.json ui.overlay "on", exactly as
+/// kiln.ui reads it), the Play page's OptiScaler note no longer says Kiln's overlay steps aside: it says it is drawn
+/// anyway, at the player's risk, and how to undo it. `kiln_overlay` stays what OptiScaler's own ini decides (the launcher
+/// keeps offering the switch under the banner, so it can go off again).
+#[test]
+fn the_optiscaler_note_says_when_the_overlay_is_drawn_anyway() {
+    let t = tmp("optiscaler-anyway");
+    let g = &t.0;
+    put(g, "d3d12.dll", &build_test_dll(&["D3D12CreateDevice"], b"OptiScaler.ini"));
+    let note = || kiln_manage::game::graphics_tools(g).remove(0);
+    assert!(!kiln_manage::game::overlay_anyway(g), "no kiln.json: Kiln decides");
+    assert!(note().text.contains("steps aside"), "{}", note().text);
+    // "on" with OptiScaler's menu on (its default), as the launcher writes it (comments kept by the jsonc reader)
+    put(g, "kiln/kiln.json", b"{\n  // the player's\n  \"ui\": { \"look\": \"game\", \"overlay\": \"on\" }\n}\n");
+    assert!(kiln_manage::game::overlay_anyway(g));
+    let n = note();
+    assert!(!n.kiln_overlay, "OptiScaler's ini still makes Kiln step aside on its own");
+    assert!(!n.text.contains("steps aside") && n.text.contains("\"Draw Kiln's overlay anyway\" is on") && n.text.contains("own menu is on")
+        && n.text.contains("your own risk") && n.text.contains("closes at start, switch it off"), "{}", n.text);
+    // "on" with its frame generation set: tried, and where Kiln cannot draw it may still go off in the session
+    put(g, "OptiScaler.ini", b"[FrameGen]\nFGInput=upscaler\nFGOutput=fsrfg\n[Menu]\nOverlayMenu=false\n");
+    let n = note();
+    assert!(!n.kiln_overlay && !n.text.contains("steps aside") && n.text.contains("frame generation is set") && n.text.contains("own queue")
+        && n.text.contains("closes at start, switch it off"), "{}", n.text);
+    // its menu off and no frame generation: Kiln draws next to it either way, the note as before
+    put(g, "OptiScaler.ini", b"[Menu]\nOverlayMenu=false\n");
+    assert!(note().kiln_overlay && note().text.contains("draws next to it"), "{}", note().text);
+    // only the exact value: "ON", true, "auto", "off" and a broken file are Kiln deciding (kiln.ui reads them so)
+    put(g, "OptiScaler.ini", b"[Menu]\nOverlayMenu=true\n");
+    for text in [&b"{\"ui\":{\"overlay\":\"ON\"}}"[..], b"{\"ui\":{\"overlay\":true}}", b"{\"ui\":{\"overlay\":\"off\"}}", b"{\"ui\":\"on\"}", b"{\"ui\":{\"overlay\":\"on\"", b"[]"] {
+        put(g, "kiln/kiln.json", text);
+        assert!(!kiln_manage::game::overlay_anyway(g), "{}", String::from_utf8_lossy(text));
+        assert!(note().text.contains("steps aside"), "{}", note().text);
+    }
+}
+
 /// Enshrouded ModLoader's packages (AndyPimms' loader, SDK ABI 1; github.com/aebischer/Enshrouded-ModLoader) are never
 /// plain DLLs: loaded early, their EnshroudedModInitialize would never run, and that loader refuses every world with the
 /// mod switched on (it never starts a DLL already in the process). Since 0.2.0-dev.29.19 they are the Library kind
