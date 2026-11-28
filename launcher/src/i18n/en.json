@@ -3580,6 +3580,9 @@
     "activateProfile": "Activate this profile in the selected game to edit ShroudForge settings.",
     "ownFolder": "This is your own folder, not a copy Kiln placed: Kiln changes only the setting you change here.",
     "none": "No settings.",
+    "openFile": "Open {file}",
+    "noFileYet": "{file} doesn't exist yet: Shroudtopia writes it at the game's first start with this profile, or when you change a setting here.",
+    "notInGame": "The {file} that ShroudForge runs isn't in the game's mods folder yet: it is there once this profile is active in the game.",
     "titleOf": "{name} settings",
     "title": "Settings",
     "modalHint": "{kind} mod. Changes are written right away; the game reads them at its next start."

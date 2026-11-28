@@ -3470,6 +3470,9 @@
     "activateProfile": "请先在所选游戏中加载此配置方案，再编辑 ShroudForge 设置。",
     "ownFolder": "这是你手动放入的文件夹。Kiln 只会写入你在此处更改的设置。",
     "none": "暂无设置。",
+    "openFile": "打开 {file}",
+    "noFileYet": "{file} 还不存在：Shroudtopia 会在使用此配置首次启动游戏时，或在这里更改设置时创建它。",
+    "notInGame": "ShroudForge 运行的 {file} 还不在游戏的 mods 文件夹中：此配置在游戏中启用后它就会在那里。",
     "titleOf": "{name} 的设置",
     "title": "设置",
     "modalHint": "{kind} 模组。更改会立即保存，游戏下次启动时读取。"

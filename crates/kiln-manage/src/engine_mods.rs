@@ -4321,6 +4321,11 @@ pub struct EngineSettings {
     /// changes in the launcher there, and never switches, replaces or removes the folder.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub own_folder: bool,
+    /// The file the Settings window's Open button shows (sosmic, 0.2.0-dev.31.25): `file`, when it is there and is the
+    /// one the engine reads. Shroudtopia: shroudtopia.json once it exists. ShroudForge: the copy in the game's mods
+    /// folder ShroudForge runs (Kiln's or the player's own), never the Library's defaults. None: nothing to open yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_file: Option<String>,
 }
 
 /// `<configDir>/shroudtopia/shroudtopia.json`, as kiln-shroudtopia reads it.
@@ -4408,7 +4413,7 @@ pub fn settings(kind: ModKind, id: &str, game_dir: Option<&Path>, config_dir: &P
     let none = |note: &str| EngineSettings {
         kind, id: id.to_string(), format: "none".into(), file: None,
         schema: serde_json::json!({ "type": "object", "properties": {} }), values: serde_json::json!({}), note: Some(note.into()),
-        own_folder: false,
+        own_folder: false, open_file: None,
     };
     match kind {
         ModKind::ShroudForge => {
@@ -4419,18 +4424,21 @@ pub fn settings(kind: ModKind, id: &str, game_dir: Option<&Path>, config_dir: &P
                 Some((g, SfFolder::At(p, own))) => Some((g, p, own)),
                 _ => None,
             };
+            let in_game = placed.is_some();
             let Some((root, dir, own_folder)) = placed.or_else(|| folder.map(|f| (library_root(f), f.to_path_buf(), false))) else {
                 return Ok(none("activate the profile once: ShroudForge's settings live in its mods folder"));
             };
             refuse_symlink_path(root, &dir.join("mod.json"))?;
             refuse_symlink_path(root, &dir.join("extended.mod.json"))?;
             let m = crate::shroudforge::read_mod(&dir)?;
+            let file = dir.join("extended.mod.json");
             Ok(EngineSettings {
                 kind, id: id.to_string(), format: "extended.mod.json".into(),
-                file: Some(dir.join("extended.mod.json").display().to_string()),
+                file: Some(file.display().to_string()),
                 schema: crate::shroudforge::settings_schema(&m), values: crate::shroudforge::settings_values(&m),
                 note: (m.settings.is_empty()).then(|| "this mod declares no settings".into()),
                 own_folder,
+                open_file: (in_game && file.is_file()).then(|| file.display().to_string()),
             })
         }
         ModKind::Shroudtopia => {
@@ -4450,6 +4458,7 @@ pub fn settings(kind: ModKind, id: &str, game_dir: Option<&Path>, config_dir: &P
             Ok(EngineSettings {
                 kind, id: key, format: "shroudtopia.json".into(), file: Some(file.display().to_string()),
                 schema: schema_from_values(&values), values, note: None, own_folder: false,
+                open_file: file.is_file().then(|| file.display().to_string()),
             })
         }
         ModKind::Emf => Ok(none("EMF settings: use the EMF ini editor")),

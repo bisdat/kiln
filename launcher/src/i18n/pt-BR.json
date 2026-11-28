@@ -3076,6 +3076,9 @@
     "activateProfile": "Ative este perfil no jogo selecionado para editar as configurações do ShroudForge.",
     "ownFolder": "Esta é a sua própria pasta, não uma cópia que o Kiln colocou: o Kiln muda só a configuração que você mudar aqui.",
     "none": "Sem configurações.",
+    "openFile": "Abrir {file}",
+    "noFileYet": "{file} ainda não existe: o Shroudtopia o cria na primeira inicialização do jogo com este perfil, ou quando você muda uma configuração aqui.",
+    "notInGame": "O {file} que o ShroudForge usa ainda não está na pasta de mods do jogo: ele estará lá quando este perfil estiver ativo no jogo.",
     "titleOf": "Configurações de {name}",
     "title": "Configurações",
     "modalHint": "Mod {kind}. As mudanças são gravadas na hora; o jogo as lê no próximo início."

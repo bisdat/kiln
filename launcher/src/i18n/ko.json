@@ -3019,6 +3019,9 @@
     "activateProfile": "ShroudForge 설정을 편집하려면 선택한 게임에서 이 프로필을 활성화하세요.",
     "ownFolder": "Kiln이 넣은 사본이 아니라 직접 만든 폴더입니다. Kiln은 여기서 바꾼 설정만 바꿉니다.",
     "none": "설정 없음.",
+    "openFile": "{file} 열기",
+    "noFileYet": "{file} 파일이 아직 없습니다. Shroudtopia는 이 프로필로 게임을 처음 시작하거나 여기서 설정을 변경할 때 파일을 만듭니다.",
+    "notInGame": "ShroudForge가 사용하는 {file} 파일이 아직 게임의 mods 폴더에 없습니다. 이 프로필이 게임에서 활성화되면 그곳에 놓입니다.",
     "titleOf": "{name} 설정",
     "title": "설정",
     "modalHint": "{kind} 모드. 변경 사항은 바로 기록되며, 게임은 다음 실행 때 읽습니다."

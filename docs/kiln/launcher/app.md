@@ -89,7 +89,10 @@ text is about Kiln's own kind it says "Kiln mods".
   drop-in folder of that kind) or "Add it" (`found_add`: into the Library and the profile, on).
 - **The menu** (the "More" button, or a right click anywhere on the row; `useRowContextMenu` in `ui/Menu.tsx` gives every
   row with a menu, in every list of the launcher, its menu at the pointer, fields keep the webview's own): Switch on/off,
-  Settings (ShroudForge's `extended.mod.json`, Shroudtopia's `shroudtopia.json`), Configs (when the mod wrote a config:
+  Settings (ShroudForge's `extended.mod.json`, Shroudtopia's `shroudtopia.json`; the window's "Open <file>" button,
+  0.2.0-dev.31.25, shows the file the engine reads in Explorer (`EngineSettings.openFile`, `app_open_path`): Shroudtopia's
+  in the profile's config folder once it exists, ShroudForge's copy in the game's mods folder, never the Library's; while
+  there is none, a line says so), Configs (when the mod wrote a config:
   the profile's config editor, opened on its file), Use <version> (the Library's other versions), Roll back to <version>
   (dev.29: an earlier version an update kept, with its settings; `library_rollback`, Undo in the toast is
   `profile_revert`; `shell/rollback.ts`), Open folder, Remove <version> (one of several versions), Remove.

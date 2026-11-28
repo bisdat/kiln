@@ -616,7 +616,14 @@ ShroudForge the Lua part's `io.export` files land in ShroudForge's exports folde
 ### Logs and state
 
 `could not prepare the game data: <step>: <cause>` names the refused preparation step and the file or underlying
-error in the log and state reasons. A backup seal mismatch means the vanilla pair cannot be trusted: verify the game
+error in the log and state reasons. One cause is said plainly instead: a file another program has open. The vanilla
+backup (`<exe>.kfc.bak`, `.kfc_resources.bak`) and stage copies, the copies of publication and restore, and the renames that set an old
+backup pair aside are tried again on Windows' sharing violation (os error 32) and lock violation (33) only, after
+pauses of 0.1, 0.2, 0.4, 0.8 and 1 s (six tries, about 2.5 s; 0.2.0-dev.31.25, sosmic's start right after the last game
+closed). A file still held after that fails the run with the reason `another program has enshrouded.kfc.bak open (the
+game still closing, an antivirus or a backup); try again in a moment`; the kiln.log warning before it keeps the
+paths, the try count and the system's own words. A rename over a target another program holds is `Access is denied
+(os error 5)` on Windows and is not tried again. A backup seal mismatch means the vanilla pair cannot be trusted: verify the game
 files in Steam, then start through Kiln again. The same recovery applies when another tool changed the game data.
 A ShroudForge writer refusal carries its own lock or handoff explanation; let that writer finish before retrying.
 - `kiln.log`, owner `early:kiln-eml.dll`: EML's info, warning and error lines as `[eml] ...`, one line per failed or

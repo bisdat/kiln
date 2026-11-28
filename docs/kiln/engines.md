@@ -424,7 +424,9 @@ engines' mods") and 5.8.
   the other kinds; kiln-shroudlink and kiln-ember read the library folder in place.
 - **Settings.** `engine_mods::settings` / `set_setting`. ShroudForge: the settings in `extended.mod.json` (the copy in
   ShroudForge's mods folder), as a JSON Schema with Kiln's `x-kiln-*` hints. Shroudtopia: `mods.<key>` in
-  `<configDir>/shroudtopia/shroudtopia.json`, with the types taken from the values. EMF keeps its ini editor. EML,
+  `<configDir>/shroudtopia/shroudtopia.json`, with the types taken from the values. `openFile` names the file the
+  launcher's "Open <file>" button shows: shroudtopia.json once it exists, ShroudForge's copy in its mods folder (never the
+  Library's). EMF keeps its ini editor. EML,
   SET, Greeneye, Flame, shroudlink and Ember mods declare no settings Kiln edits; Enshwick keeps each mod's settings
   per world (`<save>-mod-settings/<id>/settings.toml`), edited in the game's Mods screen or with `enshwick config`. Settings calls require a valid mod id listed in the requested
   profile. ShroudForge writes require that profile active in the selected game and the folder ShroudForge reads for

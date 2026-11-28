@@ -3076,6 +3076,9 @@
     "activateProfile": "Activez ce profil dans le jeu sélectionné pour modifier les paramètres de ShroudForge.",
     "ownFolder": "C'est votre propre dossier, pas une copie placée par Kiln : Kiln ne change que le paramètre que vous modifiez ici.",
     "none": "Aucun paramètre.",
+    "openFile": "Ouvrir {file}",
+    "noFileYet": "{file} n'existe pas encore : Shroudtopia le crée au premier lancement du jeu avec ce profil, ou quand vous modifiez un réglage ici.",
+    "notInGame": "Le {file} qu'utilise ShroudForge n'est pas encore dans le dossier mods du jeu : il y sera dès que ce profil sera actif dans le jeu.",
     "titleOf": "Paramètres de {name}",
     "title": "Paramètres",
     "modalHint": "Mod {kind}. Les changements sont écrits tout de suite ; le jeu les lit à son prochain lancement."

@@ -3076,6 +3076,9 @@
     "activateProfile": "Attiva questo profilo nel gioco selezionato per modificare le impostazioni di ShroudForge.",
     "ownFolder": "Questa è una tua cartella, non una copia messa da Kiln: Kiln cambia solo l'impostazione che modifichi qui.",
     "none": "Nessuna impostazione.",
+    "openFile": "Apri {file}",
+    "noFileYet": "{file} non esiste ancora: Shroudtopia lo crea al primo avvio del gioco con questo profilo, o quando cambi un'impostazione qui.",
+    "notInGame": "Il {file} usato da ShroudForge non è ancora nella cartella mods del gioco: ci sarà quando questo profilo sarà attivo nel gioco.",
     "titleOf": "Impostazioni di {name}",
     "title": "Impostazioni",
     "modalHint": "Mod {kind}. Le modifiche vengono scritte subito; il gioco le legge al prossimo avvio."

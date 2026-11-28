@@ -1,7 +1,8 @@
 // Settings of another engine's mod in a profile (engine_settings_get/set; docs/kiln/engines.md): ShroudForge's
 // `extended.mod.json` settings (JSON Schema with x-kiln-* hints) and Shroudtopia's `shroudtopia.json` (schema derived
 // from the values) on the shared SchemaForm, one form per x-kiln-group. Kinds without settings show the backend's note.
-// Each change writes one top-level key at once, like the config editor.
+// Each change writes one top-level key at once, like the config editor. "Open <file>" shows the file the engine reads
+// (`openFile`: shroudtopia.json once it exists, the copy in the game's mods folder ShroudForge runs, never the Library's).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import * as api from "../api/commands";
@@ -110,6 +111,23 @@ function LiteralSetting({ entry, parts, value, disabled, onChange }: {
   </Field>;
 }
 
+/** The Open button for the settings file the engine reads (sosmic, 0.2.0-dev.31.25), or a plain line saying it is not
+ *  there yet. Nothing for kinds without a settings file. */
+export function SettingsFileOpen({ s }: { s: EngineSettings }) {
+  const t = useT();
+  if (s.format === "none" || !s.file) return null;
+  const file = s.format;
+  const open = s.openFile;
+  if (open) {
+    return <div className="k-row" data-settings-file="open">
+      <Button size="s" onClick={() => api.appOpenPath(open).catch((e) => toast.error(e))}>{t("engineSettings.openFile", { file })}</Button>
+    </div>;
+  }
+  return <span className="k-hint" data-settings-file="missing">
+    {t(s.kind === "shroudforge" ? "engineSettings.notInGame" : "engineSettings.noFileYet", { file })}
+  </span>;
+}
+
 export const engineSettingsKey = (kind: ModKind, id: string, profileId: ProfileId, gameId: string | null) => ["engine_settings", kind, id, profileId, gameId] as const;
 
 export function EngineSettingsForm({ kind, id, profileId, gameId }: { kind: ModKind; id: string; profileId: ProfileId; gameId: string | null }) {
@@ -138,6 +156,7 @@ export function EngineSettingsForm({ kind, id, profileId, gameId }: { kind: ModK
       {s.ownFolder && <span className="k-hint" data-own-folder="">{t("engineSettings.ownFolder")}</span>}
       {s.ownFolder && own && gameId && <OwnFolderRow compact folder={own} profileId={profileId} gameId={gameId} />}
       {s.file && <span className="k-hint k-mono k-ellipsis" title={s.file}>{s.format}: {s.file}</span>}
+      <SettingsFileOpen s={s} />
       {!groups.length ? <EmptyState title={s.note ? s.note.charAt(0).toUpperCase() + s.note.slice(1) + "." : t("engineSettings.none")} /> : groups.map((g) => (
         <div key={g.title ?? "_"} className="k-stack" style={{ gap: 6 }}>
           {g.title && <span className="k-label" style={{ fontSize: 16 }}>{g.title}</span>}
