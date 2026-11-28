@@ -1003,13 +1003,23 @@ pub fn settings_schema(m: &SfMod) -> serde_json::Value {
         if let Some(opts) = s.options.as_ref().filter(|o| !o.is_empty()) {
             let order = option_keys(s);
             let keys: Vec<serde_json::Value> = order.iter().filter_map(|k| option_value(s, k)).collect();
-            let labels: Vec<serde_json::Value> = order.iter().filter_map(|k| opts.get(k.as_str()).cloned()).collect();
+            let labels: Vec<serde_json::Value> = order.iter().filter_map(|k| opts.get(k.as_str()).and_then(option_label)).map(Into::into).collect();
+            // ShroudForge 1.8's option groups, one per choice (null for an ungrouped one), only when some choice has one
+            let groups: Vec<serde_json::Value> = order.iter().map(|k| opts.get(k.as_str()).and_then(option_group).into()).collect();
+            let groups = groups.iter().any(|g| !g.is_null()).then_some(groups);
             if ty == "array" {
-                p.insert("items".into(), serde_json::json!({ "type": option_type(s), "enum": keys, "x-kiln-enum-labels": labels }));
+                let mut items = serde_json::json!({ "type": option_type(s), "enum": keys, "x-kiln-enum-labels": labels });
+                if let Some(g) = groups {
+                    items["x-kiln-enum-groups"] = g.into();
+                }
+                p.insert("items".into(), items);
                 p.insert("uniqueItems".into(), true.into());
             } else {
                 p.insert("enum".into(), keys.into());
                 p.insert("x-kiln-enum-labels".into(), labels.into());
+                if let Some(g) = groups {
+                    p.insert("x-kiln-enum-groups".into(), g.into());
+                }
             }
         } else if ty == "array" {
             p.insert("items".into(), serde_json::json!({ "type": "string" }));

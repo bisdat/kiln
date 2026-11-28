@@ -198,6 +198,41 @@ fn many_settings_are_read_without_quadratic_work() {
     assert!(took < std::time::Duration::from_secs(5), "{n} settings took {took:?}");
 }
 
+/// ShroudForge 1.8 option labels written as `{ label, group }` (Gear Up's priorityPick; Ezra's report): the launcher's form
+/// gets each choice's label text (`x-kiln-enum-labels`, as before) and its group (`x-kiln-enum-groups`, null for an
+/// ungrouped choice), for a single choice and for a list; a package without groups gets no `x-kiln-enum-groups`.
+#[test]
+fn grouped_option_labels_reach_the_launcher_form_as_text_and_groups() {
+    let root = std::env::temp_dir().join(format!("kiln-sf-groups-{}", std::process::id()));
+    let _t = Tmp(root.clone());
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("mod.json"), r#"{"id":"gear","name":"Gear","version":"1.0.0-beta","capabilities":["runtime"]}"#).unwrap();
+    std::fs::write(root.join("src/mod.lua"), "return {}").unwrap();
+    std::fs::write(
+        root.join("extended.mod.json"),
+        r#"{"schemaVersion":1,"enabled":true,"settings":{
+            "priorityPick":{"value":"equipped","options":{"equipped":{"label":"Equipped weapon","group":"Hands"},"none":{"label":"Nothing"}}},
+            "holstered":{"value":["sword"],"options":{"sword":{"label":"Sword","group":"Melee"},"staff":"Staff"}},
+            "plain":{"value":"a","options":{"a":"A","b":"B"}}}}"#,
+    )
+    .unwrap();
+    let m = shroudforge::read_mod(&root).unwrap();
+    let pick = m.settings.iter().find(|s| s.key == "priorityPick").unwrap();
+    let equipped = &pick.options.as_ref().unwrap()["equipped"];
+    assert_eq!((shroudforge::option_label(equipped), shroudforge::option_group(equipped)), (Some("Equipped weapon"), Some("Hands")));
+    assert_eq!(shroudforge::option_label(&json!("Staff")), Some("Staff"));
+    assert_eq!(shroudforge::option_label(&json!({"label": "X", "group": 5})), None, "a group that is not text");
+    assert_eq!(shroudforge::option_label(&json!({"group": "G"})), None, "no label text");
+    let schema = shroudforge::settings_schema(&m);
+    let p = &schema["properties"];
+    assert_eq!(p["priorityPick"]["x-kiln-enum-labels"], json!(["Equipped weapon", "Nothing"]));
+    assert_eq!(p["priorityPick"]["x-kiln-enum-groups"], json!(["Hands", null]));
+    assert_eq!(p["holstered"]["items"]["x-kiln-enum-labels"], json!(["Sword", "Staff"]));
+    assert_eq!(p["holstered"]["items"]["x-kiln-enum-groups"], json!(["Melee", null]));
+    assert_eq!(p["plain"]["x-kiln-enum-labels"], json!(["A", "B"]));
+    assert!(p["plain"].get("x-kiln-enum-groups").is_none());
+}
+
 /// Ezra's report (Discord, 2026-11-28): Add refused Gear Up (ShroudForge 1.8) with "not a ShroudForge package Kiln can
 /// run: setting priorityPick has invalid metadata". A package shaped like it is added; a package ShroudForge really
 /// refuses is still left out, and the reason names the field and what ShroudForge expects.
