@@ -309,9 +309,10 @@ uintptr_t hk_sim_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr
     return result;
 }
 
-// surfaces_ready, once the map list's guards hold: the link before the core's own SimStep link, so it runs after the Post.
+// surfaces_ready, once the map list's guards hold and the client Post is ours (no Post, no rows to keep): the link before
+// the core's own SimStep link, so it runs after the Post.
 void steps_setup() {
-    if (!g_map_guards) return;
+    if (!g_map_guards || !g.client_post) return;
     uintptr_t sim = 0;
     if (!g.api->feature(str("markers.client_map_steps")) || g.api->symbol(str("SimStep"), &sim) != KILN_OK || !sim ||
         !constant("world.storage", &g_world_storage) || g_world_storage <= 0 || !constant("storage.kind", &g_storage_kind) ||
