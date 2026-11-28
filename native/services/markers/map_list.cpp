@@ -74,4 +74,21 @@ uint32_t append_rows(uint8_t* ui, const MapLayout& l, const MapRow* rows, uint32
     return take;
 }
 
+void MapKeep::set(uint64_t e, const MapRow* r, uint32_t n) {
+    if (!e || !n) return clear();
+    epoch = e;
+    rows.assign(r, r + n);
+}
+
+void MapKeep::clear() {
+    epoch = 0;
+    rows.clear();
+}
+
+uint32_t rewrite_kept(uint8_t* ui, const MapLayout& l, const MapKeep& keep, uint64_t epoch, Appended* last, ListState* state) {
+    *state = ListState::Ok;
+    if (!epoch || keep.epoch != epoch || keep.rows.empty()) return 0;
+    return append_rows(ui, l, keep.rows.data(), static_cast<uint32_t>(keep.rows.size()), last, state);
+}
+
 }  // namespace kmk

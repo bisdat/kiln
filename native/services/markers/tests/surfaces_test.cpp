@@ -441,6 +441,142 @@ void compass_strip() {
     kmk_test::end("M07 compass maths: east of a north-facing camera right of centre, centred facing east, opposite facing west; strip size; 100 ms smoothing");
 }
 
+// ---- issue 159: the list in a frame -------------------------------------------------------------------------------------
+// The game's order on a fake list (docs/re/map.md, "The list in a frame"). Each client SimStep: the clear (count 0) and the
+// refill with the game's rows, then Kiln's Post at the steps that advance the clock, then the end of the step; the UI
+// frame reads the list after it. A paused frame runs no SimStep.
+struct Frames {
+    FakeUi f;
+    uint64_t game = 833;  // the game's rows this step (the 26430625 client's count in a hosted world, session 1)
+    uint64_t epoch = 1;
+    Appended last;
+    MapKeep keep;
+    std::vector<MapRow> rows = {{3815.4, 850.2, 1383.0, 0x8c1a2b3cu}, {3700.0, 820.0, 1500.0, 0x11223344u}};
+    std::vector<MapRow> post_rows;  // what the next Post admits (surfaces.cpp: the MAP surface's order)
+    ListState st = ListState::Ok;
+
+    Frames() { post_rows = rows; }
+    void programs() {  // clear_map_markers_for_ui, then replicate_map_markers_for_ui; their jobs joined
+        f.set_header(0, 1024);
+        for (uint64_t i = 0; i < game; ++i) std::memset(f.entry(i), 0x60 + static_cast<int>(i & 0x0f), 0xa0);
+        f.set_header(game, 1024);
+    }
+    void post() {  // surfaces_client_post: the keep goes, post_map appends and keeps what it wrote
+        keep.clear();
+        if (post_rows.empty() && !last.n) return;
+        const uint32_t n = static_cast<uint32_t>(post_rows.size());
+        append_rows(f.ui(), f.l, post_rows.data(), n, &last, &st);
+        if (st == ListState::Ok) keep.set(epoch, post_rows.data(), n);
+    }
+    uint32_t step(bool ticked) {  // one client SimStep and the link after it
+        programs();
+        if (ticked) post();
+        return rewrite_kept(f.ui(), f.l, keep, epoch, &last, &st);
+    }
+    // the UI frame's read: the game's rows untouched and exactly `want` of ours after them, in the Post's order
+    bool read(const std::vector<MapRow>& want) {
+        if (f.count() != game + want.size()) return false;
+        for (uint64_t i = 0; i < game; ++i)
+            if (f.entry(i)[0] != 0x60 + static_cast<int>(i & 0x0f) || f.entry(i)[0x9f] != f.entry(i)[0]) return false;
+        std::vector<uint8_t> e(0xa0);
+        for (size_t k = 0; k < want.size(); ++k) {
+            encode_entry(e.data(), f.l, want[k]);
+            if (std::memcmp(f.entry(game + k), e.data(), e.size()) != 0) return false;
+        }
+        return true;
+    }
+};
+
+void every_frame_reads_kilns_rows() {
+    kmk_test::begin();
+    // 144 frames in one second against the 60 Hz client clock: a frame's SimStep is ticked when the clock advanced since
+    // the frame before (the client world update, C 0xa1fae0: ticked = step counter != previous)
+    Frames w;
+    int missing = 0, ticked_frames = 0, first_missing = -1;
+    uint64_t prev = 0;
+    for (int frame = 0; frame < 144; ++frame) {
+        const uint64_t clock = static_cast<uint64_t>(frame) * 60 / 144 + 1;
+        const bool ticked = clock != prev;
+        prev = clock;
+        ticked_frames += ticked;
+        w.step(ticked);
+        CHECK(w.st == ListState::Ok);
+        if (!w.read(w.rows)) {
+            ++missing;
+            if (first_missing < 0) first_missing = frame;
+        }
+    }
+    CHECK_EQ(ticked_frames, 60);
+    CHECK_EQ(missing, 0);
+    if (missing) std::printf("  %d of 144 frames read the list without Kiln's rows (first: frame %d)\n", missing, first_missing);
+    // a ticked step: the link writes the Post's rows over in place (same count, same bytes)
+    w.step(true);
+    CHECK(w.read(w.rows));
+    CHECK_EQ(w.last.base, w.game);
+    CHECK_EQ(w.last.n, 2u);
+    kmk_test::end("issue 159: at 144 fps on the 60 Hz client clock every UI frame reads the game's rows and Kiln's two after them");
+}
+
+void kept_rows_follow_the_post() {
+    kmk_test::begin();
+    Frames w;
+    w.step(true);
+    CHECK(w.read(w.rows));
+    // a paused frame (no SimStep: the client world update skips it while the world is paused): the list as the step left it
+    CHECK(w.read(w.rows));
+    // a moved marker: the Post's new position, kept for the steps after it
+    w.post_rows[0].x += 25;
+    w.step(true);
+    CHECK(w.read(w.post_rows));
+    w.step(false);
+    w.step(false);
+    CHECK(w.read(w.post_rows));
+    // the game's rows grow until one of ours has no room: only the room is used, the game's rows stay whole
+    w.game = 1023;
+    CHECK_EQ(w.step(false), 1u);
+    CHECK(w.read({w.post_rows[0]}));
+    w.game = 1024;
+    CHECK_EQ(w.step(false), 0u);
+    CHECK(w.st == ListState::Ok && w.read({}));
+    w.game = 833;
+    CHECK_EQ(w.step(false), 2u);
+    CHECK(w.read(w.post_rows));
+    // the marker goes: the Post writes nothing and keeps nothing, the steps after it write nothing
+    w.post_rows.clear();
+    w.step(true);
+    CHECK(w.read({}));
+    CHECK_EQ(w.step(false), 0u);
+    CHECK(w.read({}));
+    CHECK(w.keep.rows.empty() && w.keep.epoch == 0);
+    kmk_test::end("issue 159: kept rows follow the last Post (moved, cut to the room the game leaves, gone), a paused frame keeps them");
+}
+
+void kept_rows_stay_in_their_world() {
+    kmk_test::begin();
+    Frames w;
+    w.step(true);
+    CHECK(w.read(w.rows));
+    // the next client world (a new epoch) before its first Post: nothing of the last world's goes into its list
+    w.epoch = 2;
+    CHECK_EQ(w.step(false), 0u);
+    CHECK(w.st == ListState::Ok && w.read({}));
+    w.step(true);
+    CHECK(w.read(w.rows));
+    // a header that fails its guards: nothing is written and the state says so (surfaces.cpp latches the map off)
+    w.programs();
+    w.f.set_header(w.game, 1024, 8);
+    std::vector<uint8_t> before(w.f.mem);
+    CHECK_EQ(rewrite_kept(w.f.ui(), w.f.l, w.keep, w.epoch, &w.last, &w.st), 0u);
+    CHECK(w.st == ListState::BadHeader);
+    CHECK(before == w.f.mem);
+    // nothing kept: no write, state Ok
+    MapKeep none;
+    w.programs();
+    CHECK_EQ(rewrite_kept(w.f.ui(), w.f.l, none, w.epoch, &w.last, &w.st), 0u);
+    CHECK(w.st == ListState::Ok && w.read({}));
+    kmk_test::end("issue 159: kept rows go only into their own world's list, never through a header that fails its guards");
+}
+
 }  // namespace
 
 int main() {
@@ -452,5 +588,8 @@ int main() {
     encoder_and_reuse();
     heading();
     compass_strip();
+    every_frame_reads_kilns_rows();
+    kept_rows_follow_the_post();
+    kept_rows_stay_in_their_world();
     return kmk_test::finish("surfaces_test");
 }

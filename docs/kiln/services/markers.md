@@ -58,6 +58,10 @@ The same marker as JSON (`MarkerSpec.FromJson`, `ToJson`), with the same default
   types are listed (`Markers.Icons.All`) but refused on the map, so a mod cannot make a fake travel point. Map icons are
   offered only on the game build whose icon catalog Kiln has verified; after a game update `markers.map` stays off until
   Kiln is updated (`CatalogChanged.Reason` says so). Compass and world markers do not need the catalog.
+- The game rebuilds its map list at every client step, once per frame; Kiln writes its map icons back after each one,
+  so they stay on the map at any frame rate (sigdb feature `markers.client_map_steps`, GitHub #159). On a game build
+  where that feature does not resolve they are written at the client's 60 Hz steps only and can flicker above 60 fps;
+  kiln.log says so once at start. docs/re/map.md, "The list in a frame".
 - A dedicated server has no marker icons of its own: it takes the catalog from the first player whose Kiln sends the
   verified catalog of this game build. Until then `Markers.Icons.IsReady` is false and a server `Send` with the map
   surface is refused with `CatalogNotReady`; wait for `Markers.CatalogChanged`. Compass and world markers can be sent at once.
@@ -134,7 +138,7 @@ nothing is drawn partly.
 | `kiln.markers` | the table is here |
 | `markers.local` | a client's own markers (needs `world.lifecycle`) |
 | `markers.catalog` | the icon catalog (`Markers.Icons`); `IsReady` is its warm-up |
-| `markers.map` | native map icons: the map list's guards resolved (`markers.client_map`) and the catalog verified for this game build |
+| `markers.map` | native map icons: the map list's guards resolved (`markers.client_map`) and the catalog verified for this game build; with `markers.client_map_steps` (not a row of its own) they are written again after every client step |
 | `markers.compass`, `markers.world` | the drawn surfaces: kiln.render's camera and kiln.ui's frame and screen state |
 | `markers.nameplates` | `markers.world` and `markers.anchors.client` |
 | `markers.anchors.client`, `markers.anchors.server` | following an entity of that world |

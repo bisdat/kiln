@@ -2,7 +2,7 @@
   "format": 1,
   "side": "client",
   "extends": "server.d/dev28-04-markers.json",
-  "comment": "kiln.markers on the game client (dossier chapter 04 §2.3/§3, docs/re/map.md; client 26430625). markers.client_map: the guards of the native map list kiln.markers appends to in a completed client step, never calling the game's append: the clear program's three count offsets (markers/Clear), the entry layout (two independent strategies of @markers/Entry, and the type id store @markers/EntryType), the four list capacities of 1024 at their offsets (@markers/ListCapacity) and the 0xa0 entry stride (@markers/EntryStride: index*5<<5). The fixed constants must equal their captures: a layout change turns the feature off, it is not followed. markers.anchors.client: the server-world anchor names plus the network create site and its entity/parent stack fields, reused from net.json (net/CreateTemplateCall, @net.create_fields) and not declared again (chapter 04 §4.2). Research-only symbols of the proposal (waypoint, boss, compass, canvas, fog) are not shipped.",
+  "comment": "kiln.markers on the game client (dossier chapter 04 §2.3/§3, docs/re/map.md; client 26430625). markers.client_map: the guards of the native map list kiln.markers appends to in a completed client step, never calling the game's append: the clear program's three count offsets (markers/Clear), the entry layout (two independent strategies of @markers/Entry, and the type id store @markers/EntryType), the four list capacities of 1024 at their offsets (@markers/ListCapacity) and the 0xa0 entry stride (@markers/EntryStride: index*5<<5). The fixed constants must equal their captures: a layout change turns the feature off, it is not followed. markers.anchors.client: the server-world anchor names plus the network create site and its entity/parent stack fields, reused from net.json (net/CreateTemplateCall, @net.create_fields) and not declared again (chapter 04 §4.2). markers.client_map_steps (GitHub issue 159): kiln.markers' link around the core's SimStep (client 0xa2c660; the core set's symbol and constants, not declared again) writes its map rows again after every client-world SimStep returns. The game clears and refills the list at every client SimStep, once per frame (the client world update 0xa1fae0 calls SimStep with ticked 0 on frames without a new step, and SimStep runs StepPrograms either way; StepPrograms waits for the world's jobs at 0x9ae686 before it returns), while the core's Post runs only at the ticked steps; without the feature the rows are written at the Post only (kiln.log says so once). Checked by tools/sigport/tests/test_markers_map_steps.py. Research-only symbols of the proposal (waypoint, boss, compass, canvas, fog) are not shipped.",
   "symbols": {
     "markers/Clear": {
       "comment": "clear_map_markers_for_ui (client 0x304470): only its count stores are used, as a guard",
@@ -126,6 +126,15 @@
         "markers/entry.label",
         "markers/entry.label_hash",
         "markers/entry.type"
+      ]
+    },
+    "markers.client_map_steps": {
+      "symbols": [
+        "SimStep"
+      ],
+      "constants": [
+        "world.storage",
+        "storage.kind"
       ]
     },
     "markers.anchors.client": {
