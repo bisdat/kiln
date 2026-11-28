@@ -167,7 +167,12 @@ internal static class SfiCatalog
         foreach (var m in ModCatalog.TakeSfPackages(emlRows, root, m => record is null || record.Find(SfPackageId(m.Folder!)) is not null))
         {
             var facts = ModCatalog.SfFacts(m.Folder!);
-            add(Row(m with { Engine = "shroudforge" }, SfPackageId(m.Folder!), facts?.On));
+            var pkgId = SfPackageId(m.Folder!);
+            var row = Row(m with { Engine = "shroudforge" }, pkgId, facts?.On);
+            // nothing of the interpreter's about it yet (it has not reported, or ShroudForge's own loader runs the folder):
+            // kiln-eml's words where they say the profile has it off, or that it runs although off
+            if (record?.Find(pkgId) is null && ModCatalog.KeepsEmlWords(m)) row = row with { State = m.State, Word = m.Word, Reason = m.Reason, Help = m.Help };
+            add(row);
             covered.Add(ModCatalog.NormPath(m.Folder!));
         }
         for (var i = 0; i < emlRows.Count; i++)

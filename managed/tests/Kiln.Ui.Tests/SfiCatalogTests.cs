@@ -406,6 +406,32 @@ public sealed class SfiCatalogTests : IDisposable
         }
     }
 
+    /// <summary>A ShroudForge package the profile has off, which kiln-eml lists (its row: off in the profile), moves to the
+    /// ShroudForge group before the interpreter reports. Until the interpreter says something of its own about it, the row
+    /// keeps kiln-eml's words (off in the profile), not "has not reported"; then the interpreter's (review of
+    /// 0.2.0-dev.31.24).</summary>
+    [Fact]
+    public void A_moved_row_the_profile_has_off_keeps_kiln_emls_words_until_the_interpreter_reports()
+    {
+        var folder = Package(Path.Combine(Mods, "mineral-production-boxes"), "mineral-production-boxes", launcher: "EML", settings: Whitelist);
+        Profile(("eml", "mineral-production-boxes", folder, false));
+        WriteRaw("eml.json", JsonSerializer.Serialize(new
+        {
+            pid = Pid, updatedUnixMs = StartMs + 2000, phase = "done",
+            mods = new[] { new { id = "mineral-production-boxes", name = "Mineral Production Boxes", version = "1.0.0", path = folder, source = "profile",
+                state = "disabled", reason = "switched off in the profile" } },
+        }));
+        SfStatus("kiln");
+        var row = Assert.Single(Read().Mods, m => m.Id == "mineral-production-boxes");
+        Assert.Equal(("shroudforge", ModRunState.Disabled, folder), (row.Engine, row.State, row.Folder));
+        Assert.Contains("off in the profile", row.Reason);
+        Assert.NotNull(row.Sfi);
+        WriteSfi(Record("running", [Pkg("mineral-production-boxes", intent: "disabled", epoch: 2)]));
+        row = Assert.Single(Read().Mods, m => m.Id == "mineral-production-boxes");
+        Assert.Equal(("shroudforge", ModRunState.Disabled), (row.Engine, row.State));
+        Assert.Contains("Switched off for this start", row.Reason);
+    }
+
     /// <summary>kiln-eml, the plan's data writer, failed to apply the compatibility entry's package: its EML row is the
     /// only place that failure shows, so the one-row rule leaves it (and the EML group's problem count) in place.</summary>
     [Fact]

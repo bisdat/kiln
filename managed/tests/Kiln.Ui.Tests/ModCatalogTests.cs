@@ -1223,6 +1223,31 @@ public sealed class ModCatalogTests : IDisposable
         Assert.True(row.Help is null || !row.Help.Contains("only ShroudForge reads", StringComparison.Ordinal), row.Help);
     }
 
+    /// <summary>The profile has the mod off, but ShroudForge runs Kiln's copy anyway (its switch is on there and this
+    /// ShroudForge takes no skip list): kiln-eml's row says so and how to stop it. Moved to the ShroudForge group, the row
+    /// keeps those words rather than ShroudForge's bare "active" (review of 0.2.0-dev.31.24).</summary>
+    [Fact]
+    public void A_moved_row_that_runs_although_off_in_the_profile_keeps_kiln_emls_words()
+    {
+        var mods = Dir("mods");
+        var boxes = EmlPackage("mineral-production-boxes", WhitelistExt);
+        Profile(new() { ["eml"] = [new { id = "mineral-production-boxes", version = "0.3.1", path = boxes, enabled = false }] });
+        Write("eml.json", new
+        {
+            format = 1, pid = Pid, phase = "aside", aside = "ShroudForge owns startup asset patching and runs EML packages in its mods folder",
+            mods = new[] { new { id = "mineral-production-boxes", source = "profile", path = boxes, state = "own-loader",
+                reason = $"runs under ShroudForge (its own loader) although it is off in the profile: ShroudForge's switch is on in Kiln's copy {boxes}, " +
+                         "and Kiln does not host ShroudForge this start, so it cannot have it skipped. Press Play in the Kiln launcher (or activate the profile again): Kiln then takes its copy out (or switches it off)" } },
+        });
+        Write("shroudforge.json", new { pid = Pid, mode = "self-hosted", runtime = "running", modsDir = mods, startupPrepared = true });
+        SfRuntimeActive("mineral-production-boxes");
+        var s = Read();
+        var row = Mod(s, "shroudforge", "mineral-production-boxes");
+        Assert.Equal(boxes, row.Folder);
+        Assert.Contains("although it is off in the profile", row.Reason);
+        Assert.DoesNotContain(s.Mods, m => m.Engine == "eml");
+    }
+
     [Fact]
     public void A_failed_shroudforge_preparation_does_not_leave_eml_rows_loaded()
     {

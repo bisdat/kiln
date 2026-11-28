@@ -1121,9 +1121,9 @@ internal static class ModCatalog
                 var row = m with { Engine = "shroudforge" };
                 // kiln-eml handed it to ShroudForge, whose preparation then failed (as below for the EML rows)
                 if (mode == "failed" && m.Word == "own-loader") row = row with { State = ModRunState.Failed, Word = "failed", Reason = note, Help = help };
-                // the profile has it off, and kiln-eml had Kiln's copy taken out or skipped: that is the row, not ShroudForge's
-                // switch in the files
-                if (m.Word == "disabled") keepWord.Add(b.Mods.TryGetValue("shroudforge", out var l) ? l.Count : 0);
+                // the profile has it off, and kiln-eml had Kiln's copy taken out or skipped (that is the row, not ShroudForge's
+                // switch in the files), or ShroudForge runs it although the profile has it off (kiln-eml says how to stop it)
+                if (KeepsEmlWords(m)) keepWord.Add(b.Mods.TryGetValue("shroudforge", out var l) ? l.Count : 0);
                 b.Add(row);
             }
         var emlFolders = new HashSet<string>(emlRows.Where(m => m.Folder is not null).Select(m => NormPath(m.Folder!)), StringComparer.OrdinalIgnoreCase);
@@ -1325,6 +1325,12 @@ internal static class ModCatalog
     /// "(its own loader)": kiln-eml discover.rs aside_entries).</summary>
     private static bool RunsUnderSf(CatalogMod m) =>
         m.Word == "own-loader" && m.Reason?.Contains("under ShroudForge", StringComparison.Ordinal) == true;
+
+    /// <summary>A moved EML row (<see cref="TakeSfPackages"/>) whose words are kiln-eml's to keep where ShroudForge (or
+    /// Kiln's interpreter) has none of its own about the package: the profile has it off, or it runs although the profile
+    /// has it off (kiln-eml discover.rs off_but_present, which says how to stop it).</summary>
+    internal static bool KeepsEmlWords(CatalogMod m) =>
+        m.Word == "disabled" || (m.Word == "own-loader" && m.Reason?.Contains(" although it is off in the profile", StringComparison.Ordinal) == true);
 
     /// <summary>A legacy EML package in ShroudForge's folder (mod.json and src/mod.lua, no extended.mod.json, no other
     /// engine's manifest, not a copy Kiln placed for another kind): its mod.json's id, name and version, switched off.</summary>
