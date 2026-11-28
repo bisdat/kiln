@@ -1235,8 +1235,8 @@ internal static class ModCatalog
     /// (<c>ensure_eml_extension</c>: an empty settings) and Kiln's switch in its EML copies hold none of these, so a real
     /// EML mod is never one. HTR (Discord, 2026-11-27): Mineral Production Boxes (Nexus 347) ships its 30-resource
     /// whitelist in an extension that says EML, and the Kiln menu showed it under EML with no switch and no settings;
-    /// Wardrobe and Auto Loot Plus ship settings the same way. The Library keeps such a mod's kind (kiln-manage engines.rs
-    /// detect_folder): only the menu's group follows this.</summary>
+    /// Wardrobe - Transmog ships settings the same way (kiln-manage tests/eml_under_shroudforge.rs SHIPPED). The Library
+    /// keeps such a mod's kind (kiln-manage engines.rs detect_folder): only the menu's group follows this.</summary>
     internal static bool IsSfOwned(string? folder)
     {
         if (string.IsNullOrEmpty(folder)) return false;
