@@ -538,7 +538,9 @@ including comments, CRLF, typed numeric/bool/list options, SF 1.8 option labels 
 (`docs/examples/starter-mod`) byte for byte, chained/cyclic conditions, canonical SDL shortcut text, live/restart rules,
 refused edits (each metadata refusal names the field) and exact written bytes. The page draws a list's option groups
 as headings and names a single choice's group in its combo; what it does not use (`presets`, `inputReservations`, tab
-groups, `assetPreparation`, setting fields outside SF's schema) is read past and noted once in kiln.log. No SF fork change or second UI executable is required.
+groups, `assetPreparation`) is read past and noted once in kiln.log. A setting field outside SF's schema is refused, as SF
+refuses it (SF validates `extended.mod.json` against its schema when it reads a package; only unknown top-level fields
+are tolerated). No SF fork change or second UI executable is required.
 
 A `keybind` setting is a capture box (since 0.2.0-dev.31.18, `SfShortcuts.cs`): click it and press a key or the middle
 or a side mouse button, with Ctrl, Shift or Alt. Kiln stores SF's canonical text for the key's place

@@ -133,8 +133,12 @@ Things to know:
   Use `runtime.overrides` so ShroudForge restores your changes when your mod is switched off.
 - The Kiln Launcher and in-game Mods panel read your `extended.mod.json` metadata: label, description, control,
   min/max/step, text lengths, typed options, groups, `enabledWhen` and `applyAt` / `restartRequired`. Declare them fully.
-  Kiln accepts whatever ShroudForge's own schema accepts (its 1.7.9 schema and every 1.8 snapshot). An option's label
-  can be text or, since ShroudForge 1.8, `{ "label": "Twigs", "group": "Materials" }`. The in-game panel draws a
+  Kiln accepts whatever ShroudForge's own schema accepts (its 1.7.9 schema and every 1.8 snapshot), and refuses what
+  ShroudForge refuses when it reads your package: a setting field the schema does not list (ShroudForge checks
+  `extended.mod.json` against its schema; only unknown top-level fields are let through), a `control` outside its list,
+  a non-text `applyAt`, a non-boolean `restartRequired` or `assetPreparation`. An option's label can be 1 to 120
+  characters of text or, since ShroudForge 1.8, `{ "label": "Twigs", "group": "Materials" }` with nothing else in it
+  (group 1 to 60 characters). The in-game panel draws a
   list's groups as headings over its checkboxes (ShroudForge's own Modloader shows them as tabs), and a single choice
   shows "Materials: Twigs" in its combo; the launcher's form gets the group as `x-kiln-enum-groups`. `applyAt` is
   optional: without it, a setting applies at a restart (live when `restartRequired` is false), as in ShroudForge. Kiln's
