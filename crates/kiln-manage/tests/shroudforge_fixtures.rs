@@ -27,7 +27,13 @@ fn options(s: &shroudforge::SfSetting) -> Value {
         .into_iter()
         .map(|k| {
             let v = shroudforge::option_value(s, k).expect("valid typed option");
-            json!({"value": v, "label": o[k.as_str()]})
+            // a label is text or (ShroudForge 1.8) { label, group }: the view lists the text and the group when there is one
+            let raw = &o[k.as_str()];
+            let mut view = json!({"value": v, "label": raw.get("label").unwrap_or(raw)});
+            if let Some(g) = raw.get("group") {
+                view["group"] = g.clone();
+            }
+            view
         })
         .collect();
     Value::Array(list)
@@ -190,4 +196,33 @@ fn many_settings_are_read_without_quadratic_work() {
     assert_eq!(m.settings[0].key, keys[n - 1], "declared order");
     assert_eq!(schema["properties"][&keys[0]]["x-kiln-group"], "All");
     assert!(took < std::time::Duration::from_secs(5), "{n} settings took {took:?}");
+}
+
+/// Ezra's report (Discord, 2026-11-28): Add refused Gear Up (ShroudForge 1.8) with "not a ShroudForge package Kiln can
+/// run: setting priorityPick has invalid metadata". A package shaped like it is added; a package ShroudForge really
+/// refuses is still left out, and the reason names the field and what ShroudForge expects.
+#[test]
+fn add_takes_a_shroudforge_1_8_package_with_grouped_option_labels() {
+    let root = std::env::temp_dir().join(format!("kiln-sf-add-{}", std::process::id()));
+    let _t = Tmp(root.clone());
+    let dirs = kiln_manage::paths::DataDirs::at(root.join("data"));
+    let package = |dir: &str, id: &str, options: &str| {
+        let p = root.join(dir);
+        std::fs::create_dir_all(p.join("src")).unwrap();
+        std::fs::write(p.join("mod.json"), format!(
+            r#"{{"$schema":"https://shroudforge.net/schemas/1.8.0/manifest.schema.json","id":"{id}","name":"Gear Up","version":"1.0.0-beta","capabilities":["runtime"]}}"#)).unwrap();
+        std::fs::write(p.join("extended.mod.json"), format!(
+            r#"{{"$schema":"https://shroudforge.net/schemas/1.8.0/extended.mod.schema.json","schemaVersion":1,"enabled":true,"targets":["client","server"],"launcher":"SF","settings":{{"priorityPick":{{"value":"equipped","label":"Priority pick","options":{options}}}}}}}"#)).unwrap();
+        std::fs::write(p.join("src/mod.lua"), "return {}").unwrap();
+        p
+    };
+    let good = package("gear_up", "gear_up", r#"{"equipped":{"label":"Equipped weapon","group":"Hands"},"hotbar":{"label":"Hotbar order","group":"Hotbar"}}"#);
+    let r = kiln_manage::library::import(&dirs, &[good], &mut kiln_manage::task::NoProgress).unwrap();
+    assert!(r.skipped.is_empty(), "{:?}", r.skipped);
+    assert_eq!(r.imported.len(), 1, "{r:?}");
+    let bad = package("gear_bad", "gear_bad", r#"{"equipped":{"label":"Equipped weapon","group":7}}"#);
+    let r = kiln_manage::library::import(&dirs, &[bad], &mut kiln_manage::task::NoProgress).unwrap();
+    assert!(r.imported.is_empty(), "{r:?}");
+    let reason = &r.skipped[0].reason;
+    assert!(reason.contains("ShroudForge would refuse setting priorityPick") && reason.contains("\"equipped\"'s group must be text"), "{reason}");
 }

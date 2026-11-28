@@ -3,8 +3,8 @@
 mod assertions;
 
 #[test]
-fn all_80_shared_cases_match_views_decisions_and_exact_bytes() {
-    assertions::all_80_shared_cases_match_views_decisions_and_exact_bytes();
+fn all_shared_cases_match_views_decisions_and_exact_bytes() {
+    assertions::all_shared_cases_match_views_decisions_and_exact_bytes();
 }
 
 #[test]

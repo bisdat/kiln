@@ -1055,7 +1055,8 @@
           "ok": false
         }
       ],
-      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"count\":{\"value\":3,\"options\":{}}}}\n"
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"count\":{\"value\":3,\"options\":{}}}}\n",
+      "errorContains": "options must name at least one choice"
     },
     {
       "name": "empty-options-on-a-list-are-refused",
@@ -1083,7 +1084,8 @@
           "ok": false
         }
       ],
-      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"kinds\":{\"value\":[\"wood\"],\"options\":{}}}}\n"
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"kinds\":{\"value\":[\"wood\"],\"options\":{}}}}\n",
+      "errorContains": "options must name at least one choice"
     },
     {
       "name": "negative-zero-is-fractional",
@@ -1653,7 +1655,8 @@
           "ok": false
         }
       ],
-      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":1,\"enabledWhen\":null}}}\n"
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":1,\"enabledWhen\":null}}}\n",
+      "errorContains": "enabledWhen"
     },
     {
       "name": "option-labels-must-be-text",
@@ -1679,7 +1682,8 @@
           "ok": false
         }
       ],
-      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":1}}}}\n"
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":1}}}}\n",
+      "errorContains": "label"
     },
     {
       "name": "option-key-with-spaces-is-refused",
@@ -1705,7 +1709,8 @@
           "ok": false
         }
       ],
-      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":1,\"options\":{\"1\":\"One\",\" 2\":\"Two\"}}}}\n"
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":1,\"options\":{\"1\":\"One\",\" 2\":\"Two\"}}}}\n",
+      "errorContains": "option"
     },
     {
       "name": "typed-lists-cannot-lose-their-element-type",
@@ -3518,6 +3523,677 @@
       ],
       "expect": "{\"schemaVersion\":1,\"enabled\":false,\"settings\":{\"gain\":{\"value\":2.0,\"options\":{\"1.5\":\"Low\",\"2\":\"High\"}}}}\n",
       "sfRefused": true
+    },
+    {
+      "name": "grouped-option-labels",
+      "about": "ShroudForge 1.8 ($defs.setting.options): an option's label is text or { label, group }. A select of such options without applyAt (the shape of Gear Up's priorityPick, refused by Kiln before as 'invalid metadata'; Ezra's report), a multiselect mixing grouped and plain labels, and an enabledWhen on the grouped select. The read view lists each option's label text and its group when it has one.",
+      "mod": {
+        "$schema": "https://shroudforge.net/schemas/1.8.0/manifest.schema.json",
+        "id": "gear-up-shape",
+        "name": "Gear Up shape",
+        "version": "1.0.0-beta",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "extended": "{\n  \"$schema\": \"https://shroudforge.net/schemas/1.8.0/extended.mod.schema.json\",\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\"client\", \"server\"],\n  \"settings\": {\n    \"priorityPick\": {\n      \"value\": \"equipped\",\n      \"label\": \"Priority pick\",\n      \"options\": {\n        \"equipped\": { \"label\": \"Equipped weapon\", \"group\": \"Hands\" },\n        \"hotbar\": { \"label\": \"Hotbar order\", \"group\": \"Hotbar\" },\n        \"none\": { \"label\": \"Nothing\" }\n      }\n    },\n    \"holstered\": {\n      \"value\": [\"sword\"],\n      \"label\": \"Holstered weapons\",\n      \"control\": \"multiselect\",\n      \"applyAt\": \"live\",\n      \"options\": {\n        \"sword\": { \"label\": \"Sword\", \"group\": \"Melee\" },\n        \"bow\": { \"label\": \"Bow\", \"group\": \"Ranged\" },\n        \"staff\": \"Staff\"\n      }\n    },\n    \"hotbarOffset\": {\n      \"value\": 0.5,\n      \"label\": \"Hotbar offset\",\n      \"min\": 0,\n      \"max\": 1,\n      \"step\": 0.05,\n      \"enabledWhen\": { \"setting\": \"priorityPick\", \"equals\": \"hotbar\" }\n    }\n  }\n}\n",
+      "read": {
+        "enabled": true,
+        "switchLive": true,
+        "settings": [
+          {
+            "key": "priorityPick",
+            "type": "string",
+            "label": "Priority pick",
+            "control": "select",
+            "applyAt": "restart",
+            "live": true,
+            "options": [
+              {
+                "value": "equipped",
+                "label": "Equipped weapon",
+                "group": "Hands"
+              },
+              {
+                "value": "hotbar",
+                "label": "Hotbar order",
+                "group": "Hotbar"
+              },
+              {
+                "value": "none",
+                "label": "Nothing"
+              }
+            ]
+          },
+          {
+            "key": "holstered",
+            "type": "array",
+            "label": "Holstered weapons",
+            "control": "multiselect",
+            "applyAt": "live",
+            "live": true,
+            "options": [
+              {
+                "value": "sword",
+                "label": "Sword",
+                "group": "Melee"
+              },
+              {
+                "value": "bow",
+                "label": "Bow",
+                "group": "Ranged"
+              },
+              {
+                "value": "staff",
+                "label": "Staff"
+              }
+            ]
+          },
+          {
+            "key": "hotbarOffset",
+            "type": "number",
+            "label": "Hotbar offset",
+            "control": null,
+            "applyAt": "restart",
+            "live": true,
+            "enabledWhen": {
+              "setting": "priorityPick",
+              "equals": "hotbar"
+            }
+          }
+        ],
+        "enabledNow": [
+          "priorityPick",
+          "holstered"
+        ]
+      },
+      "edits": [
+        {
+          "setting": "priorityPick",
+          "value": "hotbar",
+          "ok": true
+        },
+        {
+          "setting": "priorityPick",
+          "value": "Hotbar order",
+          "ok": false
+        },
+        {
+          "setting": "holstered",
+          "value": [
+            "bow",
+            "staff"
+          ],
+          "ok": true
+        },
+        {
+          "setting": "holstered",
+          "value": [
+            "axe"
+          ],
+          "ok": false
+        }
+      ],
+      "expect": "{\n  \"$schema\": \"https://shroudforge.net/schemas/1.8.0/extended.mod.schema.json\",\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\"client\", \"server\"],\n  \"settings\": {\n    \"priorityPick\": {\n      \"value\": \"hotbar\",\n      \"label\": \"Priority pick\",\n      \"options\": {\n        \"equipped\": { \"label\": \"Equipped weapon\", \"group\": \"Hands\" },\n        \"hotbar\": { \"label\": \"Hotbar order\", \"group\": \"Hotbar\" },\n        \"none\": { \"label\": \"Nothing\" }\n      }\n    },\n    \"holstered\": {\n      \"value\": [\"bow\", \"staff\"],\n      \"label\": \"Holstered weapons\",\n      \"control\": \"multiselect\",\n      \"applyAt\": \"live\",\n      \"options\": {\n        \"sword\": { \"label\": \"Sword\", \"group\": \"Melee\" },\n        \"bow\": { \"label\": \"Bow\", \"group\": \"Ranged\" },\n        \"staff\": \"Staff\"\n      }\n    },\n    \"hotbarOffset\": {\n      \"value\": 0.5,\n      \"label\": \"Hotbar offset\",\n      \"min\": 0,\n      \"max\": 1,\n      \"step\": 0.05,\n      \"enabledWhen\": { \"setting\": \"priorityPick\", \"equals\": \"hotbar\" }\n    }\n  }\n}\n",
+      "enabledAfter": [
+        "priorityPick",
+        "holstered",
+        "hotbarOffset"
+      ]
+    },
+    {
+      "name": "shroudforge-starter-mod-1.8",
+      "about": "ShroudForge's own starter mod (docs/examples/starter-mod, schema 1.8.0) byte for byte: every control, grouped long lists ({ label, group } option labels), enabledWhen, keybinds, tab groups, presets, inputReservations, links and a changelog. Kiln reads it and writes only the values it changes (presets and inputReservations are ShroudForge's own Modloader's: Kiln leaves them as they are).",
+      "modText": "{\n  \"$schema\": \"https://shroudforge.net/schemas/1.8.0/manifest.schema.json\",\n  \"id\": \"example.hello-ember\",\n  \"name\": \"Hello Ember\",\n  \"version\": \"1.0.0\",\n  \"description\": \"An English visual demo for Modloader settings, page tabs, dependencies, presets, and actions.\",\n  \"authors\": [\n    \"Your Name\"\n  ],\n  \"license\": \"MIT\",\n  \"icon\": \"icon.svg\",\n  \"dependencies\": [\n    {\n      \"id\": \"sf-survival\",\n      \"version\": \"^1.0.0\",\n      \"optional\": true\n    },\n    {\n      \"id\": \"example.settings-demo-missing-dependency\",\n      \"version\": \"^1.0.0\",\n      \"optional\": true\n    }\n  ],\n  \"capabilities\": [\n    \"patch\",\n    \"export\",\n    \"runtime\",\n    \"runtime-register-dll\"\n  ]\n}\n",
+      "extended": "{\n  \"$schema\": \"https://shroudforge.net/schemas/1.8.0/extended.mod.schema.json\",\n  \"schemaVersion\": 1,\n  \"enabled\": false,\n  \"targets\": [\"client\"],\n  \"launcher\": \"SF\",\n  \"links\": {\n    \"source\": \"https://shroudforge.net\",\n    \"source-github\": \"https://github.com/bonsaibauer/shroudforge\",\n    \"source-gitlab\": \"https://gitlab.com\",\n    \"source-codeberg\": \"https://codeberg.org\",\n    \"issues\": \"https://github.com/bonsaibauer/shroudforge/issues/new?template=bug_report.yml\",\n    \"wiki\": \"https://wiki.shroudforge.net\",\n    \"website\": \"https://shroudforge.net\",\n    \"store\": \"https://www.nexusmods.com/enshrouded/mods/\",\n    \"community-discord\": \"https://discord.com/invite/jH2gNJYnt2\",\n    \"video-youtube\": \"https://www.youtube.com/\",\n    \"support-bmac\": \"https://buymeacoffee.com/bonsaibauer\",\n    \"support-patreon\": \"https://www.patreon.com/cw/bonsaibauer\",\n    \"support-paypal\": \"https://www.paypal.com/\",\n    \"support-github\": \"https://github.com/sponsors\",\n    \"support-ko-fi\": \"https://ko-fi.com/\",\n    \"support-open-collective\": \"https://opencollective.com/\",\n    \"support-other\": \"https://shroudforge.net\"\n  },\n  \"changelog\": [\n    \"Initial visual demo. The page header shows the example links; Information shows the package badges and this changelog.\",\n    \"Optional dependencies demonstrate installed and missing dependency states.\",\n    \"Settings and custom tabs demonstrate all supported controls, long-list search, option categories, conditions, presets, keybinds, and actions.\"\n  ],\n  \"settings\": {\n    \"showOnLoad\": {\n      \"value\": true,\n      \"label\": \"Show greeting on load\",\n      \"description\": \"Write the greeting to the mod log when the runtime starts.\",\n      \"control\": \"toggle\",\n      \"applyAt\": \"live\"\n    },\n    \"greeting\": {\n      \"value\": \"Hello from the ShroudForge runtime!\",\n      \"label\": \"Greeting\",\n      \"description\": \"Message written by the startup callback and the button below.\",\n      \"control\": \"text\",\n      \"minLength\": 1,\n      \"maxLength\": 120,\n      \"applyAt\": \"live\"\n    },\n    \"severity\": {\n      \"value\": \"info\",\n      \"label\": \"Log level\",\n      \"description\": \"Choose how the example message appears in the mod log.\",\n      \"control\": \"select\",\n      \"options\": {\n        \"info\": \"Information\",\n        \"warn\": \"Warning\"\n      },\n      \"applyAt\": \"live\"\n    },\n    \"checkboxExample\": {\n      \"value\": false,\n      \"label\": \"Checkbox control\",\n      \"description\": \"The checkbox variant of a boolean setting.\",\n      \"control\": \"checkbox\",\n      \"applyAt\": \"live\"\n    },\n    \"textareaExample\": {\n      \"value\": \"Write a longer example here.\",\n      \"label\": \"Text area\",\n      \"description\": \"A multi-line text field.\",\n      \"control\": \"textarea\",\n      \"minLength\": 3,\n      \"maxLength\": 240,\n      \"applyAt\": \"live\"\n    },\n    \"numberExample\": {\n      \"value\": 42,\n      \"label\": \"Number input\",\n      \"description\": \"A bounded numeric field with a step size.\",\n      \"control\": \"number\",\n      \"min\": 0,\n      \"max\": 100,\n      \"step\": 1,\n      \"applyAt\": \"live\"\n    },\n    \"sliderExample\": {\n      \"value\": 65,\n      \"label\": \"Slider control\",\n      \"description\": \"A range slider with a visible value.\",\n      \"control\": \"slider\",\n      \"min\": 0,\n      \"max\": 100,\n      \"step\": 5,\n      \"applyAt\": \"live\"\n    },\n    \"radioExample\": {\n      \"value\": \"comfortable\",\n      \"label\": \"Radio choices\",\n      \"description\": \"A row of radio-style choices.\",\n      \"control\": \"radio\",\n      \"options\": {\n        \"compact\": \"Compact\",\n        \"comfortable\": \"Comfortable\",\n        \"wide\": \"Wide\"\n      },\n      \"applyAt\": \"live\"\n    },\n    \"segmentedExample\": {\n      \"value\": \"center\",\n      \"label\": \"Segmented choices\",\n      \"description\": \"A compact segmented choice control.\",\n      \"control\": \"segmented\",\n      \"options\": {\n        \"left\": \"Left\",\n        \"center\": \"Center\",\n        \"right\": \"Right\"\n      },\n      \"applyAt\": \"live\"\n    },\n    \"colorExample\": {\n      \"value\": \"#c99a42\",\n      \"label\": \"Color control\",\n      \"description\": \"A native color picker.\",\n      \"control\": \"color\",\n      \"applyAt\": \"live\"\n    },\n    \"groupedChoices\": {\n      \"value\": [\"stone\", \"hammer\", \"rope\"],\n      \"label\": \"Grouped long list\",\n      \"description\": \"Search across all categories or choose a category tab.\",\n      \"control\": \"multiselect\",\n      \"options\": {\n        \"stone\": { \"label\": \"Stone\", \"group\": \"Materials\" },\n        \"timber\": { \"label\": \"Timber\", \"group\": \"Materials\" },\n        \"clay\": { \"label\": \"Clay\", \"group\": \"Materials\" },\n        \"iron\": { \"label\": \"Iron\", \"group\": \"Materials\" },\n        \"copper\": { \"label\": \"Copper\", \"group\": \"Materials\" },\n        \"hammer\": { \"label\": \"Hammer\", \"group\": \"Tools\" },\n        \"axe\": { \"label\": \"Axe\", \"group\": \"Tools\" },\n        \"shovel\": { \"label\": \"Shovel\", \"group\": \"Tools\" },\n        \"pickaxe\": { \"label\": \"Pickaxe\", \"group\": \"Tools\" },\n        \"saw\": { \"label\": \"Saw\", \"group\": \"Tools\" },\n        \"rope\": { \"label\": \"Rope\", \"group\": \"Supplies\" },\n        \"resin\": { \"label\": \"Resin\", \"group\": \"Supplies\" },\n        \"nails\": { \"label\": \"Nails\", \"group\": \"Supplies\" },\n        \"cloth\": { \"label\": \"Cloth\", \"group\": \"Supplies\" },\n        \"charcoal\": { \"label\": \"Charcoal\", \"group\": \"Supplies\" }\n      },\n      \"applyAt\": \"live\"\n    },\n    \"plainLongChoices\": {\n      \"value\": [\"alpha\", \"echo\"],\n      \"label\": \"Ungrouped long list\",\n      \"description\": \"Search and the switched-on filter without category tabs.\",\n      \"control\": \"multiselect\",\n      \"options\": {\n        \"alpha\": \"Choice 01\",\n        \"bravo\": \"Choice 02\",\n        \"charlie\": \"Choice 03\",\n        \"delta\": \"Choice 04\",\n        \"echo\": \"Choice 05\",\n        \"foxtrot\": \"Choice 06\",\n        \"golf\": \"Choice 07\",\n        \"hotel\": \"Choice 08\",\n        \"india\": \"Choice 09\",\n        \"juliet\": \"Choice 10\",\n        \"kilo\": \"Choice 11\",\n        \"lima\": \"Choice 12\",\n        \"mike\": \"Choice 13\",\n        \"november\": \"Choice 14\"\n      },\n      \"applyAt\": \"live\"\n    },\n    \"shortGroupedChoices\": {\n      \"value\": [\"north\", \"summer\"],\n      \"label\": \"Short grouped list\",\n      \"description\": \"Exactly twelve options. Category tabs remain while search controls are hidden.\",\n      \"control\": \"multiselect\",\n      \"options\": {\n        \"north\": { \"label\": \"North\", \"group\": \"Directions\" },\n        \"east\": { \"label\": \"East\", \"group\": \"Directions\" },\n        \"south\": { \"label\": \"South\", \"group\": \"Directions\" },\n        \"west\": { \"label\": \"West\", \"group\": \"Directions\" },\n        \"spring\": { \"label\": \"Spring\", \"group\": \"Seasons\" },\n        \"summer\": { \"label\": \"Summer\", \"group\": \"Seasons\" },\n        \"autumn\": { \"label\": \"Autumn\", \"group\": \"Seasons\" },\n        \"winter\": { \"label\": \"Winter\", \"group\": \"Seasons\" },\n        \"morning\": { \"label\": \"Morning\", \"group\": \"Day parts\" },\n        \"noon\": { \"label\": \"Noon\", \"group\": \"Day parts\" },\n        \"evening\": { \"label\": \"Evening\", \"group\": \"Day parts\" },\n        \"night\": { \"label\": \"Night\", \"group\": \"Day parts\" }\n      },\n      \"applyAt\": \"live\"\n    },\n    \"advancedEnabled\": {\n      \"value\": false,\n      \"label\": \"Enable advanced control\",\n      \"description\": \"Turn this on to enable the dependent slider below.\",\n      \"control\": \"toggle\",\n      \"applyAt\": \"live\"\n    },\n    \"advancedAmount\": {\n      \"value\": 35,\n      \"label\": \"Dependent slider\",\n      \"description\": \"This stays disabled until the toggle above is on.\",\n      \"control\": \"slider\",\n      \"min\": 0,\n      \"max\": 100,\n      \"step\": 5,\n      \"enabledWhen\": {\n        \"setting\": \"advancedEnabled\",\n        \"equals\": true\n      },\n      \"applyAt\": \"live\"\n    },\n    \"reservedShortcut\": {\n      \"value\": \"SDL:60\",\n      \"label\": \"Reserved example shortcut\",\n      \"description\": \"Shows keyboard and mouse reservation padlocks.\",\n      \"control\": \"keybind\",\n      \"applyAt\": \"live\"\n    },\n    \"plainShortcut\": {\n      \"value\": \"Ctrl+SDL:61\",\n      \"label\": \"Unreserved example shortcut\",\n      \"description\": \"A keybind without reservation padlocks.\",\n      \"control\": \"keybind\",\n      \"applyAt\": \"live\"\n    },\n    \"wheelScroll\": {\n      \"value\": true,\n      \"label\": \"Mouse wheel reservation\",\n      \"description\": \"Shows the mouse wheel reservation control.\",\n      \"control\": \"toggle\",\n      \"applyAt\": \"live\"\n    },\n    \"presetQuality\": {\n      \"value\": \"balanced\",\n      \"label\": \"Quality preset\",\n      \"description\": \"Changing this preset updates the fields below.\",\n      \"control\": \"segmented\",\n      \"options\": {\n        \"low\": \"Low\",\n        \"balanced\": \"Balanced\",\n        \"high\": \"High\",\n        \"custom\": \"Custom\"\n      },\n      \"applyAt\": \"live\"\n    },\n    \"presetRange\": {\n      \"value\": 120,\n      \"label\": \"Preset range\",\n      \"description\": \"Editing this manually switches the preset to Custom.\",\n      \"control\": \"number\",\n      \"min\": 20,\n      \"max\": 300,\n      \"step\": 10,\n      \"applyAt\": \"live\"\n    },\n    \"presetDetail\": {\n      \"value\": \"medium\",\n      \"label\": \"Preset detail\",\n      \"description\": \"This value is controlled by the quality preset.\",\n      \"control\": \"select\",\n      \"options\": {\n        \"low\": \"Low detail\",\n        \"medium\": \"Medium detail\",\n        \"high\": \"High detail\"\n      },\n      \"applyAt\": \"live\"\n    }\n  },\n  \"groups\": [\n    {\n      \"label\": \"Search and Categories\",\n      \"description\": \"Both lists exceed the search threshold. The first also has category tabs.\",\n      \"tab\": true,\n      \"settings\": [\"groupedChoices\", \"plainLongChoices\", \"shortGroupedChoices\"]\n    },\n    {\n      \"label\": \"Conditional Controls\",\n      \"description\": \"Enable the first setting to unlock the dependent slider.\",\n      \"tab\": true,\n      \"settings\": [\"advancedEnabled\", \"advancedAmount\"]\n    },\n    {\n      \"label\": \"Keybinds and Mouse Wheel\",\n      \"description\": \"Compare a normal keybind, reserved keys, and a reserved mouse wheel.\",\n      \"tab\": true,\n      \"settings\": [\"reservedShortcut\", \"plainShortcut\", \"wheelScroll\"]\n    },\n    {\n      \"label\": \"Preset Profiles\",\n      \"description\": \"Choose a preset, then edit a member setting to select Custom.\",\n      \"tab\": true,\n      \"settings\": [\"presetQuality\", \"presetRange\", \"presetDetail\"]\n    },\n    {\n      \"label\": \"Actions and Confirmation\",\n      \"description\": \"These actions only write to the mod log. One asks for confirmation.\",\n      \"tab\": true,\n      \"settings\": [],\n      \"actions\": [\n        {\n          \"id\": \"logGreeting\",\n          \"label\": \"Write greeting to mod log\",\n          \"style\": \"secondary\"\n        },\n        {\n          \"id\": \"logTestSettings\",\n          \"label\": \"Log current test values\",\n          \"style\": \"secondary\"\n        },\n        {\n          \"id\": \"confirmTestAction\",\n          \"label\": \"Show confirmation example\",\n          \"style\": \"danger\",\n          \"confirm\": \"Run the harmless confirmation example? It only writes a message to the mod log.\"\n        }\n      ]\n    }\n  ],\n  \"presets\": {\n    \"presetQuality\": {\n      \"custom\": \"custom\",\n      \"settings\": [\"presetRange\", \"presetDetail\"],\n      \"values\": {\n        \"low\": {\n          \"presetRange\": 60,\n          \"presetDetail\": \"low\"\n        },\n        \"balanced\": {\n          \"presetRange\": 120,\n          \"presetDetail\": \"medium\"\n        },\n        \"high\": {\n          \"presetRange\": 240,\n          \"presetDetail\": \"high\"\n        }\n      }\n    }\n  },\n  \"inputReservations\": {\n    \"contexts\": {\n      \"visualDemo\": \"Visual demo context\"\n    },\n    \"keys\": {\n      \"reservedShortcut\": {\n        \"when\": \"visualDemo\",\n        \"keyboard\": true,\n        \"mouse\": true\n      }\n    },\n    \"wheels\": {\n      \"wheelScroll\": {\n        \"when\": \"visualDemo\"\n      }\n    }\n  }\n}\n",
+      "read": {
+        "enabled": false,
+        "switchLive": false,
+        "settings": [
+          {
+            "key": "showOnLoad",
+            "type": "boolean",
+            "label": "Show greeting on load",
+            "control": "toggle",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "greeting",
+            "type": "string",
+            "label": "Greeting",
+            "control": "text",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "severity",
+            "type": "string",
+            "label": "Log level",
+            "control": "select",
+            "applyAt": "live",
+            "live": true,
+            "options": [
+              {
+                "value": "info",
+                "label": "Information"
+              },
+              {
+                "value": "warn",
+                "label": "Warning"
+              }
+            ]
+          },
+          {
+            "key": "checkboxExample",
+            "type": "boolean",
+            "label": "Checkbox control",
+            "control": "checkbox",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "textareaExample",
+            "type": "string",
+            "label": "Text area",
+            "control": "textarea",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "numberExample",
+            "type": "integer",
+            "label": "Number input",
+            "control": "number",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "sliderExample",
+            "type": "integer",
+            "label": "Slider control",
+            "control": "slider",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "radioExample",
+            "type": "string",
+            "label": "Radio choices",
+            "control": "radio",
+            "applyAt": "live",
+            "live": true,
+            "options": [
+              {
+                "value": "compact",
+                "label": "Compact"
+              },
+              {
+                "value": "comfortable",
+                "label": "Comfortable"
+              },
+              {
+                "value": "wide",
+                "label": "Wide"
+              }
+            ]
+          },
+          {
+            "key": "segmentedExample",
+            "type": "string",
+            "label": "Segmented choices",
+            "control": "segmented",
+            "applyAt": "live",
+            "live": true,
+            "options": [
+              {
+                "value": "left",
+                "label": "Left"
+              },
+              {
+                "value": "center",
+                "label": "Center"
+              },
+              {
+                "value": "right",
+                "label": "Right"
+              }
+            ]
+          },
+          {
+            "key": "colorExample",
+            "type": "string",
+            "label": "Color control",
+            "control": "color",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "groupedChoices",
+            "type": "array",
+            "label": "Grouped long list",
+            "control": "multiselect",
+            "applyAt": "live",
+            "live": true,
+            "options": [
+              {
+                "value": "stone",
+                "label": "Stone",
+                "group": "Materials"
+              },
+              {
+                "value": "timber",
+                "label": "Timber",
+                "group": "Materials"
+              },
+              {
+                "value": "clay",
+                "label": "Clay",
+                "group": "Materials"
+              },
+              {
+                "value": "iron",
+                "label": "Iron",
+                "group": "Materials"
+              },
+              {
+                "value": "copper",
+                "label": "Copper",
+                "group": "Materials"
+              },
+              {
+                "value": "hammer",
+                "label": "Hammer",
+                "group": "Tools"
+              },
+              {
+                "value": "axe",
+                "label": "Axe",
+                "group": "Tools"
+              },
+              {
+                "value": "shovel",
+                "label": "Shovel",
+                "group": "Tools"
+              },
+              {
+                "value": "pickaxe",
+                "label": "Pickaxe",
+                "group": "Tools"
+              },
+              {
+                "value": "saw",
+                "label": "Saw",
+                "group": "Tools"
+              },
+              {
+                "value": "rope",
+                "label": "Rope",
+                "group": "Supplies"
+              },
+              {
+                "value": "resin",
+                "label": "Resin",
+                "group": "Supplies"
+              },
+              {
+                "value": "nails",
+                "label": "Nails",
+                "group": "Supplies"
+              },
+              {
+                "value": "cloth",
+                "label": "Cloth",
+                "group": "Supplies"
+              },
+              {
+                "value": "charcoal",
+                "label": "Charcoal",
+                "group": "Supplies"
+              }
+            ]
+          },
+          {
+            "key": "plainLongChoices",
+            "type": "array",
+            "label": "Ungrouped long list",
+            "control": "multiselect",
+            "applyAt": "live",
+            "live": true,
+            "options": [
+              {
+                "value": "alpha",
+                "label": "Choice 01"
+              },
+              {
+                "value": "bravo",
+                "label": "Choice 02"
+              },
+              {
+                "value": "charlie",
+                "label": "Choice 03"
+              },
+              {
+                "value": "delta",
+                "label": "Choice 04"
+              },
+              {
+                "value": "echo",
+                "label": "Choice 05"
+              },
+              {
+                "value": "foxtrot",
+                "label": "Choice 06"
+              },
+              {
+                "value": "golf",
+                "label": "Choice 07"
+              },
+              {
+                "value": "hotel",
+                "label": "Choice 08"
+              },
+              {
+                "value": "india",
+                "label": "Choice 09"
+              },
+              {
+                "value": "juliet",
+                "label": "Choice 10"
+              },
+              {
+                "value": "kilo",
+                "label": "Choice 11"
+              },
+              {
+                "value": "lima",
+                "label": "Choice 12"
+              },
+              {
+                "value": "mike",
+                "label": "Choice 13"
+              },
+              {
+                "value": "november",
+                "label": "Choice 14"
+              }
+            ]
+          },
+          {
+            "key": "shortGroupedChoices",
+            "type": "array",
+            "label": "Short grouped list",
+            "control": "multiselect",
+            "applyAt": "live",
+            "live": true,
+            "options": [
+              {
+                "value": "north",
+                "label": "North",
+                "group": "Directions"
+              },
+              {
+                "value": "east",
+                "label": "East",
+                "group": "Directions"
+              },
+              {
+                "value": "south",
+                "label": "South",
+                "group": "Directions"
+              },
+              {
+                "value": "west",
+                "label": "West",
+                "group": "Directions"
+              },
+              {
+                "value": "spring",
+                "label": "Spring",
+                "group": "Seasons"
+              },
+              {
+                "value": "summer",
+                "label": "Summer",
+                "group": "Seasons"
+              },
+              {
+                "value": "autumn",
+                "label": "Autumn",
+                "group": "Seasons"
+              },
+              {
+                "value": "winter",
+                "label": "Winter",
+                "group": "Seasons"
+              },
+              {
+                "value": "morning",
+                "label": "Morning",
+                "group": "Day parts"
+              },
+              {
+                "value": "noon",
+                "label": "Noon",
+                "group": "Day parts"
+              },
+              {
+                "value": "evening",
+                "label": "Evening",
+                "group": "Day parts"
+              },
+              {
+                "value": "night",
+                "label": "Night",
+                "group": "Day parts"
+              }
+            ]
+          },
+          {
+            "key": "advancedEnabled",
+            "type": "boolean",
+            "label": "Enable advanced control",
+            "control": "toggle",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "advancedAmount",
+            "type": "integer",
+            "label": "Dependent slider",
+            "control": "slider",
+            "applyAt": "live",
+            "live": true,
+            "enabledWhen": {
+              "setting": "advancedEnabled",
+              "equals": true
+            }
+          },
+          {
+            "key": "reservedShortcut",
+            "type": "string",
+            "label": "Reserved example shortcut",
+            "control": "keybind",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "plainShortcut",
+            "type": "string",
+            "label": "Unreserved example shortcut",
+            "control": "keybind",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "wheelScroll",
+            "type": "boolean",
+            "label": "Mouse wheel reservation",
+            "control": "toggle",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "presetQuality",
+            "type": "string",
+            "label": "Quality preset",
+            "control": "segmented",
+            "applyAt": "live",
+            "live": true,
+            "options": [
+              {
+                "value": "low",
+                "label": "Low"
+              },
+              {
+                "value": "balanced",
+                "label": "Balanced"
+              },
+              {
+                "value": "high",
+                "label": "High"
+              },
+              {
+                "value": "custom",
+                "label": "Custom"
+              }
+            ]
+          },
+          {
+            "key": "presetRange",
+            "type": "integer",
+            "label": "Preset range",
+            "control": "number",
+            "applyAt": "live",
+            "live": true
+          },
+          {
+            "key": "presetDetail",
+            "type": "string",
+            "label": "Preset detail",
+            "control": "select",
+            "applyAt": "live",
+            "live": true,
+            "options": [
+              {
+                "value": "low",
+                "label": "Low detail"
+              },
+              {
+                "value": "medium",
+                "label": "Medium detail"
+              },
+              {
+                "value": "high",
+                "label": "High detail"
+              }
+            ]
+          }
+        ],
+        "enabledNow": [
+          "showOnLoad",
+          "greeting",
+          "severity",
+          "checkboxExample",
+          "textareaExample",
+          "numberExample",
+          "sliderExample",
+          "radioExample",
+          "segmentedExample",
+          "colorExample",
+          "groupedChoices",
+          "plainLongChoices",
+          "shortGroupedChoices",
+          "advancedEnabled",
+          "reservedShortcut",
+          "plainShortcut",
+          "wheelScroll",
+          "presetQuality",
+          "presetRange",
+          "presetDetail"
+        ]
+      },
+      "edits": [
+        {
+          "setting": "groupedChoices",
+          "value": [
+            "timber",
+            "hammer"
+          ],
+          "ok": true
+        },
+        {
+          "setting": "groupedChoices",
+          "value": [
+            "Timber"
+          ],
+          "ok": false
+        },
+        {
+          "setting": "shortGroupedChoices",
+          "value": [],
+          "ok": true
+        },
+        {
+          "enabled": true,
+          "ok": true
+        }
+      ],
+      "expect": "{\n  \"$schema\": \"https://shroudforge.net/schemas/1.8.0/extended.mod.schema.json\",\n  \"schemaVersion\": 1,\n  \"enabled\": true,\n  \"targets\": [\"client\"],\n  \"launcher\": \"SF\",\n  \"links\": {\n    \"source\": \"https://shroudforge.net\",\n    \"source-github\": \"https://github.com/bonsaibauer/shroudforge\",\n    \"source-gitlab\": \"https://gitlab.com\",\n    \"source-codeberg\": \"https://codeberg.org\",\n    \"issues\": \"https://github.com/bonsaibauer/shroudforge/issues/new?template=bug_report.yml\",\n    \"wiki\": \"https://wiki.shroudforge.net\",\n    \"website\": \"https://shroudforge.net\",\n    \"store\": \"https://www.nexusmods.com/enshrouded/mods/\",\n    \"community-discord\": \"https://discord.com/invite/jH2gNJYnt2\",\n    \"video-youtube\": \"https://www.youtube.com/\",\n    \"support-bmac\": \"https://buymeacoffee.com/bonsaibauer\",\n    \"support-patreon\": \"https://www.patreon.com/cw/bonsaibauer\",\n    \"support-paypal\": \"https://www.paypal.com/\",\n    \"support-github\": \"https://github.com/sponsors\",\n    \"support-ko-fi\": \"https://ko-fi.com/\",\n    \"support-open-collective\": \"https://opencollective.com/\",\n    \"support-other\": \"https://shroudforge.net\"\n  },\n  \"changelog\": [\n    \"Initial visual demo. The page header shows the example links; Information shows the package badges and this changelog.\",\n    \"Optional dependencies demonstrate installed and missing dependency states.\",\n    \"Settings and custom tabs demonstrate all supported controls, long-list search, option categories, conditions, presets, keybinds, and actions.\"\n  ],\n  \"settings\": {\n    \"showOnLoad\": {\n      \"value\": true,\n      \"label\": \"Show greeting on load\",\n      \"description\": \"Write the greeting to the mod log when the runtime starts.\",\n      \"control\": \"toggle\",\n      \"applyAt\": \"live\"\n    },\n    \"greeting\": {\n      \"value\": \"Hello from the ShroudForge runtime!\",\n      \"label\": \"Greeting\",\n      \"description\": \"Message written by the startup callback and the button below.\",\n      \"control\": \"text\",\n      \"minLength\": 1,\n      \"maxLength\": 120,\n      \"applyAt\": \"live\"\n    },\n    \"severity\": {\n      \"value\": \"info\",\n      \"label\": \"Log level\",\n      \"description\": \"Choose how the example message appears in the mod log.\",\n      \"control\": \"select\",\n      \"options\": {\n        \"info\": \"Information\",\n        \"warn\": \"Warning\"\n      },\n      \"applyAt\": \"live\"\n    },\n    \"checkboxExample\": {\n      \"value\": false,\n      \"label\": \"Checkbox control\",\n      \"description\": \"The checkbox variant of a boolean setting.\",\n      \"control\": \"checkbox\",\n      \"applyAt\": \"live\"\n    },\n    \"textareaExample\": {\n      \"value\": \"Write a longer example here.\",\n      \"label\": \"Text area\",\n      \"description\": \"A multi-line text field.\",\n      \"control\": \"textarea\",\n      \"minLength\": 3,\n      \"maxLength\": 240,\n      \"applyAt\": \"live\"\n    },\n    \"numberExample\": {\n      \"value\": 42,\n      \"label\": \"Number input\",\n      \"description\": \"A bounded numeric field with a step size.\",\n      \"control\": \"number\",\n      \"min\": 0,\n      \"max\": 100,\n      \"step\": 1,\n      \"applyAt\": \"live\"\n    },\n    \"sliderExample\": {\n      \"value\": 65,\n      \"label\": \"Slider control\",\n      \"description\": \"A range slider with a visible value.\",\n      \"control\": \"slider\",\n      \"min\": 0,\n      \"max\": 100,\n      \"step\": 5,\n      \"applyAt\": \"live\"\n    },\n    \"radioExample\": {\n      \"value\": \"comfortable\",\n      \"label\": \"Radio choices\",\n      \"description\": \"A row of radio-style choices.\",\n      \"control\": \"radio\",\n      \"options\": {\n        \"compact\": \"Compact\",\n        \"comfortable\": \"Comfortable\",\n        \"wide\": \"Wide\"\n      },\n      \"applyAt\": \"live\"\n    },\n    \"segmentedExample\": {\n      \"value\": \"center\",\n      \"label\": \"Segmented choices\",\n      \"description\": \"A compact segmented choice control.\",\n      \"control\": \"segmented\",\n      \"options\": {\n        \"left\": \"Left\",\n        \"center\": \"Center\",\n        \"right\": \"Right\"\n      },\n      \"applyAt\": \"live\"\n    },\n    \"colorExample\": {\n      \"value\": \"#c99a42\",\n      \"label\": \"Color control\",\n      \"description\": \"A native color picker.\",\n      \"control\": \"color\",\n      \"applyAt\": \"live\"\n    },\n    \"groupedChoices\": {\n      \"value\": [\"timber\", \"hammer\"],\n      \"label\": \"Grouped long list\",\n      \"description\": \"Search across all categories or choose a category tab.\",\n      \"control\": \"multiselect\",\n      \"options\": {\n        \"stone\": { \"label\": \"Stone\", \"group\": \"Materials\" },\n        \"timber\": { \"label\": \"Timber\", \"group\": \"Materials\" },\n        \"clay\": { \"label\": \"Clay\", \"group\": \"Materials\" },\n        \"iron\": { \"label\": \"Iron\", \"group\": \"Materials\" },\n        \"copper\": { \"label\": \"Copper\", \"group\": \"Materials\" },\n        \"hammer\": { \"label\": \"Hammer\", \"group\": \"Tools\" },\n        \"axe\": { \"label\": \"Axe\", \"group\": \"Tools\" },\n        \"shovel\": { \"label\": \"Shovel\", \"group\": \"Tools\" },\n        \"pickaxe\": { \"label\": \"Pickaxe\", \"group\": \"Tools\" },\n        \"saw\": { \"label\": \"Saw\", \"group\": \"Tools\" },\n        \"rope\": { \"label\": \"Rope\", \"group\": \"Supplies\" },\n        \"resin\": { \"label\": \"Resin\", \"group\": \"Supplies\" },\n        \"nails\": { \"label\": \"Nails\", \"group\": \"Supplies\" },\n        \"cloth\": { \"label\": \"Cloth\", \"group\": \"Supplies\" },\n        \"charcoal\": { \"label\": \"Charcoal\", \"group\": \"Supplies\" }\n      },\n      \"applyAt\": \"live\"\n    },\n    \"plainLongChoices\": {\n      \"value\": [\"alpha\", \"echo\"],\n      \"label\": \"Ungrouped long list\",\n      \"description\": \"Search and the switched-on filter without category tabs.\",\n      \"control\": \"multiselect\",\n      \"options\": {\n        \"alpha\": \"Choice 01\",\n        \"bravo\": \"Choice 02\",\n        \"charlie\": \"Choice 03\",\n        \"delta\": \"Choice 04\",\n        \"echo\": \"Choice 05\",\n        \"foxtrot\": \"Choice 06\",\n        \"golf\": \"Choice 07\",\n        \"hotel\": \"Choice 08\",\n        \"india\": \"Choice 09\",\n        \"juliet\": \"Choice 10\",\n        \"kilo\": \"Choice 11\",\n        \"lima\": \"Choice 12\",\n        \"mike\": \"Choice 13\",\n        \"november\": \"Choice 14\"\n      },\n      \"applyAt\": \"live\"\n    },\n    \"shortGroupedChoices\": {\n      \"value\": [],\n      \"label\": \"Short grouped list\",\n      \"description\": \"Exactly twelve options. Category tabs remain while search controls are hidden.\",\n      \"control\": \"multiselect\",\n      \"options\": {\n        \"north\": { \"label\": \"North\", \"group\": \"Directions\" },\n        \"east\": { \"label\": \"East\", \"group\": \"Directions\" },\n        \"south\": { \"label\": \"South\", \"group\": \"Directions\" },\n        \"west\": { \"label\": \"West\", \"group\": \"Directions\" },\n        \"spring\": { \"label\": \"Spring\", \"group\": \"Seasons\" },\n        \"summer\": { \"label\": \"Summer\", \"group\": \"Seasons\" },\n        \"autumn\": { \"label\": \"Autumn\", \"group\": \"Seasons\" },\n        \"winter\": { \"label\": \"Winter\", \"group\": \"Seasons\" },\n        \"morning\": { \"label\": \"Morning\", \"group\": \"Day parts\" },\n        \"noon\": { \"label\": \"Noon\", \"group\": \"Day parts\" },\n        \"evening\": { \"label\": \"Evening\", \"group\": \"Day parts\" },\n        \"night\": { \"label\": \"Night\", \"group\": \"Day parts\" }\n      },\n      \"applyAt\": \"live\"\n    },\n    \"advancedEnabled\": {\n      \"value\": false,\n      \"label\": \"Enable advanced control\",\n      \"description\": \"Turn this on to enable the dependent slider below.\",\n      \"control\": \"toggle\",\n      \"applyAt\": \"live\"\n    },\n    \"advancedAmount\": {\n      \"value\": 35,\n      \"label\": \"Dependent slider\",\n      \"description\": \"This stays disabled until the toggle above is on.\",\n      \"control\": \"slider\",\n      \"min\": 0,\n      \"max\": 100,\n      \"step\": 5,\n      \"enabledWhen\": {\n        \"setting\": \"advancedEnabled\",\n        \"equals\": true\n      },\n      \"applyAt\": \"live\"\n    },\n    \"reservedShortcut\": {\n      \"value\": \"SDL:60\",\n      \"label\": \"Reserved example shortcut\",\n      \"description\": \"Shows keyboard and mouse reservation padlocks.\",\n      \"control\": \"keybind\",\n      \"applyAt\": \"live\"\n    },\n    \"plainShortcut\": {\n      \"value\": \"Ctrl+SDL:61\",\n      \"label\": \"Unreserved example shortcut\",\n      \"description\": \"A keybind without reservation padlocks.\",\n      \"control\": \"keybind\",\n      \"applyAt\": \"live\"\n    },\n    \"wheelScroll\": {\n      \"value\": true,\n      \"label\": \"Mouse wheel reservation\",\n      \"description\": \"Shows the mouse wheel reservation control.\",\n      \"control\": \"toggle\",\n      \"applyAt\": \"live\"\n    },\n    \"presetQuality\": {\n      \"value\": \"balanced\",\n      \"label\": \"Quality preset\",\n      \"description\": \"Changing this preset updates the fields below.\",\n      \"control\": \"segmented\",\n      \"options\": {\n        \"low\": \"Low\",\n        \"balanced\": \"Balanced\",\n        \"high\": \"High\",\n        \"custom\": \"Custom\"\n      },\n      \"applyAt\": \"live\"\n    },\n    \"presetRange\": {\n      \"value\": 120,\n      \"label\": \"Preset range\",\n      \"description\": \"Editing this manually switches the preset to Custom.\",\n      \"control\": \"number\",\n      \"min\": 20,\n      \"max\": 300,\n      \"step\": 10,\n      \"applyAt\": \"live\"\n    },\n    \"presetDetail\": {\n      \"value\": \"medium\",\n      \"label\": \"Preset detail\",\n      \"description\": \"This value is controlled by the quality preset.\",\n      \"control\": \"select\",\n      \"options\": {\n        \"low\": \"Low detail\",\n        \"medium\": \"Medium detail\",\n        \"high\": \"High detail\"\n      },\n      \"applyAt\": \"live\"\n    }\n  },\n  \"groups\": [\n    {\n      \"label\": \"Search and Categories\",\n      \"description\": \"Both lists exceed the search threshold. The first also has category tabs.\",\n      \"tab\": true,\n      \"settings\": [\"groupedChoices\", \"plainLongChoices\", \"shortGroupedChoices\"]\n    },\n    {\n      \"label\": \"Conditional Controls\",\n      \"description\": \"Enable the first setting to unlock the dependent slider.\",\n      \"tab\": true,\n      \"settings\": [\"advancedEnabled\", \"advancedAmount\"]\n    },\n    {\n      \"label\": \"Keybinds and Mouse Wheel\",\n      \"description\": \"Compare a normal keybind, reserved keys, and a reserved mouse wheel.\",\n      \"tab\": true,\n      \"settings\": [\"reservedShortcut\", \"plainShortcut\", \"wheelScroll\"]\n    },\n    {\n      \"label\": \"Preset Profiles\",\n      \"description\": \"Choose a preset, then edit a member setting to select Custom.\",\n      \"tab\": true,\n      \"settings\": [\"presetQuality\", \"presetRange\", \"presetDetail\"]\n    },\n    {\n      \"label\": \"Actions and Confirmation\",\n      \"description\": \"These actions only write to the mod log. One asks for confirmation.\",\n      \"tab\": true,\n      \"settings\": [],\n      \"actions\": [\n        {\n          \"id\": \"logGreeting\",\n          \"label\": \"Write greeting to mod log\",\n          \"style\": \"secondary\"\n        },\n        {\n          \"id\": \"logTestSettings\",\n          \"label\": \"Log current test values\",\n          \"style\": \"secondary\"\n        },\n        {\n          \"id\": \"confirmTestAction\",\n          \"label\": \"Show confirmation example\",\n          \"style\": \"danger\",\n          \"confirm\": \"Run the harmless confirmation example? It only writes a message to the mod log.\"\n        }\n      ]\n    }\n  ],\n  \"presets\": {\n    \"presetQuality\": {\n      \"custom\": \"custom\",\n      \"settings\": [\"presetRange\", \"presetDetail\"],\n      \"values\": {\n        \"low\": {\n          \"presetRange\": 60,\n          \"presetDetail\": \"low\"\n        },\n        \"balanced\": {\n          \"presetRange\": 120,\n          \"presetDetail\": \"medium\"\n        },\n        \"high\": {\n          \"presetRange\": 240,\n          \"presetDetail\": \"high\"\n        }\n      }\n    }\n  },\n  \"inputReservations\": {\n    \"contexts\": {\n      \"visualDemo\": \"Visual demo context\"\n    },\n    \"keys\": {\n      \"reservedShortcut\": {\n        \"when\": \"visualDemo\",\n        \"keyboard\": true,\n        \"mouse\": true\n      }\n    },\n    \"wheels\": {\n      \"wheelScroll\": {\n        \"when\": \"visualDemo\"\n      }\n    }\n  }\n}\n"
+    },
+    {
+      "name": "option-label-object-needs-text",
+      "about": "ShroudForge refuses an option label object without a text label; the message names the option and the field",
+      "mod": {
+        "id": "option-label-object-needs-text",
+        "name": "option-label-object-needs-text",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"group\":\"G\"}}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"group\":\"G\"}}}}}\n",
+      "errorContains": "label"
+    },
+    {
+      "name": "option-group-must-be-text",
+      "about": "ShroudForge refuses an option group that is not text; the message names the option and the field",
+      "mod": {
+        "id": "option-group-must-be-text",
+        "name": "option-group-must-be-text",
+        "version": "1.0.0",
+        "capabilities": [
+          "runtime"
+        ]
+      },
+      "refused": true,
+      "extended": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":5}}}}}\n",
+      "edits": [
+        {
+          "enabled": false,
+          "ok": false
+        },
+        {
+          "setting": "a",
+          "value": "x",
+          "ok": false
+        }
+      ],
+      "expect": "{\"schemaVersion\":1,\"enabled\":true,\"settings\":{\"a\":{\"value\":\"x\",\"options\":{\"x\":{\"label\":\"X\",\"group\":5}}}}}\n",
+      "errorContains": "group"
     }
   ],
   "limits": {

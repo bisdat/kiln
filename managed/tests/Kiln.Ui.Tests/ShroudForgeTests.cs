@@ -39,7 +39,13 @@ public sealed class ShroudForgeTests : IDisposable
         };
         if (s.EnabledWhen is { } w) o["enabledWhen"] = new JsonObject { ["setting"] = w.Setting, ["equals"] = w.EqualsValue?.DeepClone() };
         if (s.Options.Count > 0)
-            o["options"] = new JsonArray(s.Options.Select(x => (JsonNode)new JsonObject { ["value"] = x.Value?.DeepClone(), ["label"] = x.Label }).ToArray());
+            // a label is text or (ShroudForge 1.8) { label, group }: the view lists the text and the group when there is one
+            o["options"] = new JsonArray(s.Options.Select(x =>
+            {
+                var v = new JsonObject { ["value"] = x.Value?.DeepClone(), ["label"] = x.Label };
+                if (x.Group is not null) v["group"] = x.Group;
+                return (JsonNode)v;
+            }).ToArray());
         return o;
     }
 

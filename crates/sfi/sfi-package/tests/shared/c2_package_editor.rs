@@ -17,8 +17,13 @@ fn view(m: &edit::EditorPackage) -> Value {
             "control": edit::control_of(s), "applyAt": s.apply_at, "live": s.live});
         if let Some(w) = &s.enabled_when { out["enabledWhen"] = w.clone(); }
         if let Some(options) = s.options.as_ref().filter(|o| !o.is_empty()) {
-            out["options"] = json!(edit::option_keys(s).iter().map(|k|
-                json!({"value": edit::option_value(s, k).unwrap(), "label": options[k.as_str()]})).collect::<Vec<_>>());
+            // a label is text or (ShroudForge 1.8) { label, group }: the view lists the text and the group when there is one
+            out["options"] = json!(edit::option_keys(s).iter().map(|k| {
+                let raw = &options[k.as_str()];
+                let mut o = json!({"value": edit::option_value(s, k).unwrap(), "label": raw.get("label").unwrap_or(raw)});
+                if let Some(g) = raw.get("group") { o["group"] = g.clone(); }
+                o
+            }).collect::<Vec<_>>());
         }
         out
     }).collect();
@@ -36,10 +41,10 @@ fn view(m: &edit::EditorPackage) -> Value {
     out
 }
 
-pub fn all_80_shared_cases_match_views_decisions_and_exact_bytes() {
+pub fn all_shared_cases_match_views_decisions_and_exact_bytes() {
     let doc = corpus();
     let cases = doc["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 80);
+    assert_eq!(cases.len(), 84);
     for c in cases {
         let name = c["name"].as_str().unwrap();
         let manifest = c["modText"]
@@ -130,7 +135,7 @@ pub fn all_80_shared_cases_match_views_decisions_and_exact_bytes() {
         }
     }
     eprintln!(
-        "core editor corpus: 80/80 read views, accept/refuse decisions and byte-exact outputs"
+        "core editor corpus: 84/84 read views, accept/refuse decisions and byte-exact outputs"
     );
 }
 

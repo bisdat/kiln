@@ -386,6 +386,91 @@ fn package_version(version: &str) -> bool {
     })
 }
 
+/// What ShroudForge's own reader and schema refuse in one setting's metadata (`raw`: the setting as declared), in words
+/// naming the field and what it expects; kiln-manage's shroudforge.rs check_metadata says the same. ShroudForge's
+/// `$defs.setting` in its 1.7 and every 1.8 schema snapshot, and read_mod_settings.rs: anything those accept passes.
+fn check_metadata(s: &EditorSetting, raw: &Doc) -> std::result::Result<(), String> {
+    if s.value.is_null() || s.value.is_object() {
+        return Err(format!(
+            "value must be a boolean, text, a number or a list, not {}",
+            kind(&s.value)
+        ));
+    }
+    if !matches!(s.apply_at.as_deref(), Some("live" | "restart")) {
+        return Err(format!(
+            "applyAt must be \"live\" or \"restart\", not {}",
+            raw.get("applyAt")
+                .map_or_else(|| "missing".into(), |v| v.to_serde().to_string())
+        ));
+    }
+    if raw
+        .get("restartRequired")
+        .and_then(|v| v.as_bool())
+        .is_some_and(|r| r != (s.apply_at.as_deref() == Some("restart")))
+    {
+        return Err(
+            "applyAt and restartRequired must agree (restartRequired: true goes with applyAt \"restart\")"
+                .into(),
+        );
+    }
+    // ShroudForge's schema: options name at least one choice ("options": {} refuses the mod)
+    if raw
+        .get("options")
+        .is_some_and(|o| o.as_object().is_none_or(|o| o.is_empty()))
+    {
+        return Err("options must name at least one choice".into());
+    }
+    if s.value.is_array() && s.options.as_ref().is_none_or(|o| o.is_empty()) {
+        return Err("a list value needs options naming its choices".into());
+    }
+    for (k, label) in s.options.iter().flatten() {
+        if option_value(s, k).is_none() {
+            let ty = option_type(s);
+            let article = if ty.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
+            return Err(format!(
+                "option {k:?} must be written as {article} {ty} like the value"
+            ));
+        }
+        if option_label(label).is_none() {
+            return Err(
+                if label.is_object() && label.get("label").is_some_and(|l| l.is_string()) {
+                    format!("option {k:?}'s group must be text")
+                } else {
+                    format!(
+                        "option {k:?}'s label must be text, or {{ \"label\": text, \"group\": text }}"
+                    )
+                },
+            );
+        }
+    }
+    if s.enabled_when.as_ref().is_some_and(|w| {
+        w.get("setting").and_then(|v| v.as_str()).is_none() || w.get("equals").is_none()
+    }) {
+        return Err(
+            "enabledWhen must name a setting and the value it equals ({ \"setting\": key, \"equals\": value })"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// An option's label text: the label itself, or (ShroudForge 1.8) the `label` of `{ "label": text, "group": text }`.
+/// None when ShroudForge refuses it (read_mod_settings.rs: anything else, or a group that is not text).
+pub fn option_label(label: &serde_json::Value) -> Option<&str> {
+    match label {
+        serde_json::Value::String(text) => Some(text),
+        serde_json::Value::Object(o) if o.get("group").is_none_or(|g| g.is_string()) => {
+            o.get("label")?.as_str()
+        }
+        _ => None,
+    }
+}
+
+/// The group an option sorts into (ShroudForge 1.8's `{ "label": text, "group": text }`).
+pub fn option_group(label: &serde_json::Value) -> Option<&str> {
+    label.get("group")?.as_str()
+}
+
 /// Validate package conditions, not the editor's defensive numeric equality. Walk the dependency graph only once.
 fn validate_conditions(settings: &[EditorSetting]) -> Result<()> {
     use std::collections::{HashMap, HashSet};
@@ -520,18 +605,8 @@ pub fn read(manifest: &[u8], extension: Option<&[u8]>) -> Result<EditorPackage> 
         if recover_fraction(s) {
             repair.push(s.key.clone());
         }
-        let raw = &ext["settings"][&s.key];
-        if s.value.is_null() || s.value.is_object() ||
-            !matches!(s.apply_at.as_deref(), Some("live" | "restart")) ||
-            raw.get("restartRequired").and_then(|v| v.as_bool()).is_some_and(|r| r != (s.apply_at.as_deref() == Some("restart"))) ||
-            (s.value.is_array() && s.options.as_ref().is_none_or(|o| o.is_empty())) ||
-            // ShroudForge's schema: options name at least one choice ("options": {} refuses the mod)
-            raw.get("options").is_some_and(|o| o.as_object().is_none_or(|o| o.is_empty())) ||
-            s.options.as_ref().is_some_and(|o| o.iter().any(|(k, label)| option_value(s, k).is_none() || !label.is_string())) ||
-            s.enabled_when.as_ref().is_some_and(|w| w.get("setting").and_then(|v| v.as_str()).is_none() || w.get("equals").is_none())
-        {
-            return Err(invalid(format!("setting {} has invalid metadata", s.key)));
-        }
+        check_metadata(s, &ext["settings"][&s.key])
+            .map_err(|why| invalid(format!("ShroudForge would refuse setting {}: {why}", s.key)))?;
         s.live = runtime && (!patch || s.apply_at.as_deref() == Some("live"));
     }
     validate_conditions(&settings)?;

@@ -17,8 +17,9 @@ using System.Text.Json.Nodes;
 
 namespace Kiln;
 
-/// <summary>One choice of a setting with options: the value ShroudForge stores and the label it shows.</summary>
-internal sealed record SfOption(JsonNode? Value, string Label);
+/// <summary>One choice of a setting with options: the value ShroudForge stores, the label it shows and (ShroudForge 1.8,
+/// a label written as <c>{ "label": text, "group": text }</c>) the group it sorts the choice into.</summary>
+internal sealed record SfOption(JsonNode? Value, string Label, string? Group = null);
 
 /// <summary>A condition: the setting can be changed only while <see cref="Setting"/> holds <see cref="EqualsValue"/>.</summary>
 internal sealed record SfCondition(string Setting, JsonNode? EqualsValue);
@@ -250,7 +251,7 @@ internal static class ShroudForgePackages
     /// <summary>An option key typed as ShroudForge types it (read_mod_settings.rs; kiln-manage <c>option_value</c>): a yes/no
     /// key is true only as "true"; numbers are read as Rust's <c>str::parse</c> reads them, and a fractional key that is not
     /// a finite double is an option without a value (null).</summary>
-    private static JsonNode? OptionValue(string type, JsonNode? value, string option)
+    private static JsonNode? OptionValue(string key, string type, JsonNode? value, string option)
     {
         var elementType = ElementType(type, value);
         return elementType switch
@@ -258,7 +259,8 @@ internal static class ShroudForgePackages
             "boolean" => JsonValue.Create(option == "true"),
             "integer" when RustInteger(option) is { } l => JsonValue.Create(l),
             "number" when RustFloat(option) is { } d => double.IsFinite(d) ? JsonValue.Create(d) : null,
-            "integer" or "number" => throw new SfEditException($"invalid {elementType} option {option}"),
+            "integer" or "number" => throw new SfEditException(
+                $"ShroudForge would refuse setting {key}: option \"{option}\" must be written as {(elementType == "integer" ? "an" : "a")} {elementType} like the value"),
             _ => JsonValue.Create(option),
         };
     }
@@ -326,22 +328,32 @@ internal static class ShroudForgePackages
         var options = new List<SfOption>();
         // ShroudForge's schema: options name at least one choice ("options": {} refuses the mod)
         if (meta is not null && meta.TryGetPropertyValue("options", out var declared) && declared is not JsonObject { Count: > 0 })
-            throw new SfEditException($"setting {key}: options must name at least one choice");
+            throw new SfEditException($"ShroudForge would refuse setting {key}: options must name at least one choice");
         if (meta?["options"] is JsonObject opts)
             foreach (var (k, label) in opts)
-                options.Add(new SfOption(OptionValue(type, value, k), label is JsonValue lv && lv.GetValueKind() == JsonValueKind.String
-                    ? lv.GetValue<string>() : throw new SfEditException($"setting {key}: an option label is not text")));
+            {
+                var optionValue = OptionValue(key, type, value, k);
+                // a label is text, or (ShroudForge 1.8) { "label": text, "group": text } (read_mod_settings.rs)
+                (string Text, string? Group) parsed = label switch
+                {
+                    JsonValue lv when lv.GetValueKind() == JsonValueKind.String => (lv.GetValue<string>(), null),
+                    JsonObject lo when Str(lo, "label") is { } l => (l, !lo.ContainsKey("group") ? null
+                        : Str(lo, "group") ?? throw new SfEditException($"ShroudForge would refuse setting {key}: option \"{k}\"'s group must be text")),
+                    _ => throw new SfEditException($"ShroudForge would refuse setting {key}: option \"{k}\"'s label must be text, or {{ \"label\": text, \"group\": text }}"),
+                };
+                options.Add(new SfOption(optionValue, parsed.Text, parsed.Group));
+            }
         var control = Str(meta, "control");
         if (control is null && options.Count > 0) control = type == "array" ? "multiselect" : "select";
         var applyAt = Str(meta, "applyAt") ?? (Flag(meta, "restartRequired") == false ? "live" : "restart");
         if (applyAt is not ("live" or "restart") || Flag(meta, "restartRequired") is { } restart && restart != (applyAt == "restart"))
-            throw new SfEditException($"setting {key}: applyAt and restartRequired must agree");
-        if (type == "array" && options.Count == 0) throw new SfEditException($"list setting {key} must declare options");
+            throw new SfEditException($"ShroudForge would refuse setting {key}: applyAt must be \"live\" or \"restart\" and agree with restartRequired");
+        if (type == "array" && options.Count == 0) throw new SfEditException($"ShroudForge would refuse setting {key}: a list value needs options naming its choices");
         SfCondition? when = null;
         if (meta is not null && meta.TryGetPropertyValue("enabledWhen", out var condition))
         {
             if (condition is not JsonObject w || Str(w, "setting") is not { } target || !w.ContainsKey("equals"))
-                throw new SfEditException($"setting {key}: invalid enabledWhen");
+                throw new SfEditException($"ShroudForge would refuse setting {key}: enabledWhen must name a setting and the value it equals ({{ \"setting\": key, \"equals\": value }})");
             when = new SfCondition(target, w["equals"]?.DeepClone());
         }
         // ShroudForge reads the limits with as_u64: a whole number token (4, not 4.0)
