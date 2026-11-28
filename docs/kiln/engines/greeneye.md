@@ -46,6 +46,19 @@ found and patched): the launcher's support report (Logs > Save report) carries e
 reason, folder, generation and hook count. "started" means `GreeneyeModStart` returned true; what the mod then patched
 is in its own log.
 
+**When a mod does not start (since 0.2.0-dev.31.26, kiln#157).** A mod that returns false from `GreeneyeModStart`
+often logs only its own words ("unsupported game signatures"). Kiln then adds what the mod asked of it while it
+started, one line before the mod's `did not start`, for example:
+
+    [greeneye] Hollow Halls Progression: while starting it asked find for 31 signatures in the game's code (exe file); not found: 1 ("48 8B 05 ?? ?? ?? ??..."); 2 reads returned the game's own bytes under another module's hook (rva 0xc2b450, 0x2dd74e)
+
+It counts the signatures, names up to four that `find` did not find (a pattern longer than 72 characters is cut), and
+names up to four places where `read` returned the game's bytes from under another module's hook (below). The code in
+brackets is where `find`'s code came from: `exe file`; `exe file (Kiln's view; the plugin's own read: <why>)`; or
+`live: <why>`, the snapshot of the live code when neither view of the exe could be had. When every signature was found,
+the line ends with "so it declined for a reason of its own": the mod's own lines before it say which. A mod that starts
+gets the line only when one of its reads saw through such a hook, without the signature count.
+
 ## Which mods load
 
 Exactly Greeneye Loader's rules, read from the same `mod.json` fields with the same lenient reader:
@@ -94,14 +107,25 @@ Greeneye Loader. "Tested" names the check in `native/plugins/compat/tests/run.py
 | `log(line)` | `[greeneye:<id>]` in kiln.log + `greeneye-loader.log` (one log function per mod, so lines carry the mod's id) | `ModContext.Log` | full; host, lab |
 | `generation`, `hotReload`, `token` | ported hook owner | Kiln's own mod reload | full; host `generation=2`, `hot_reload_flag` |
 | `enter(token)` / `leave()` | ported: per-mod shared gate, nestable per thread; active only for the active generation | `HookHandle` removal waits for running handlers | full; host `lease_inactive_while_starting`, detour +1000 runs under an active lease |
-| `find(pattern, module)` | unique match in the exe file's relocated `.text`, checked against the loaded image's headers and code section, with other live code changes kept; if unavailable, the previous live snapshot and lookup behind hook jumps; `module` may be null or the main executable handle | **new** `OriginalCode.FindUnique` / `TryFindUnique` (reads the exe file: before every hook) | full; Linux host `native/plugins/greeneye/tests/run.sh` (short and interior patches, ambiguity, fallback); Windows host `find`, `find_wildcard`, `find_ambiguous`, `find_other_module_null`, `find_after_hook`; lab: found the game's chat-log function behind Kiln's own detour |
-| `read(p, out, n)` | ported: live bytes with every Greeneye slot's saved bytes laid back (another loader's jump stays visible, as upstream) | **new** `OriginalCode.Read` (the file: before every hook) | full; host `read_before_hooks`, `read_original`; lab `lab_read` |
+| `find(pattern, module)` | unique match in the exe file's relocated `.text`, checked against the loaded image's headers and code section, with other live code changes kept; when the plugin cannot read the exe itself, Kiln's verified view of the same file (kiln.hooks `read_original`, the code sigdb scans; since 0.2.0-dev.31.26); if neither is available, the previous live snapshot and lookup behind hook jumps; `module` may be null or the main executable handle | **new** `OriginalCode.FindUnique` / `TryFindUnique` (reads the exe file: before every hook) | full; Linux host `native/plugins/greeneye/tests/run.sh` (short and interior patches, ambiguity, fallback); Windows host `find`, `find_wildcard`, `find_ambiguous`, `find_other_module_null`, `find_after_hook`; lab: found the game's chat-log function behind Kiln's own detour |
+| `read(p, out, n)` | the code `find` matches (since 0.2.0-dev.31.26, kiln#157): live bytes with every Greeneye slot's saved bytes laid back and, while `find`'s code is the exe file's, the file's bytes under every other recognised hook (a jump to outside the image with the nops behind it, or a call sent outside the image: Kiln's own detours, hosted ShroudForge's, other loaders'), also one written after the first `find`; a byte another mod changed in place stays the live one, as in `find` | **new** `OriginalCode.Read` (the file: before every hook) | full; Linux host `read-*` scenarios (a redirected call, a jump with nops, a later hook, an in-place patch beside a hook, a dense place); Windows host `read_before_hooks`, `read_original`; lab `lab_read` |
 | `hook(target, detour, len, prologue, n)` | ported: 12..32 bytes, `mov rax; jmp rax` to a thunk, trampoline runs the original or the given prologue; chains onto an existing `mov rax`, `jmp rel32` or `jmp [rip]` | `Hooks.Detour` (Kiln's detour chain) | full; host `hook` (+1000), `short_hook_refused` declines the start |
 | `redirectCall(call, detour)` | ported: points one `call rel32` at a thunk near it | `Hooks.Mid` at the call site | full; host `redirect_call` (+100) |
 | `poll()` | ported safe point | - | full; host `poll_returns` |
 | `keep(key, size)` | ported: zeroed block per key for the process life (shared across mods, as upstream) | **new** `Keep.Block` / `Keep.Span<T>` | full; host `keep_same_block` (zeroed, then the same block after a reload) |
 | `GreeneyeModStart(host)` export | called once per generation under a fault guard | `Mod.OnLoad` | full; host, lab |
 | `GreeneyeModHot()` export: `prepare`, `ready`, `resume` | ported reload protocol | - | full; host tests prepare/ready/resume, reentrant own-hook calls, and faulting/invalid hot factories |
+
+**Why `read` differs from Greeneye Loader's.** Under Greeneye Loader, `find` and `read` both see the live code
+(`find` also looks behind a hook at a function's start), so another loader's jump shows in both. Kiln's `find` matches
+the exe file's code, so a function another module hooked is still found by its own bytes. Up to 0.2.0-dev.31.25 `read`
+stayed upstream's: it returned the live bytes, and the hook's bytes showed where `find` had just matched the
+original ones. A mod that found a call or a global load by its pattern and read the operand inside the match then got
+the hook's jump or a relay's address. Hollow Halls Progression 1.0.5 called its signatures unsupported on 31.24
+(kiln#157) beside hosted ShroudForge, whose runtime sends the main menu's two Settings calls to a relay, and Kiln's own
+newer detours, while the same DLL started on the same game build without them. `find` gave it the same answers as on an
+unhooked game there (the player's 135 hooked places, rebuilt over client 26430625, change none of the code `find`
+matches); `read` was the answer that differed. `read` now returns the bytes `find` matched.
 
 ## Kiln C# additions
 
@@ -143,7 +167,8 @@ Greeneye mods are client mods. The Worst Map Mod (Nexus mod 220) is the first on
 6. Repeat 1 to 3 with Find (Shift+F in a base) and Quick Deposit (G G at a chest; K on a backpack item). Close Kiln's
    pages first. Quick Deposit's startup line in `kiln.log` reports `active=yes`, `UiCommandLoop=hooked` and
    `UiDispatch=hooked` when its two client hooks were published. `code=exe file` means earlier hooks could not hide
-   either signature; `code=live: <reason>` explains why the file view was unavailable. `missing` means the signature
+   either signature (`code=exe file (Kiln's view; ...)`: from Kiln's view of the file, the plugin's own read failed
+   for the reason given); `code=live: <reason>` explains why neither view of the file was available. `missing` means the signature
    was not found; `not hooked` means it was found but Quick Deposit did not publish a hook there. An active startup
    with both hooks does not prove that the game's UI called them. Other live code changes are kept in the snapshot,
    so a signature for those bytes must match the live patch. Send this line and `quick-deposit.log` if the keys
