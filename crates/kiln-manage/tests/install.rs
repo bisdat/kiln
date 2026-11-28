@@ -936,17 +936,25 @@ fn chain_destinations_never_displace_even_identical_files() {
     assert_eq!(std::fs::read(g.join("kiln/chain/eml-dinput8.dll")).unwrap(), dll);
     assert_eq!(std::fs::read(g.join("dinput8.dll")).unwrap(), dll);
     let asi = build_test_dll(&["DirectInput8Create", "IsUltimateASILoader"], b"");
-    for tag in ["same", "directory", "case"] {
+    // a folder under UAL's name: refused, nothing moved
+    let g = t.0.join("directory");
+    put(&g, "enshrouded.exe", b"MZ");
+    put(&g, "dinput8.dll", &asi);
+    std::fs::create_dir_all(g.join("xinput9_1_0.dll")).unwrap();
+    assert_eq!(install::install(&dirs, &client(&g), &b, &InstallOptions::default(), &mut NoProgress).unwrap_err().code, ErrorCode::Refused);
+    assert_eq!(std::fs::read(g.join("dinput8.dll")).unwrap(), asi);
+    // the same UAL already under that name (any spelling): never displaced; the dinput8.dll copy goes to the backup
+    for (tag, name) in [("same", "xinput9_1_0.dll"), ("case", "XINPUT9_1_0.DLL")] {
         let g = t.0.join(tag);
         put(&g, "enshrouded.exe", b"MZ");
         put(&g, "dinput8.dll", &asi);
-        match tag {
-            "same" => put(&g, "xinput9_1_0.dll", &asi),
-            "case" => put(&g, "XINPUT9_1_0.DLL", &asi),
-            _ => std::fs::create_dir_all(g.join("xinput9_1_0.dll")).unwrap(),
-        }
-        assert_eq!(install::install(&dirs, &client(&g), &b, &InstallOptions::default(), &mut NoProgress).unwrap_err().code, ErrorCode::Refused);
-        assert_eq!(std::fs::read(g.join("dinput8.dll")).unwrap(), asi);
+        put(&g, name, &asi);
+        let before = outside_kiln(&g);
+        let r = install::install(&dirs, &client(&g), &b, &InstallOptions::default(), &mut NoProgress).unwrap();
+        assert_eq!(std::fs::read(g.join(name)).unwrap(), asi, "{tag}");
+        assert_eq!(r.replaced.last().unwrap().action, install::ReplacedAction::BackedUp, "{tag}");
+        install::uninstall(&dirs, &client(&g), &mut NoProgress).unwrap();
+        assert_eq!(outside_kiln(&g), before, "{tag}");
     }
 }
 
@@ -2067,4 +2075,201 @@ fn uninstall_always_keeps_character_and_world_storage_even_if_a_receipt_lists_it
         assert_eq!(std::fs::read(game.join(path)).unwrap(), b"stored items", "{path}");
     }
     assert!(!game.join("kiln/kiln-core.dll").exists());
+}
+
+// ---- Ultimate ASI Loader under both names (KR-NXM5, launcher 31.24) ----
+
+/// A stand-in Ultimate ASI Loader; `version` puts a VS_VERSION_INFO resource with the file version a.b.c in it.
+fn ual(tag: &str, version: Option<(u16, u16, u16)>) -> Vec<u8> {
+    let mut extra = format!("{tag}\0").into_bytes();
+    if let Some((a, b, c)) = version {
+        let mut v = vec![0u8; 6];
+        v.extend("VS_VERSION_INFO\0".encode_utf16().flat_map(|u| u.to_le_bytes()));
+        while v.len() % 4 != 0 { v.push(0); }
+        for x in [0xFEEF_04BDu32, 0x0001_0000, (u32::from(a) << 16) | u32::from(b), u32::from(c) << 16] { v.extend(x.to_le_bytes()); }
+        v.extend([0u8; 36]);
+        extra.extend(v);
+    }
+    build_test_dll(&["DirectInput8Create", "IsUltimateASILoader"], &extra)
+}
+
+/// Progress lines, as the launcher's log gets them.
+#[derive(Default)]
+struct Lines(Vec<String>);
+impl kiln_manage::task::Progress for Lines {
+    fn report(&mut self, _: Option<f32>, message: &str) { self.0.push(message.to_string()); }
+}
+
+fn is_kiln_proxy(p: &Path) -> bool {
+    kiln_manage::pe::classify_proxy(p).unwrap().kind == kiln_manage::pe::ProxyKind::Kiln
+}
+
+/// The sentence the install result, the launcher's message and the log carry for a second copy of UAL.
+fn says_second_copy(warnings: &[String], lines: &Lines) -> String {
+    let w = warnings.iter().find(|w| w.contains("second copy of Ultimate ASI Loader"))
+        .unwrap_or_else(|| panic!("no second-copy warning in {warnings:?}")).clone();
+    assert!(w.contains("Multi DLL Installer") && w.contains("Vortex") && w.contains("kiln/backups/install-"), "{w}");
+    assert!(lines.0.iter().any(|l| l == &w), "the log has it too: {:?}", lines.0);
+    w
+}
+
+/// Kiln chained UAL as xinput9_1_0.dll; then another mod manager wrote the same UAL back as dinput8.dll. An update no
+/// longer refuses: the second copy goes to the backup, Kiln's proxy is dinput8.dll again, the chained copy stays.
+#[test]
+fn ual_redeployed_over_kilns_proxy_with_the_same_bytes_is_backed_up_not_refused() {
+    let t = tmp("ual-same");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let a = bundle::create(&stage(&t.0, "a", false), &t.0.join("out"), &opts(1_793_793_600, "aaaaaaa")).unwrap();
+    let b = bundle::create(&stage(&t.0, "b", false), &t.0.join("out"), &opts(1_793_880_000, "bbbbbbb")).unwrap();
+    let g = t.0.join("game");
+    let asi = ual("one", Some((5, 2, 1)));
+    put(&g, "enshrouded.exe", b"MZ");
+    put(&g, "dinput8.dll", &asi);
+    let before = outside_kiln(&g);
+    install::install(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap();
+    assert_eq!(std::fs::read(g.join("xinput9_1_0.dll")).unwrap(), asi);
+    // Multi DLL Installer / Vortex deploys it again
+    put(&g, "dinput8.dll", &asi);
+    let mut lines = Lines::default();
+    let (r, rep) = install::install_report(&dirs, &client(&g), &b, &InstallOptions::default(), &mut lines).unwrap();
+    assert!(is_kiln_proxy(&g.join("dinput8.dll")));
+    assert_eq!(std::fs::read(g.join("xinput9_1_0.dll")).unwrap(), asi);
+    assert_eq!(chain::read(&g).unwrap().chain.iter().filter(|e| e.path.eq_ignore_ascii_case("..\\xinput9_1_0.dll")).count(), 1);
+    let w = says_second_copy(&rep.warnings, &lines);
+    let last = r.replaced.last().unwrap();
+    assert_eq!((last.path.as_str(), last.action, last.engine), ("dinput8.dll", install::ReplacedAction::BackedUp, Some(kiln_manage::pe::ProxyKind::UltimateAsiLoader)));
+    let backup = last.backup.as_deref().unwrap();
+    assert!(w.contains(backup), "{w}");
+    assert_eq!(std::fs::read(g.join(backup)).unwrap(), asi);
+    install::uninstall(&dirs, &client(&g), &mut NoProgress).unwrap();
+    assert_eq!(outside_kiln(&g), before, "uninstall gives back the folder Kiln first found");
+}
+
+/// Repair (the installed bundle again) on the same folder: the same outcome.
+#[test]
+fn repair_with_ual_under_both_names_works() {
+    let t = tmp("ual-repair");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let a = bundle::create(&stage(&t.0, "a", false), &t.0.join("out"), &opts(1_793_793_600, "aaaaaaa")).unwrap();
+    let g = t.0.join("game");
+    let asi = ual("one", None);
+    put(&g, "enshrouded.exe", b"MZ");
+    put(&g, "dinput8.dll", &asi);
+    install::install(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap();
+    put(&g, "dinput8.dll", &asi);
+    let st = install::status(&dirs, &client(&g)).unwrap();
+    assert!(st.modified.contains(&"dinput8.dll".to_string()), "the Runtime page shows it changed: {:?}", st.modified);
+    let mut lines = Lines::default();
+    let (r, rep) = install::install_report(&dirs, &client(&g), &a, &InstallOptions::default(), &mut lines).unwrap();
+    says_second_copy(&rep.warnings, &lines);
+    assert!(is_kiln_proxy(&g.join("dinput8.dll")));
+    assert_eq!(std::fs::read(g.join("xinput9_1_0.dll")).unwrap(), asi);
+    assert!(install::modified_files(&g, &r).is_empty());
+    // and once more: nothing to back up, no warning
+    let (_, rep) = install::install_report(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap();
+    assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
+}
+
+/// Two different builds of UAL: the newer one runs as xinput9_1_0.dll, the other goes to the backup.
+#[test]
+fn ual_under_both_names_with_different_versions_keeps_the_newer_one_chained() {
+    let t = tmp("ual-versions");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let a = bundle::create(&stage(&t.0, "a", false), &t.0.join("out"), &opts(1_793_793_600, "aaaaaaa")).unwrap();
+    let (old, new) = (ual("old", Some((4, 8, 0))), ual("new", Some((5, 2, 1))));
+    // a newer UAL deployed over Kiln's proxy: it takes the chained name, the older chained copy goes to the backup
+    let g = t.0.join("newer");
+    put(&g, "enshrouded.exe", b"MZ");
+    put(&g, "dinput8.dll", &old);
+    install::install(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap();
+    put(&g, "dinput8.dll", &new);
+    let mut lines = Lines::default();
+    let (r, rep) = install::install_report(&dirs, &client(&g), &a, &InstallOptions::default(), &mut lines).unwrap();
+    assert!(is_kiln_proxy(&g.join("dinput8.dll")));
+    assert_eq!(std::fs::read(g.join("xinput9_1_0.dll")).unwrap(), new);
+    let w = says_second_copy(&rep.warnings, &lines);
+    assert!(w.contains("5.2.1") && w.contains("4.8.0"), "{w}");
+    let kept_old = std::fs::read_dir(g.join("kiln/backups")).unwrap().flatten()
+        .any(|d| std::fs::read(d.path().join("xinput9_1_0.dll")).is_ok_and(|b| b == old));
+    assert!(kept_old, "the older copy is in kiln/backups");
+    assert!(install::modified_files(&g, &r).is_empty());
+    install::uninstall(&dirs, &client(&g), &mut NoProgress).unwrap();
+    assert_eq!(std::fs::read(g.join("dinput8.dll")).unwrap(), new, "uninstall puts the newer UAL back as dinput8.dll");
+    assert!(!g.join("xinput9_1_0.dll").exists());
+
+    // an older UAL deployed over Kiln's proxy: the newer chained copy stays, the older goes to the backup
+    let g = t.0.join("older");
+    put(&g, "enshrouded.exe", b"MZ");
+    put(&g, "dinput8.dll", &new);
+    install::install(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap();
+    put(&g, "dinput8.dll", &old);
+    let mut lines = Lines::default();
+    let (r, rep) = install::install_report(&dirs, &client(&g), &a, &InstallOptions::default(), &mut lines).unwrap();
+    assert!(is_kiln_proxy(&g.join("dinput8.dll")));
+    assert_eq!(std::fs::read(g.join("xinput9_1_0.dll")).unwrap(), new);
+    says_second_copy(&rep.warnings, &lines);
+    assert_eq!(std::fs::read(g.join(r.replaced.last().unwrap().backup.as_deref().unwrap())).unwrap(), old);
+
+    // both placed by hand before Kiln, the newer as dinput8.dll: uninstall gives the folder back as it was
+    let g = t.0.join("by-hand");
+    put(&g, "enshrouded.exe", b"MZ");
+    put(&g, "dinput8.dll", &new);
+    put(&g, "xinput9_1_0.dll", &old);
+    let before = outside_kiln(&g);
+    let mut lines = Lines::default();
+    let (_, rep) = install::install_report(&dirs, &client(&g), &a, &InstallOptions::default(), &mut lines).unwrap();
+    says_second_copy(&rep.warnings, &lines);
+    assert!(is_kiln_proxy(&g.join("dinput8.dll")));
+    assert_eq!(std::fs::read(g.join("xinput9_1_0.dll")).unwrap(), new);
+    assert!(chain::read(&g).unwrap().chain.iter().any(|e| e.path.eq_ignore_ascii_case("..\\xinput9_1_0.dll")), "the kept copy is loaded");
+    install::uninstall(&dirs, &client(&g), &mut NoProgress).unwrap();
+    assert_eq!(outside_kiln(&g), before);
+}
+
+/// UAL at dinput8.dll and a file under xinput9_1_0.dll that is not UAL: still refused, nothing changed (also when
+/// Kiln is installed and the UAL came back over its proxy).
+#[test]
+fn ual_at_dinput8_with_a_foreign_xinput9_1_0_is_still_refused() {
+    let t = tmp("ual-foreign");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let a = bundle::create(&stage(&t.0, "a", false), &t.0.join("out"), &opts(1_793_793_600, "aaaaaaa")).unwrap();
+    let g = t.0.join("game");
+    put(&g, "enshrouded.exe", b"MZ");
+    install::install(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap();
+    put(&g, "dinput8.dll", &ual("one", None));
+    for foreign in [b"something else".to_vec(), build_test_dll(&["XInputGetState"], b"a real xinput")] {
+        put(&g, "xinput9_1_0.dll", &foreign);
+        let before = outside_kiln(&g);
+        let e = install::install(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Refused);
+        assert!(e.message.contains("another file has that name"), "{}", e.message);
+        assert_eq!(outside_kiln(&g), before);
+    }
+}
+
+/// The other mod manager deploys UAL again after a Repair: Play says so plainly instead of starting the game without
+/// Kiln; Repair fixes it again.
+#[test]
+fn play_says_when_ual_came_back_over_kilns_proxy() {
+    let t = tmp("ual-play");
+    let dirs = DataDirs::at(t.0.join("data"));
+    let a = bundle::create(&stage(&t.0, "a", false), &t.0.join("out"), &opts(1_793_793_600, "aaaaaaa")).unwrap();
+    let g = t.0.join("game");
+    let asi = ual("one", None);
+    put(&g, "enshrouded.exe", b"MZ");
+    put(&g, "dinput8.dll", &asi);
+    install::install(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap();
+    put(&g, "dinput8.dll", &asi);
+    let opened = std::cell::RefCell::new(0);
+    let opener = |_: &str| { *opened.borrow_mut() += 1; Ok(()) };
+    let req = |mode| kiln_manage::launch::LaunchRequest { mode, profile_id: None, skip_backup: true };
+    for mode in [kiln_manage::launch::LaunchMode::Profile, kiln_manage::launch::LaunchMode::NoMods] {
+        let e = kiln_manage::launch::play_with(&dirs, &client(&g), &req(mode), Some(&[]), &opener).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Refused);
+        assert!(e.message.contains("Ultimate ASI Loader") && e.message.contains("Repair") && e.message.contains("Vortex"), "{}", e.message);
+    }
+    assert_eq!(*opened.borrow(), 0, "the game is not started without Kiln");
+    install::install(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap();
+    kiln_manage::launch::play_with(&dirs, &client(&g), &req(kiln_manage::launch::LaunchMode::Profile), Some(&[]), &opener).unwrap();
+    assert_eq!(*opened.borrow(), 1);
 }
