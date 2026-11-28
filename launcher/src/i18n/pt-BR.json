@@ -2772,6 +2772,7 @@
       "desktopHint": "Com o ícone, para a barra de tarefas e o dock mostrarem o ícone do Kiln também. O Kiln o mantém apontando para este AppImage.",
       "desktopHintFile": "Com o ícone, para a barra de tarefas e o dock mostrarem o ícone do Kiln também. O Kiln o mantém apontando para este AppImage. {file}",
       "desktopHintForeign": "Com o ícone, para a barra de tarefas e o dock mostrarem o ícone do Kiln também. O Kiln o mantém apontando para este AppImage. {file} não é do Kiln: ativar isto o substitui.",
+      "desktopHintIntegrated": "O Gear Lever (ou outro integrador de AppImage) já adicionou o Kiln ao menu de aplicativos: {file}. O Kiln não adiciona uma segunda entrada.",
       "desktopOn": "O Kiln Launcher está no menu de apps",
       "desktopOff": "O Kiln Launcher saiu do menu de apps"
     },

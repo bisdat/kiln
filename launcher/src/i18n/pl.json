@@ -2884,6 +2884,7 @@
       "desktopHint": "Z ikoną, więc pasek zadań i dok też pokazują ikonę Kiln. Kiln pilnuje, by wskazywał na ten AppImage.",
       "desktopHintFile": "Z ikoną, więc pasek zadań i dok też pokazują ikonę Kiln. Kiln pilnuje, by wskazywał na ten AppImage. {file}",
       "desktopHintForeign": "Z ikoną, więc pasek zadań i dok też pokazują ikonę Kiln. Kiln pilnuje, by wskazywał na ten AppImage. {file} nie należy do Kiln: włączenie tego go zastąpi.",
+      "desktopHintIntegrated": "Gear Lever (lub inne narzędzie integrujące AppImage) już dodał Kiln do menu aplikacji: {file}. Kiln nie dodaje drugiego wpisu.",
       "desktopOn": "Kiln Launcher jest w menu aplikacji",
       "desktopOff": "Kiln Launcher zniknął z menu aplikacji"
     },

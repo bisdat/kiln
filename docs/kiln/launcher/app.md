@@ -1113,12 +1113,34 @@ Taskbars, docks and app menus show the launcher with Kiln's icon (`launcher/src-
   first start may show the icon only from the next start on (the shell matched the window before the entry was
   there). On a Steam Deck the entry also puts Kiln, with its icon, in Steam's "Add a Non-Steam Game" list; the
   launcher writes no Steam files ([deck.md](deck.md)).
+- **AppImage under an integrator** (0.2.0-dev.31.25, kiln#156): Gear Lever, AppImageLauncher and appimaged add their
+  own entry for the AppImage, so Kiln's made the menu (and Gear Lever's list) show "Kiln Launcher" twice. Kiln now
+  writes no entry of its own, and removes its own marked one, when either holds:
+  - `DESKTOPINTEGRATION` is set in the launcher's environment (not empty, `0`, `false` or `no`): the AppImage
+    convention; Gear Lever's entry starts `env DESKTOPINTEGRATION=1 <AppImage>`, AppImageLauncher sets its own name;
+  - another entry the menu shows (`Type=Application`, not `NoDisplay`/`Hidden`, the first file with its desktop id
+    across `$XDG_DATA_HOME/applications` then each `$XDG_DATA_DIRS/applications` and their subfolders, not one with
+    Kiln's line) has an `Exec` argument or `TryExec` that is the same file as `$APPIMAGE` once both are resolved: on
+    Bazzite, Silverblue and Kinoite `/home` is a link to `/var/home`, so Gear Lever's `/var/home/<user>/AppImages/...`
+    and the launcher's `/home/<user>/AppImages/...` are one file. Quotes, the spec's escapes and field codes are read.
+
+  Someone else's file is never changed or removed (a `kiln-launcher.desktop` without Kiln's line included). The icons
+  stay up to date: the NoDisplay nxm and `kiln://` handler entries (`kiln-launcher-nxm.desktop`,
+  `kiln-launcher-links.desktop`, written by their own code and untouched by this) name `Icon=kiln-launcher`, and they
+  keep working whatever the menu entry does. The window's taskbar icon then comes from the integrator's entry:
+  integrators copy the AppImage's own entry (Tauri's template: `StartupWMClass=kiln-launcher`, no `MimeType` for this
+  app), so the bar matches the window to it. Settings > Appearance, "Kiln Launcher in the app menu": the switch is off
+  and not offered, and the line says "Gear Lever (or another AppImage integrator) already added Kiln to the app menu"
+  with the other entry's file (`DesktopInfo.integrator`). `launcher.log` says so once, when Kiln's entry went. The
+  deb, the rpm, the Steam Deck and a plain AppImage without an integrator work as before.
 - **Windows**: `icons/icon.ico` (16, 24, 32, 48, 64, 256 px) is the exe's icon resource (Tauri), the window's icon,
   the NSIS setup's and uninstaller's icon, and the Start menu and desktop shortcuts' (they point at the exe). The
   shortcuts carry the AppUserModelID `io.frostdev.kiln.launcher` (Tauri's NSIS template); main.rs gives the process
   the same one, so a pinned shortcut and the running window are one taskbar button.
 - **Tests**: `cargo test -p kiln-launcher --lib desktop::` (a temporary home: the entry, moving, someone else's entry,
-  removal, system folders refused; the bundle's icon sizes; icon.ico's sizes).
+  removal, system folders refused; integrators: `DESKTOPINTEGRATION`, Gear Lever's entry through a linked home,
+  another AppImage's entry, someone else's file kept, the XDG folders; the bundle's icon sizes; icon.ico's sizes).
+  `bun test unit/settings-model.test.ts` covers the Settings line.
 
 ## `--selftest`
 `kiln-launcher --selftest [--out report.json] [--keep]` runs before `tauri::Builder` (no window), in a temp folder:

@@ -61,6 +61,7 @@ export const fireOff = (info: AppInfo | undefined) =>
 
 /** The AppImage's app menu entry: what it does, where it is, what is in the way. */
 export function desktopHint(d: DesktopInfo): string {
+  if (d.integrator) return t("settings.appearance.desktopHintIntegrated", { file: d.integrator });
   if (d.foreign) return t("settings.appearance.desktopHintForeign", { file: d.file });
   return d.on && d.installed ? t("settings.appearance.desktopHintFile", { file: d.file }) : t("settings.appearance.desktopHint");
 }

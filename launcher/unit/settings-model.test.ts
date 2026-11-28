@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { AppInfo, SchemaSnapshot } from "../src/api/commands";
 import snapshot from "../src/data/kiln-json.snapshot.json";
 import { GROUPS, SECTIONS, bestHit, countBySection, fold, keyWords, markParts, matchItem, queryWords, resolveAnchor, search, sectionFor, snippet, type SettingsCtx } from "../src/pages/settings/model";
-import { KILN_GAME_PATHS, buildIndex, forceHint, kilnGroupOf, kilnSchema } from "../src/pages/settings/searchIndex";
+import { KILN_GAME_PATHS, buildIndex, desktopHint, forceHint, kilnGroupOf, kilnSchema } from "../src/pages/settings/searchIndex";
 
 const SRC = join(import.meta.dirname, "..", "src");
 const schema = snapshot as unknown as SchemaSnapshot;
@@ -108,6 +108,18 @@ test("every row a section draws has its words in the index", () => {
   for (const i of buildIndex(full)) expect(GROUPS.find((g) => g.id === i.group)?.section, i.id).toBe(i.section);
   // the Nexus build's update line
   expect(buildIndex({ ...full, dist: "nexus" }).some((i) => i.id === "updates.nexus")).toBe(true);
+});
+
+test("the AppImage's app menu entry: an integrator's entry is named instead of offering a second one (#156)", () => {
+  const file = "/home/p/.local/share/applications/kiln-launcher.desktop";
+  const gear = desktopHint({ on: true, installed: false, foreign: false, file, integrator: "/home/p/.local/share/applications/gearlever_kiln_launcher_b2a1c9.desktop" });
+  expect(gear).toContain("Gear Lever (or another AppImage integrator) already added Kiln to the app menu");
+  expect(gear).toContain("gearlever_kiln_launcher_b2a1c9.desktop");
+  expect(desktopHint({ on: true, installed: false, foreign: false, file, integrator: "DESKTOPINTEGRATION=1" }))
+    .toContain("Gear Lever (or another AppImage integrator) already added Kiln to the app menu");
+  // without one: as before
+  expect(desktopHint({ on: true, installed: true, foreign: false, file, integrator: null })).toContain(file);
+  expect(desktopHint({ on: true, installed: false, foreign: false, file })).not.toContain("Gear Lever");
 });
 
 test("Force GPU drawing on NVIDIA: found by NVIDIA, off by default, and it says what this start does", () => {

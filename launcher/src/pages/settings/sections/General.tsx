@@ -130,7 +130,8 @@ function DeckGroup() {
   );
 }
 
-/** Linux AppImage: the app menu entry Kiln writes so taskbars and docks show its icon (desktop.rs). */
+/** Linux AppImage: the app menu entry Kiln writes so taskbars and docks show its icon (desktop.rs); off and not offered
+ *  while an AppImage integrator (Gear Lever) has its own entry for it (#156). */
 function ComputerGroup() {
   const t = useT();
   const qc = useQueryClient();
@@ -144,7 +145,8 @@ function ComputerGroup() {
   return (
     <Group id="computer" items={["desktop"]}>
       <SettingRow id="desktop" htmlFor="st-desktop"
-        control={<Toggle id="st-desktop" checked={desktop.on && desktop.installed} onChange={(on) => void setDesktop(on)} />} />
+        control={<Toggle id="st-desktop" checked={desktop.on && desktop.installed} disabled={!!desktop.integrator}
+          onChange={(on) => void setDesktop(on)} />} />
     </Group>
   );
 }

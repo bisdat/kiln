@@ -119,6 +119,9 @@ export interface DesktopInfo {
   foreign: boolean;
   /** The entry's path. */
   file: string;
+  /** Gear Lever or another AppImage integrator already put this AppImage in the app menu (`DESKTOPINTEGRATION=<value>` or
+   *  its entry's file): Kiln adds no entry of its own and Settings says so instead of offering a second one (#156). */
+  integrator?: string | null;
 }
 /** How the Linux launcher draws its window (src-tauri/src/render.rs). */
 /** `app_render_report` (src-tauri render.rs PageRender): every field optional, each call sends what it has. */
