@@ -93,6 +93,31 @@ test("ShroudForge settings edit a value through the SchemaForm; kinds without se
   expect(eml.note).toContain("no settings");
 });
 
+// sosmic (0.2.0-dev.31.25): "Open <file>" shows the settings file the engine reads, only once it is there
+test("the Settings window opens shroudtopia.json once it exists, and ShroudForge's copy in the game", async ({ page }) => {
+  await desktop(page, "/");
+  const opened = () => page.evaluate(() => (window as unknown as { __kilnMock: { openedPaths: () => string[] } }).__kilnMock.openedPaths());
+  await openRowMenu(page, "Fly Mode", "shroudtopia");
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  const st = page.getByRole("dialog", { name: "Fly Mode settings" });
+  await expect(st).toContainText("shroudtopia.json doesn't exist yet");
+  await expect(st.getByRole("button", { name: "Open shroudtopia.json" })).toHaveCount(0);
+  // a change writes the file: now it opens
+  await st.locator('label.k-toggle[for="sf-active"]').click();
+  await expect(st.getByRole("switch", { name: "active" })).not.toBeChecked();
+  await st.getByRole("button", { name: "Open shroudtopia.json" }).click();
+  await expect.poll(opened).toEqual(["/home/player/.local/share/kiln/profiles/ember-run/config/shroudtopia/shroudtopia.json"]);
+  await st.getByRole("button", { name: "Done" }).click();
+  await expect(st).toHaveCount(0);
+
+  // ShroudForge: the copy in the game's mods folder (the profile is the game's)
+  await openRowMenu(page, "Better Chests", "shroudforge");
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  const sf = page.getByRole("dialog", { name: "Better Chests settings" });
+  await sf.getByRole("button", { name: "Open extended.mod.json" }).click();
+  await expect.poll(async () => (await opened()).at(-1)).toMatch(/\/shroudforge\/mods\/better-chests\/extended\.mod\.json$/);
+});
+
 test("Logs > Engines shows state without overwriting a shared archive backup", async ({ page }) => {
   await desktop(page, "/logs");
   await page.getByRole("tab", { name: "Engines" }).click();

@@ -1646,6 +1646,9 @@ export interface EngineSettings {
   /** ShroudForge: `file` is in the player's own folder (one Kiln did not place). Kiln writes only a setting changed
    *  here into it, and never switches, replaces or removes it. Absent: Kiln's copy or the Library's defaults. */
   ownFolder?: boolean;
+  /** The file the Settings window's Open button shows: `file`, once it is there and is the one the engine reads
+   *  (ShroudForge: the copy in the game's mods folder, never the Library's). Absent: nothing to open yet. */
+  openFile?: string | null;
 }
 /** SF's own runtime report, not the adapter's hosted state. Only current reports have mod observations. */
 export interface SfEffects {

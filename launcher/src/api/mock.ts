@@ -556,12 +556,17 @@ function engineSettings(kind: ModKind, id: string, pid: string) {
   if (kind === "shroudforge") {
     const sf = sfSettings[id];
     if (!sf) return { kind, id, format: "extended.mod.json", file: `${g?.path}/shroudforge/mods/${id}/extended.mod.json`, schema: { type: "object", properties: {} }, values: {}, note: "this mod declares no settings" };
-    return { kind, id, format: "extended.mod.json", file: `${g?.path}/shroudforge/mods/${id}/extended.mod.json`, schema: sf.schema, values: clone(sf.values), note: null,
-      ...(sfOwn.has(id) ? { ownFolder: true } : {}) };
+    const file = `${g?.path}/shroudforge/mods/${id}/extended.mod.json`;
+    // the game's copy is there to open while this profile is the game's (engine_mods::settings `openFile`)
+    return { kind, id, format: "extended.mod.json", file, schema: sf.schema, values: clone(sf.values), note: null,
+      ...(sfOwn.has(id) ? { ownFolder: true } : {}), ...(g && activations[g.id]?.profileId === pid ? { openFile: file } : {}) };
   }
   if (kind === "shroudtopia") {
     const values = shroudtopiaFiles.get(pid)?.[id] ?? { active: true, flySpeed: 1.5, hotkey: "F6" };
-    return { kind, id, format: "shroudtopia.json", file: `/home/player/.local/share/kiln/profiles/${pid}/config/shroudtopia/shroudtopia.json`, schema: schemaFromValues(values), values: clone(values), note: null };
+    const file = `/home/player/.local/share/kiln/profiles/${pid}/config/shroudtopia/shroudtopia.json`;
+    // shroudtopia.json exists once a setting was written (or the game wrote its defaults)
+    return { kind, id, format: "shroudtopia.json", file, schema: schemaFromValues(values), values: clone(values), note: null,
+      ...(shroudtopiaFiles.has(pid) ? { openFile: file } : {}) };
   }
   if (kind === "emf") return none("EMF settings: use the EMF ini editor");
   if (kind === "enshwick") return none("Enshwick keeps each mod's settings per world (<save>-mod-settings/<id>/settings.toml): use the game's Mods screen or `enshwick config` on the server");
