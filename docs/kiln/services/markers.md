@@ -59,9 +59,10 @@ The same marker as JSON (`MarkerSpec.FromJson`, `ToJson`), with the same default
   offered only on the game build whose icon catalog Kiln has verified; after a game update `markers.map` stays off until
   Kiln is updated (`CatalogChanged.Reason` says so). Compass and world markers do not need the catalog.
 - The game rebuilds its map list at every client step, once per frame; Kiln writes its map icons back after each one,
-  so they stay on the map at any frame rate (sigdb feature `markers.client_map_steps`, GitHub #159). On a game build
-  where that feature does not resolve they are written at the client's 60 Hz steps only and can flicker above 60 fps;
-  kiln.log says so once at start. docs/re/map.md, "The list in a frame".
+  so they stay on the map at any frame rate (sigdb feature `markers.client_map_steps`, GitHub #159). What it writes back
+  is the last client Post's icons: a marker that moves or is removed changes on the map at the next Post (60 Hz), as on
+  the compass and in the world. On a game build where that feature does not resolve they are written at the client's
+  60 Hz steps only and can flicker above 60 fps; kiln.log says so once at start. docs/re/map.md, "The list in a frame".
 - A dedicated server has no marker icons of its own: it takes the catalog from the first player whose Kiln sends the
   verified catalog of this game build. Until then `Markers.Icons.IsReady` is false and a server `Send` with the map
   surface is refused with `CatalogNotReady`; wait for `Markers.CatalogChanged`. Compass and world markers can be sent at once.
