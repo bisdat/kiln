@@ -57,9 +57,22 @@ bool ReadPointer(uintptr_t at, uintptr_t* target) {
 bool ReadOriginalCode(std::vector<uint8_t>& out, std::string& why) {
     if (scenario == "read-fault") throw std::runtime_error("mapped file read failed");
     if (scenario == "allocation-failure") throw std::bad_alloc();
-    if (scenario == "unreadable") { why = "cannot open the exe file"; return false; }
+    if (scenario == "unreadable" || scenario.rfind("kiln-view", 0) == 0) { why = "cannot open the exe file"; return false; }
     const code::Identity id{reinterpret_cast<uintptr_t>(live.data()) - rva, 42, static_cast<uint32_t>(image_size), rva, mapped_size};
     return code::OriginalText(file.data(), file.size(), id, live.data(), out, why, &ReadPointer);
+}
+// Kiln's verified view of the same exe (kiln.hooks read_original): the file's code at a live address, in bounded reads.
+// Only "kiln-view" has one; elsewhere a failed own read keeps meaning no file code at all, as those scenarios test.
+bool KilnView(uintptr_t at, void* out, size_t n) {
+    const auto start = reinterpret_cast<uintptr_t>(live.data());
+    if (scenario != "kiln-view" || n > 0x300 || at < start || at - start > mapped_size || n > mapped_size - (at - start))
+        return false;
+    std::memcpy(out, file.data() + raw + (at - start), n);
+    return true;
+}
+bool ReadKilnCode(std::vector<uint8_t>& out, std::string& why) {
+    const code::Identity id{reinterpret_cast<uintptr_t>(live.data()) - rva, 42, static_cast<uint32_t>(image_size), rva, mapped_size};
+    return code::OriginalTextFrom(&KilnView, 0x300, id, live.data(), out, why, &ReadPointer);
 }
 #include "../src/find_code.h"
 } // namespace
@@ -162,7 +175,11 @@ int main(int argc, char** argv) {
         std::memcpy(live.data() + site + 2, &target, 8);
         live[site + 10] = 0x41; live[site + 11] = 0xFF; live[site + 12] = 0xE3;
     }
-    if (scenario == "inside-pattern") live[0x180 + 20] = 0xE9;
+    if (scenario == "inside-pattern" || scenario == "kiln-view") live[0x180 + 20] = 0xE9;
+    if (scenario == "kiln-view") { // the plugin cannot open the exe (kiln#157's first suspect), and the code is hooked
+        std::memset(live.data() + site, 0x90, sizeof dispatch);
+        live[site] = 0x48; live[site + 1] = 0xB8; live[site + 10] = 0xFF; live[site + 11] = 0xE0;
+    }
     if (scenario == "mixed-patches") live[0x380] = 0xCD;
     if (scenario == "indirect-slot" || scenario == "unreadable-slot" || scenario == "inside-image-slot") {
         // A six-byte RIP-indirect hook can keep its destination outside .text, rather than inline at +6.
@@ -279,6 +296,18 @@ int main(int argc, char** argv) {
                   "an in-place patch beside a hook stays visible");
         }
     }
+    if (scenario == "kiln-view") {
+        check(hot::g_codeFromFile, "Kiln's view of the exe file stands in for the plugin's own read");
+        check(same(mod_read(site, sizeof dispatch), dispatch), "a read under a hook returns the file's bytes from Kiln's view");
+        check(hot::CodeSource() == "exe file (Kiln's view; the plugin's own read: cannot open the exe file)",
+              "kiln.log names Kiln's view and why the plugin's own read failed");
+    }
+    if (scenario == "kiln-view-none") {
+        check(!hot::g_codeFromFile && mod_read(0x380, 1)[0] == 0xCC, "without either view the code is the live snapshot");
+        check(hot::CodeSource() == "live: cannot open the exe file; Kiln's view of the exe: Kiln has no view of the exe file's code",
+              "kiln.log names both reasons");
+    }
+    if (scenario == "plain") check(hot::CodeSource() == "exe file", "kiln.log says the code is the exe file's");
     if (scenario == "live-patch")
         check(mod_read(site + 4, 1)[0] == 0x54, "a read of an in-place patch returns the patched byte");
     if (scenario == "unreadable")

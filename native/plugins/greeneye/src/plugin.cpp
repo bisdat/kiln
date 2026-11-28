@@ -22,6 +22,7 @@
 #include <set>
 
 #include "../../compat/compat.h"
+#include "kiln_hook.hpp"
 #include "greeneye_internal.h"
 #include "greeneye_json.h"
 #include "own_off_greeneye.h"
@@ -235,6 +236,18 @@ void write_status() {
 
 void KILN_CALL on_client_pre(const KilnTickInfo*, void*) { hot::PollFromKiln(); }
 
+// Kiln's verified view of the exe file's code (kiln.hooks read_original, since 0.2.0-dev.29.19): find's code when the
+// plugin cannot read the exe itself (kiln#157).
+const KilnHooksApi* g_hooks = nullptr;
+bool kiln_code(uintptr_t at, void* out, size_t n) { return g_hooks->read_original(at, out, n) == KILN_OK; }
+
+bool (*kiln_code_reader())(uintptr_t, void*, size_t) {
+    const KilnHooksApi* h = kiln::hooks_v2(H.api);
+    if (!h || h->header.size < offsetof(KilnHooksApi, read_original) + sizeof(void*) || !h->read_original) return nullptr;
+    g_hooks = h;
+    return &kiln_code;
+}
+
 void KILN_CALL on_ready(void*) {
     const fs::path game = H.path(KILN_PATH_GAME);
     const fs::path folder = game / L"greeneye";
@@ -335,7 +348,8 @@ void KILN_CALL on_ready(void*) {
     Log("kiln-greeneye %s (GreeneyeHost API %u, as Greeneye Loader %s) on %s: %s; %zu mod(s)%s", kPluginVersion,
         kGreeneyeApiVersion, kUpstreamVersion, g_side == KILN_SIDE_SERVER ? "the server" : "the client",
         plan.note.c_str(), g_entries.size(), g_hot ? "; hot reload on (greeneye\\hotreload.enable)" : "");
-    hot::Init(g_side == KILN_SIDE_SERVER ? kGreeneyeServer : kGreeneyeClient, with_slash(game), g_hot);
+    hot::Init(g_side == KILN_SIDE_SERVER ? kGreeneyeServer : kGreeneyeClient, with_slash(game), g_hot, kiln_code_reader(),
+              KILN_HOOKS_CODE_RANGE_MAX);
     size_t started = 0;
     for (auto& e : g_entries) {
         if (e.status != "candidate") {

@@ -40,8 +40,11 @@ struct ModState {
     bool hotApi = false;      // exports GreeneyeModHot
 };
 
-// Before any mod starts. hotReload: load from shadow copies, watch for reload requests, swap generations.
-void Init(int side, const std::wstring& gameDir, bool hotReload);
+// Before any mod starts. hotReload: load from shadow copies, watch for reload requests, swap generations. kilnCode: Kiln's
+// view of the exe file's code (kiln.hooks read_original, at most `chunk` bytes a call), for when the plugin cannot read
+// the exe itself; null without one.
+void Init(int side, const std::wstring& gameDir, bool hotReload, bool (*kilnCode)(uintptr_t at, void* out, size_t n),
+          size_t chunk);
 
 // The loader's own safe point for reloads in the game (top of the UI frame). After the mods started.
 void InstallSafePoint();

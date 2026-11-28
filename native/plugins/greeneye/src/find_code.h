@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
-// Included by hot.cpp and the host test, with TextSection, ImageSpan, ReadOriginalCode, ReadLive, ReadPointer and
-// jumppatch available.
+// Included by hot.cpp and the host test, with TextSection, ImageSpan, ReadOriginalCode, ReadKilnCode, ReadLive,
+// ReadPointer and jumppatch available.
 uint8_t* g_text = nullptr;
 size_t g_textSize = 0;
 std::once_flag g_canonicalOnce;
 std::vector<uint8_t> g_canonical; // .text as it was before our hooks (made on first find)
-bool g_codeFromFile = false;
-std::string g_codeNote;
+bool g_codeFromFile = false;  // the exe file's code (read by the plugin, or Kiln's view of it), else a live snapshot
+bool g_codeFromKiln = false;  // the file's code came from Kiln's view: the plugin's own read failed (g_codeNote)
+std::string g_codeNote;       // why the plugin's own read of the exe failed (and Kiln's view, when that failed too)
 uintptr_t g_imageBase = 0; // the loaded exe: "outside the image" for the hook forms
 size_t g_imageSize = 0;
 
@@ -54,10 +55,29 @@ void PrepareCode()
             g_codeNote = "cannot read the exe code";
         }
         if (!g_codeFromFile) {
+            // The plugin's own read of the exe failed (kiln#157 suspected Wine's path forms for that): Kiln's verified
+            // view of the same file, the code sigdb scans, gives the same bytes.
+            std::string why;
+            try {
+                g_codeFromFile = g_codeFromKiln = ReadKilnCode(g_canonical, why);
+            } catch (...) {
+                g_codeFromFile = g_codeFromKiln = false;
+                why = "cannot read it";
+            }
+            if (!g_codeFromFile) g_codeNote += "; Kiln's view of the exe: " + why;
+        }
+        if (!g_codeFromFile) {
             g_canonical.resize(g_textSize);
             ReadLive(g_text, g_canonical.data(), g_textSize);
         }
     });
+}
+
+// Where the code find matches came from, for kiln.log.
+std::string CodeSource()
+{
+    if (!g_codeFromFile) return "live: " + g_codeNote;
+    return g_codeFromKiln ? "exe file (Kiln's view; the plugin's own read: " + g_codeNote + ")" : "exe file";
 }
 
 uint8_t* Find(const char* pattern, void* module)

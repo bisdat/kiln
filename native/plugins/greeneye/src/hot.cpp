@@ -290,6 +290,22 @@ bool ReadOriginalCode(std::vector<uint8_t>& out, std::string& why)
     return code::OriginalText(view.bytes, static_cast<size_t>(size.QuadPart), id, text, out, why, &ReadPointer);
 }
 
+// Kiln's verified view of the exe file's code (kiln.hooks read_original), set by the plugin before the mods start.
+bool (*g_kilnCode)(uintptr_t at, void* out, size_t n) = nullptr;
+size_t g_kilnCodeChunk = 0;
+
+bool ReadKilnCode(std::vector<uint8_t>& out, std::string& why)
+{
+    auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + reinterpret_cast<IMAGE_DOS_HEADER*>(base)->e_lfanew);
+    uint8_t* text = nullptr;
+    size_t textSize = 0;
+    if (!TextSection(text, textSize)) return why = "no loaded code section", false;
+    const code::Identity id{reinterpret_cast<uintptr_t>(base), nt->FileHeader.TimeDateStamp,
+        nt->OptionalHeader.SizeOfImage, static_cast<uint32_t>(text - base), textSize};
+    return code::OriginalTextFrom(g_kilnCode, g_kilnCodeChunk, id, text, out, why, &ReadPointer);
+}
+
 #include "find_code.h"
 
 // --- hooks ------------------------------------------------------------------------------------
@@ -1120,8 +1136,10 @@ DWORD WINAPI Watcher(void*)
 
 } // namespace
 
-void Init(int side, const std::wstring& gameDir, bool hotReload)
+void Init(int side, const std::wstring& gameDir, bool hotReload, bool (*kilnCode)(uintptr_t, void*, size_t), size_t chunk)
 {
+    g_kilnCode = kilnCode;
+    g_kilnCodeChunk = chunk;
     g_starting = true;
     g_stopping = false;
     g_side = side;
@@ -1187,9 +1205,8 @@ std::string StartMod(const ModInfo& info, bool* started)
         };
         const char* loop = state("40 53 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 48 8D 81 ?? 4F 03 00");
         const char* dispatch = state("4C 8B DC 55 56 57 49 8D AB 18 FF FF FF");
-        Log("Quick Deposit startup: active=%s; UiCommandLoop=%s; UiDispatch=%s; code=%s%s; %s",
-            ok ? "yes" : "no", loop, dispatch, g_codeFromFile ? "exe file" : "live: ",
-            g_codeFromFile ? "" : g_codeNote.c_str(), outcome.c_str());
+        Log("Quick Deposit startup: active=%s; UiCommandLoop=%s; UiDispatch=%s; code=%s; %s",
+            ok ? "yes" : "no", loop, dispatch, CodeSource().c_str(), outcome.c_str());
     }
     if (started)
         *started = ok;
