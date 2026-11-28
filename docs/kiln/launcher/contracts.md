@@ -1290,7 +1290,7 @@ cooks nothing); `vanilla` and `no-mods`, nothing. Neither step refuses the start
    `refuse_pending`): a start the launcher tracks (Kiln or Vanilla) for which Steam was asked (or the direct start
    made), its game process not seen, less than 5 minutes (`STEAM_WAIT_MS`) since the ask; or another `launch_play` /
    `launch_confirm` inside its own start for the game. The pending start's record is left as it is.
-   (0.2.0-dev.31.next, KR-NXM5) Every mode but `vanilla`: refuse (`refused`, `detail: {ualOverProxy: true}`) when Kiln's
+   (0.2.0-dev.31.25, KR-NXM5) Every mode but `vanilla`: refuse (`refused`, `detail: {ualOverProxy: true}`) when Kiln's
    receipt is there but `dinput8.dll` is Ultimate ASI Loader again (another mod manager re-deployed it over Kiln's
    proxy; `install::ual_over_proxy`). The sentence says so and points to Repair on the Runtime page.
 2. Mode `profile`: nothing to write (Steam's Play button does the same). Modes `vanilla`/`no-mods`: write

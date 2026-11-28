@@ -705,8 +705,8 @@ pub fn ual_over_proxy(game_dir: &Path) -> Option<String> {
     (c.kind == ProxyKind::UltimateAsiLoader).then(|| format!(
         "dinput8.dll is Ultimate ASI Loader again instead of Kiln's loader, so the game would start without Kiln. Another \
          mod manager (Multi DLL Installer, Vortex) likely deployed it again. Repair Kiln on the Runtime page: it puts its \
-         loader back and keeps Ultimate ASI Loader running as {ASI_LOADER_NAME}. To stop this coming back, turn off that \
-         manager's dinput8.dll deployment (Kiln already loads Ultimate ASI Loader)."))
+         loader back and keeps Ultimate ASI Loader running as {ASI_LOADER_NAME}. If that manager deploys it again, press \
+         Repair again (Kiln already loads Ultimate ASI Loader)."))
 }
 
 /// A fresh slot: even identical existing files belong to the player and must survive uninstall.
@@ -927,6 +927,13 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                 let backup_d = copy_into_backup(game_dir, &backup_rel, PROXY, Some(&mirror))?;
                 std::fs::create_dir_all(&prev_dir).map_err(io_at(&prev_dir, "creating"))?;
                 let ver = |v: &Option<String>| v.as_ref().map(|v| format!(" {v}")).unwrap_or_default();
+                // (31.25 review) an installed Kiln's proxy came back; a first install (the launcher offered Install, not
+                // Repair) puts nothing back. What to do next time: Repair again, never "turn off the other manager's
+                // deployment" (a Vortex purge could then delete what is by then Kiln's dinput8.dll, and Multi DLL Installer
+                // may have no such switch)
+                let put = if old.is_some() { "Kiln put its loader back as dinput8.dll" } else { "Kiln installed its loader as dinput8.dll" };
+                let again = "Another mod manager (Multi DLL Installer, Vortex) likely deployed it there; if it does so again, press \
+                    Repair on the Runtime page again (Kiln already loads Ultimate ASI Loader).";
                 let note = if proxy_newer {
                     // the newer copy takes the chained name; the older chained copy goes to the backup
                     let backup_x = copy_into_backup(game_dir, &backup_rel, &slot_rel, Some(&mirror))?;
@@ -977,10 +984,8 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                             });
                         }
                     }
-                    format!("Kiln put its loader back as dinput8.dll and moved the second copy of Ultimate ASI Loader to \
-                        {backup_x}: the newer copy{} from dinput8.dll now runs as {slot_rel} in place of the older{}. It's likely \
-                        another mod manager (Multi DLL Installer, Vortex) re-deployed it; turn off its dinput8.dll deployment, \
-                        Kiln already loads Ultimate ASI Loader.", ver(&ver_d), ver(&ver_x))
+                    format!("{put} and moved the second copy of Ultimate ASI Loader to {backup_x}: the newer copy{} from \
+                        dinput8.dll now runs as {slot_rel} in place of the older{}. {again}", ver(&ver_d), ver(&ver_x))
                 } else {
                     let hold = prev_dir.join(PROXY);
                     std::fs::rename(&proxy_path, &hold).map_err(io_at(&proxy_path, "moving"))?;
@@ -1001,10 +1006,8 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                         (Some(_), Some(x)) => format!(" (older than the {x} running as {slot_rel})"),
                         _ => format!(" (not known to be newer than the one running as {slot_rel})"),
                     };
-                    format!("Kiln put its loader back as dinput8.dll and moved the second copy of Ultimate ASI Loader{}{which} to \
-                        {backup_d}; Ultimate ASI Loader keeps running as {slot_rel}. It's likely another mod manager (Multi DLL \
-                        Installer, Vortex) re-deployed it; turn off its dinput8.dll deployment, Kiln already loads Ultimate ASI \
-                        Loader.", ver(&ver_d))
+                    format!("{put} and moved the second copy of Ultimate ASI Loader{}{which} to {backup_d}; Ultimate ASI \
+                        Loader keeps running as {slot_rel}. {again}", ver(&ver_d))
                 };
                 // the kept copy is loaded by Kiln's proxy (already so when an earlier install chained it)
                 let previous = match std::fs::read(&chain_path) {

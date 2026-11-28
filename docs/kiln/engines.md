@@ -51,15 +51,17 @@ Kiln owns only `dinput8.dll`.
   dangling links. Ultimate ASI Loader runs only under names it knows, so it is chained as `xinput9_1_0.dll` next
   to the game (`..\xinput9_1_0.dll` in chain.ini). If another file has that name (case ignored, a folder or a link
   as well), the install is refused.
-- Ultimate ASI Loader under both names (0.2.0-dev.31.next, KR-NXM5): `dinput8.dll` is Ultimate ASI Loader and
+- Ultimate ASI Loader under both names (0.2.0-dev.31.25, KR-NXM5): `dinput8.dll` is Ultimate ASI Loader and
   `xinput9_1_0.dll` is Ultimate ASI Loader too (its `IsUltimateASILoader` export). Usually an earlier install chained
   it and another mod manager (Multi DLL Installer, Vortex) wrote it back over Kiln's proxy; the player can also have
   put both there. Install and Repair are not refused. The newer copy, by the file version in its VS_VERSION_INFO,
   runs as `xinput9_1_0.dll`; with the same bytes, the same or no version, the chained copy stays. The other copy goes
   to the install's backup (`kiln/backups/install-*/` and the launcher's second copy), Kiln's proxy becomes
   `dinput8.dll`, and `..\xinput9_1_0.dll` is added to `chain.ini [chain]` when it is not there. The install result's
-  `warnings`, the launcher's install notes and the log say which copy went where and that another mod manager likely
-  re-deployed it. Receipt: the copy that went to the backup is a `replaced` entry of `dinput8.dll` (`backed-up`,
+  `warnings`, the launcher's install notes and the log say which copy went where, that another mod manager likely
+  deployed it there, and to press Repair again if it does so again (never to turn that manager's deployment off: a
+  Vortex purge could then delete what is by then Kiln's `dinput8.dll`, and Multi DLL Installer may have no such
+  switch). A first install says Kiln installed its loader, a Repair or update that it put it back. Receipt: the copy that went to the backup is a `replaced` entry of `dinput8.dll` (`backed-up`,
   engine `ultimateasiloader`). When the newer copy took the chained name, an earlier install's `chained` entry
   names the newer bytes, so uninstall puts the newer one back as `dinput8.dll`; without such an entry both originals
   are recorded and uninstall restores both. A re-deploy after that is caught at Play: every start but vanilla is

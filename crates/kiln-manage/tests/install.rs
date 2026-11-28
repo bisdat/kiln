@@ -2110,6 +2110,9 @@ fn says_second_copy(warnings: &[String], lines: &Lines) -> String {
         .unwrap_or_else(|| panic!("no second-copy warning in {warnings:?}")).clone();
     assert!(w.contains("Multi DLL Installer") && w.contains("Vortex") && w.contains("kiln/backups/install-"), "{w}");
     assert!(lines.0.iter().any(|l| l == &w), "the log has it too: {:?}", lines.0);
+    // (31.25 review, support) what to do when it comes back: Repair again. Never "turn off its deployment": a Vortex
+    // purge could then delete what is by then Kiln's dinput8.dll, and Multi DLL Installer may have no such switch
+    assert!(w.contains("press Repair on the Runtime page again") && !w.contains("turn off"), "{w}");
     w
 }
 
@@ -2136,6 +2139,7 @@ fn ual_redeployed_over_kilns_proxy_with_the_same_bytes_is_backed_up_not_refused(
     assert_eq!(std::fs::read(g.join("xinput9_1_0.dll")).unwrap(), asi);
     assert_eq!(chain::read(&g).unwrap().chain.iter().filter(|e| e.path.eq_ignore_ascii_case("..\\xinput9_1_0.dll")).count(), 1);
     let w = says_second_copy(&rep.warnings, &lines);
+    assert!(w.starts_with("Kiln put its loader back as dinput8.dll"), "an installed Kiln's proxy came back: {w}");
     let last = r.replaced.last().unwrap();
     assert_eq!((last.path.as_str(), last.action, last.engine), ("dinput8.dll", install::ReplacedAction::BackedUp, Some(kiln_manage::pe::ProxyKind::UltimateAsiLoader)));
     let backup = last.backup.as_deref().unwrap();
@@ -2218,7 +2222,9 @@ fn ual_under_both_names_with_different_versions_keeps_the_newer_one_chained() {
     let before = outside_kiln(&g);
     let mut lines = Lines::default();
     let (_, rep) = install::install_report(&dirs, &client(&g), &a, &InstallOptions::default(), &mut lines).unwrap();
-    says_second_copy(&rep.warnings, &lines);
+    let w = says_second_copy(&rep.warnings, &lines);
+    // (31.25 review) a first install puts nothing "back": the player's state before it was Install, not Repair
+    assert!(w.starts_with("Kiln installed its loader as dinput8.dll") && !w.contains("put its loader back"), "{w}");
     assert!(is_kiln_proxy(&g.join("dinput8.dll")));
     assert_eq!(std::fs::read(g.join("xinput9_1_0.dll")).unwrap(), new);
     assert!(chain::read(&g).unwrap().chain.iter().any(|e| e.path.eq_ignore_ascii_case("..\\xinput9_1_0.dll")), "the kept copy is loaded");
@@ -2267,6 +2273,7 @@ fn play_says_when_ual_came_back_over_kilns_proxy() {
         let e = kiln_manage::launch::play_with(&dirs, &client(&g), &req(mode), Some(&[]), &opener).unwrap_err();
         assert_eq!(e.code, ErrorCode::Refused);
         assert!(e.message.contains("Ultimate ASI Loader") && e.message.contains("Repair") && e.message.contains("Vortex"), "{}", e.message);
+        assert!(e.message.contains("press Repair again") && !e.message.contains("turn off"), "{}", e.message);
     }
     assert_eq!(*opened.borrow(), 0, "the game is not started without Kiln");
     install::install(&dirs, &client(&g), &a, &InstallOptions::default(), &mut NoProgress).unwrap();
