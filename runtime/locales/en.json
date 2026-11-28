@@ -426,6 +426,7 @@
     },
     "reading": "Reading its settings...",
     "cannot_show": "Its settings cannot be shown: {error}",
+    "library_copy": "This folder is the mod's copy in Kiln's Library, which ShroudForge does not run, so Kiln does not change its settings here. Press Play in the Kiln launcher: Kiln then places the copy ShroudForge runs, and its switch and settings show here.",
     "files_unreadable": "its files could not be read: {error}",
     "value_unreadable": "the value of setting {setting} cannot be read ({error})",
     "too_many": "too many choices, groups or actions for this page (1000 combined at most). Change settings in the mod's extended.mod.json; the file is unchanged.",
