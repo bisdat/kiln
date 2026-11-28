@@ -543,12 +543,28 @@ internal static class ModCatalog
         /// that needs ShroudForge's runtime (kiln-manage profile.rs render_routed: an exact copy of the EML entry under
         /// shroudforge, both naming the package's Library folder) runs Kiln's EML copy in ShroudForge's mods folder, the
         /// folder kiln-eml's report names: its row reads and writes ShroudForge's switch and settings there, never in the
-        /// Library (review of 0.2.0-dev.31.24).</summary>
+        /// Library (review of 0.2.0-dev.31.24). That is Kiln's EML copy, or the player's own folder of the package under
+        /// another name, which kiln-eml finds by its manifest id (<see cref="EmlRunFolder"/>; HTR, 2026-11-27: labels he
+        /// changed to English there still drew as ???? from the Library copy).</summary>
         public string? RunFolder(ProfileEntry e)
         {
             if (!_runFolders.TryGetValue(e, out var f))
-                _runFolders[e] = f = EngineRunFolder(Src, e) ?? (IsCompatEntry(e) ? EngineRunFolder(Src, e, "eml") : null);
+                _runFolders[e] = f = EngineRunFolder(Src, e) ?? (IsCompatEntry(e) ? EngineRunFolder(Src, e, "eml") ?? EmlRunFolder(e) : null);
             return f;
+        }
+
+        /// <summary>The folder kiln-eml's row of the profile's EML entry <paramref name="e"/> names in ShroudForge's mods
+        /// folder (kiln-eml discover.rs aside_entries: Kiln's copy, or a hand-installed folder of the package), or null.
+        /// kiln-eml's rows are made before any ShroudForge entry's folder is looked up (Read: EngineMods, then Xhl and
+        /// ShroudForge).</summary>
+        private string? EmlRunFolder(ProfileEntry e)
+        {
+            if (PlacedRoot(Src, "shroudforge") is not { } root || !Mods.TryGetValue("eml", out var rows)) return null;
+            foreach (var m in rows)
+                if (string.Equals(m.Id, e.Id, StringComparison.Ordinal) && m.Folder is { } f && ParentOf(f) is { } parent && SamePath(parent, root) &&
+                    DirExists(f))
+                    return f;
+            return null;
         }
 
         /// <summary>A shroudforge entry that is the launcher's compatibility entry: the profile's EML entry of the same id
@@ -1130,7 +1146,8 @@ internal static class ModCatalog
         foreach (var sub in SubDirs(dir))
         {
             var name = LeafName(sub);
-            if (seen.Contains(name) || moved.Contains(NormPath(sub))) continue;
+            // (a profile entry's folder: the compatibility entry's may be the player's own folder under another name)
+            if (seen.Contains(name) || moved.Contains(NormPath(sub)) || mine.Contains(NormPath(sub))) continue;
             if (emlFolders.Contains(NormPath(sub)) && string.Equals(PlacedKind(sub), "eml", StringComparison.OrdinalIgnoreCase)) continue;
             // ShroudForge does not run it this start, and kiln-eml (or EML's own loader) lists it: one row, the EML one, which
             // says its ShroudForge settings do nothing (SfSettingsUnused)
