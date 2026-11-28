@@ -283,10 +283,11 @@ bool guarded_rewrite(RewriteCall* c) {
 }
 
 // After a SimStep returned. Only the client world's, on its own thread, touches the kept rows (the server world of a
-// hosted game steps on its GameServer thread; the prediction world's kind is 1).
-void step_end(uintptr_t storage) {
+// hosted game steps on its GameServer thread; the prediction world's kind is 1). A ticked step without our Post drops them
+// (MapKeep::end_step): they never outlive the Post that would move or remove them.
+void step_end(uintptr_t storage, bool ticked) {
     if (storage_kind(storage) != KILN_WORLD_CLIENT || !g.api->on_world_thread(KILN_WORLD_CLIENT)) return;
-    if (g_keep.rows.empty() || !g.sw->map.load()) return;
+    if (!g_keep.end_step(ticked) || !g.sw->map.load()) return;
     const uintptr_t w = g.api->world(KILN_WORLD_CLIENT);
     if (!w || storage != w + static_cast<uintptr_t>(g_world_storage)) return;
     uint64_t epoch = 0;
@@ -300,10 +301,11 @@ void step_end(uintptr_t storage) {
 }
 
 // SimStep(Storage*, bool ticked): the rest of the chain (the core's Pre, the game's step, the core's Post), then step_end.
+// ticked is the bool's byte, as the core's link reads it.
 uintptr_t hk_sim_step(uintptr_t storage, uintptr_t ticked, uintptr_t r8, uintptr_t r9) {
     const uintptr_t result = g_step_hook.call<uintptr_t>(storage, ticked, r8, r9);
     try {
-        step_end(storage);
+        step_end(storage, (ticked & 0xff) != 0);
     } catch (...) {  // never into the game; a fault in the list itself latches the map (step_end)
     }
     return result;
@@ -551,10 +553,10 @@ void surfaces_world(const KilnWorldEvent& e, std::vector<Note>* notes) {
 
 void surfaces_client_post(std::vector<Note>* notes) {
     if (g.side != KILN_SIDE_CLIENT) return;
+    g_keep.begin_post();  // post_map keeps what it writes at this Post
     uint64_t epoch = 0;
     g.store->world_epoch(KILN_WORLD_CLIENT, &epoch);
     update_map_row();
-    g_keep.clear();  // post_map keeps what it writes at this Post
     update_nameplates_row();
     g.store->snapshot_client(&g_rows);
     if (g_rows.empty() && !g_vis.size() && !g_appended.n) {

@@ -454,6 +454,7 @@ struct Frames {
     std::vector<MapRow> rows = {{3815.4, 850.2, 1383.0, 0x8c1a2b3cu}, {3700.0, 820.0, 1500.0, 0x11223344u}};
     std::vector<MapRow> post_rows;  // what the next Post admits (surfaces.cpp: the MAP surface's order)
     ListState st = ListState::Ok;
+    bool post_alive = true;  // the core removes a tick subscriber that faults: no Post of ours from then on
 
     Frames() { post_rows = rows; }
     void programs() {  // clear_map_markers_for_ui, then replicate_map_markers_for_ui; their jobs joined
@@ -462,7 +463,7 @@ struct Frames {
         f.set_header(game, 1024);
     }
     void post() {  // surfaces_client_post: the keep goes, post_map appends and keeps what it wrote
-        keep.clear();
+        keep.begin_post();
         if (post_rows.empty() && !last.n) return;
         const uint32_t n = static_cast<uint32_t>(post_rows.size());
         append_rows(f.ui(), f.l, post_rows.data(), n, &last, &st);
@@ -470,7 +471,8 @@ struct Frames {
     }
     uint32_t step(bool ticked) {  // one client SimStep and the link after it
         programs();
-        if (ticked) post();
+        if (ticked && post_alive) post();
+        if (!keep.end_step(ticked)) return 0;  // surfaces.cpp step_end
         return rewrite_kept(f.ui(), f.l, keep, epoch, &last, &st);
     }
     // the UI frame's read: the game's rows untouched and exactly `want` of ours after them, in the Post's order
@@ -577,6 +579,31 @@ void kept_rows_stay_in_their_world() {
     kmk_test::end("issue 159: kept rows go only into their own world's list, never through a header that fails its guards");
 }
 
+void kept_rows_end_with_the_post() {
+    kmk_test::begin();
+    Frames w;
+    w.step(true);
+    w.step(false);
+    CHECK(w.read(w.rows));
+    // the client Post faults and the core removes it (tick.cpp run_subs): from then on nothing moves or removes the rows.
+    // The frames up to the next ticked step still show the last Post's rows (as the drawn surfaces show its snapshot)...
+    w.post_alive = false;
+    w.step(false);
+    CHECK(w.read(w.rows));
+    // ...and the first ticked step without our Post drops them: they never outlive the Post that would remove them
+    CHECK_EQ(w.step(true), 0u);
+    CHECK(w.st == ListState::Ok && w.read({}));
+    CHECK_EQ(w.step(false), 0u);
+    CHECK(w.read({}));
+    CHECK(w.keep.rows.empty() && w.keep.epoch == 0);
+    // a Post again (the next world's subscriber, say): kept and written again as before
+    w.post_alive = true;
+    w.step(true);
+    w.step(false);
+    CHECK(w.read(w.rows));
+    kmk_test::end("issue 159: a ticked step without Kiln's Post (its subscriber faulted and was removed) drops the kept rows");
+}
+
 }  // namespace
 
 int main() {
@@ -591,5 +618,6 @@ int main() {
     every_frame_reads_kilns_rows();
     kept_rows_follow_the_post();
     kept_rows_stay_in_their_world();
+    kept_rows_end_with_the_post();
     return kmk_test::finish("surfaces_test");
 }

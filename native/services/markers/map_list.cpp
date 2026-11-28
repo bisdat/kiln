@@ -85,6 +85,18 @@ void MapKeep::clear() {
     rows.clear();
 }
 
+void MapKeep::begin_post() {
+    clear();
+    posted = true;
+}
+
+bool MapKeep::end_step(bool ticked) {
+    const bool post = posted;
+    posted = false;
+    if (ticked && !post) clear();
+    return !rows.empty();
+}
+
 uint32_t rewrite_kept(uint8_t* ui, const MapLayout& l, const MapKeep& keep, uint64_t epoch, Appended* last, ListState* state) {
     *state = ListState::Ok;
     if (!epoch || keep.epoch != epoch || keep.rows.empty()) return 0;

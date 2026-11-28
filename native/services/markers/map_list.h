@@ -64,14 +64,21 @@ uint32_t append_rows(uint8_t* ui, const MapLayout& l, const MapRow* rows, uint32
 struct MapKeep {
     uint64_t epoch = 0;        // the client world epoch of the Post that wrote them; 0 = nothing kept
     std::vector<MapRow> rows;  // in the Post's order
+    bool posted = false;       // a client Post began since the last client step's end
     void set(uint64_t e, const MapRow* r, uint32_t n);
     void clear();
+    // The start of a client Post: nothing kept until post_map keeps what this Post writes.
+    void begin_post();
+    // The end of a client SimStep, before the rows are written again. The core runs the client Post at every ticked step
+    // (tick.cpp), so a ticked step without one means the Post is gone (the core removes a tick subscriber that faults):
+    // the kept rows are dropped, as nothing would move or remove them any more. Returns whether rows are kept.
+    bool end_step(bool ticked);
 };
 
 // The end of a client SimStep: the kept rows again through append_rows when they are this epoch's (the same guards and
-// room: the game's rows are never displaced, rows beyond the room are left out). A step whose clear did not run leaves the
-// list ending with them, and append_rows writes them over in place. Returns the rows written; nothing kept for this epoch
-// writes nothing and leaves *state Ok.
+// room: the game's rows are never displaced, rows beyond the room are left out). Rows already at the list's end (this
+// step's Post wrote them, or the step's clear did not run) are written over in place, never twice. Returns the rows
+// written; nothing kept for this epoch writes nothing and leaves *state Ok.
 uint32_t rewrite_kept(uint8_t* ui, const MapLayout& l, const MapKeep& keep, uint64_t epoch, Appended* last, ListState* state);
 
 }  // namespace kmk
