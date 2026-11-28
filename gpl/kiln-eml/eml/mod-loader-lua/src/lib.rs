@@ -167,8 +167,12 @@ fn run_steps(
         &planned.cache_diff,
     ) {
         Ok(context) => context,
-        // kiln-eml: include the complete preparation cause in Display (also used by status).
-        Err(error) => anyhow::bail!("could not prepare the game data: {error:#}"),
+        // kiln-eml: a file another program had open is said plainly (the paths and the system's words are in kiln.log);
+        // any other cause in full, in Display (also used by status).
+        Err(error) => match transaction::in_use(&error) {
+            Some(plain) => anyhow::bail!("{plain}"),
+            None => anyhow::bail!("could not prepare the game data: {error:#}"),
+        },
     };
 
     let mut executed = execute(env, app_state, planned, progress, prints)?;

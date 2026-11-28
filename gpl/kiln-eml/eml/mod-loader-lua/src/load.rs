@@ -565,7 +565,7 @@ fn set_aside_backups(root: &std::path::Path, stem: &str) -> std::io::Result<Opti
     std::fs::create_dir_all(&kept)?;
     crate::ownership::checked_path(root, &kept)?;
     for name in found {
-        std::fs::rename(root.join(name), kept.join(name))?;
+        crate::transaction::rename_retrying(&root.join(name), &kept.join(name))?;
     }
     crate::transaction::sync_dir(&kept)?;
     crate::transaction::sync_dir(root)?;
@@ -1608,6 +1608,20 @@ mod kiln_tests {
         std::fs::write(&bak, b"KFC").unwrap();
         let text = crate::run(&env, args).unwrap_err().to_string();
         assert!(text.contains("create_backup:") && text.contains("g.kfc.bak") && text.contains("failed to fill whole buffer"), "{text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    // kiln-eml (sosmic, 0.2.0-dev.31.25): the vanilla backup held by another program (the game still closing, an
+    // antivirus, a backup) while the stage copies it: a brief hold is waited out, a longer one is said plainly
+    #[test]
+    fn a_backup_another_program_holds_is_waited_for_then_said_plainly() {
+        let (dir, env, args) = patch_fixture();
+        crate::transaction::IN_USE_WAIT.with(|w| w.set(Some(|_| {})));
+        crate::transaction::IN_USE_COPY.with(|c| c.set(Some(|src, _, _| (src.file_name() == Some("g.kfc.bak".as_ref())).then_some(32))));
+        let text = crate::run(&env, args.clone()).unwrap_err().to_string();
+        assert_eq!(text, "another program has g.kfc.bak open (the game still closing, an antivirus or a backup); try again in a moment");
+        crate::transaction::IN_USE_COPY.with(|c| c.set(Some(|src, _, n| (src.file_name() == Some("g.kfc.bak".as_ref()) && n < 4).then_some(32))));
+        assert!(!crate::run(&env, args).unwrap().cached);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

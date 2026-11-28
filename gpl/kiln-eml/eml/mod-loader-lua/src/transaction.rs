@@ -155,12 +155,123 @@ pub(crate) fn move_new(src: &Path, dst: &Path) -> io::Result<()> {
     sync_dir(src.parent().ok_or_else(|| io::Error::other("no archive parent"))?)
 }
 
-pub fn atomic_copy(src: &Path, dst: &Path) -> io::Result<()> { copy_via_temp(src, dst, true) }
+pub fn atomic_copy(src: &Path, dst: &Path) -> io::Result<()> { copy_retrying(src, dst, |s, d| copy_via_temp(s, d, true), wait) }
 
 /// kiln-eml: atomic_copy into a held stage (`PatchWriter::at`). The stage's own cleanup record covers the temps inside
 /// it, so the copy writes no record of its own (on Linux the held path is /proc/self/fd/<fd>, under which record_temp
 /// would otherwise create kiln/eml/ownership inside the stage).
-pub(crate) fn stage_copy(src: &Path, dst: &Path) -> io::Result<()> { copy_via_temp(src, dst, false) }
+pub(crate) fn stage_copy(src: &Path, dst: &Path) -> io::Result<()> { copy_retrying(src, dst, |s, d| copy_via_temp(s, d, false), wait) }
+
+/// kiln-eml (sosmic, 0.2.0-dev.31.25): the pauses between the tries of a copy or rename whose file another program has
+/// open: about 2.5 s in all, six tries. A game that is still closing, an antivirus scan or a backup program holds the
+/// file for a moment, and the next start a few minutes later worked, so a short wait is worth it; a longer one would
+/// only hold up the start of a game whose file stays held.
+pub(crate) const IN_USE_WAITS: [Duration; 5] =
+    [Duration::from_millis(100), Duration::from_millis(200), Duration::from_millis(400), Duration::from_millis(800), Duration::from_millis(1000)];
+
+/// kiln-eml: Windows' ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33): another program has the file open
+/// without sharing it, or holds a lock on it. Only these are tried again (Wine reports the same codes). Other systems
+/// have other codes under these numbers, so the host tests' copy function (cfg(test)) stands for Windows there.
+/// A rename over a target another program holds fails with ERROR_ACCESS_DENIED (5) instead, which is not tried again.
+fn in_use_code(e: &io::Error) -> Option<i32> {
+    let code = e.raw_os_error()?;
+    (cfg!(any(windows, test)) && matches!(code, 32 | 33)).then_some(code)
+}
+
+/// kiln-eml: a copy or rename that still found its source in use by another program after every pause of
+/// [`IN_USE_WAITS`]. Its text is the plain message for kiln.log and the players' status (`in_use`); the system's own
+/// error (in the player's language) and the paths are in the kiln.log line written when it gave up.
+#[derive(Debug)]
+pub struct InUse {
+    /// The file another program has open: the source of the copy or rename (its name only; the paths are in kiln.log). In a
+    /// copy, a temp of Kiln's own that a scanner opened right after it was written shows as the source too.
+    pub file: String,
+    source: io::Error,
+}
+impl std::fmt::Display for InUse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "another program has {} open (the game still closing, an antivirus or a backup); try again in a moment", self.file)
+    }
+}
+impl std::error::Error for InUse {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.source) }
+}
+
+/// kiln-eml: the [`InUse`] message, when a step of `error` gave up on a file another program had open.
+pub fn in_use(error: &anyhow::Error) -> Option<String> {
+    error.chain().find_map(|cause| {
+        cause.downcast_ref::<InUse>()
+            .or_else(|| cause.downcast_ref::<io::Error>()?.get_ref()?.downcast_ref::<InUse>())
+            .map(ToString::to_string)
+    })
+}
+
+/// kiln-eml: the pause between tries; host tests make it instant (and count it) through IN_USE_WAIT.
+fn wait(pause: Duration) {
+    #[cfg(test)]
+    if IN_USE_WAIT.with(|w| w.get()).is_some_and(|w| { w(pause); true }) { return; }
+    std::thread::sleep(pause);
+}
+#[cfg(test)]
+thread_local! {
+    /// The copy function's stand-in for a held file: called before each try with its source, target and number (1 to
+    /// 6), it answers the OS error code that try fails with, if any.
+    pub(crate) static IN_USE_COPY: std::cell::Cell<Option<fn(&Path, &Path, usize) -> Option<i32>>> = const { std::cell::Cell::new(None) };
+    pub(crate) static IN_USE_WAIT: std::cell::Cell<Option<fn(Duration)>> = const { std::cell::Cell::new(None) };
+}
+
+/// kiln-eml: `copy(src, dst)`, tried again after each pause of [`IN_USE_WAITS`] while it fails because another program
+/// has a file of it open; then [`InUse`]. Any other error returns at once. `copy` must leave nothing behind when it fails
+/// (copy_via_temp removes its temp), so a new try starts clean.
+pub(crate) fn copy_retrying(src: &Path, dst: &Path, mut copy: impl FnMut(&Path, &Path) -> io::Result<()>,
+                            pause: impl FnMut(Duration)) -> io::Result<()> {
+    let mut tries = 0usize;
+    retry_in_use(src, dst, || {
+        tries += 1;
+        #[cfg(test)]
+        if let Some(code) = IN_USE_COPY.with(|c| c.get()).and_then(|c| c(src, dst, tries)) { return Err(io::Error::from_raw_os_error(code)); }
+        copy(src, dst)
+    }, pause)
+}
+
+/// kiln-eml: a same-volume rename (`std::fs::rename`) with the tries of [`copy_retrying`].
+pub(crate) fn rename_retrying(src: &Path, dst: &Path) -> io::Result<()> {
+    retry_in_use(src, dst, || fs::rename(src, dst), wait)
+}
+
+fn retry_in_use(src: &Path, dst: &Path, mut step: impl FnMut() -> io::Result<()>, mut pause: impl FnMut(Duration)) -> io::Result<()> {
+    let name = |p: &Path| p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned());
+    let mut waited = Duration::ZERO;
+    for n in 0..=IN_USE_WAITS.len() {
+        let error = match step() {
+            Ok(()) => {
+                if n > 0 {
+                    tracing::info!("{} was in use by another program; it went through on try {} of {}, after {:.1} s",
+                        name(src), n + 1, IN_USE_WAITS.len() + 1, waited.as_secs_f64());
+                }
+                return Ok(());
+            }
+            Err(e) => e,
+        };
+        let Some(code) = in_use_code(&error) else { return Err(error) };
+        match IN_USE_WAITS.get(n) {
+            Some(&next) => {
+                if n == 0 {
+                    tracing::info!("{} is in use by another program (os error {code}); trying again for up to {:.1} s",
+                        name(src), IN_USE_WAITS.iter().sum::<Duration>().as_secs_f64());
+                }
+                pause(next);
+                waited += next;
+            }
+            None => {
+                tracing::warn!("{} stayed in use by another program through {} tries over {:.1} s (os error {code}: {error}); \
+                                {} to {} was not done", name(src), n + 1, waited.as_secs_f64(), src.display(), dst.display());
+                return Err(io::Error::new(io::ErrorKind::ResourceBusy, InUse { file: name(src), source: error }));
+            }
+        }
+    }
+    unreachable!("the last try returns")
+}
 
 fn copy_via_temp(src: &Path, dst: &Path, own_record: bool) -> io::Result<()> {
     regular(src)?;
@@ -1128,6 +1239,115 @@ fn baseline_samples<'a>(contents: &[(u64, u64, &'a ContentHash)]) -> Vec<&'a Con
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    // kiln-eml (sosmic, 0.2.0-dev.31.25): a file another program has open is tried again for about 2.5 s, then said
+    // plainly. The copy function is injected: these run on any host.
+    const PLAIN: &str = "another program has enshrouded.kfc.bak open (the game still closing, an antivirus or a backup); try again in a moment";
+    fn held(code: i32) -> io::Error { io::Error::from_raw_os_error(code) }
+
+    #[test]
+    fn a_copy_in_use_is_tried_again_and_goes_through() {
+        for code in [32, 33] {
+            let (mut tries, mut waits) = (0, Vec::new());
+            copy_retrying(Path::new("game/enshrouded.kfc.bak"), Path::new("stage/.vanilla-header"),
+                |_, _| { tries += 1; if tries < 3 { Err(held(code)) } else { Ok(()) } }, |d| waits.push(d)).unwrap();
+            assert_eq!(tries, 3, "os error {code}");
+            assert_eq!(waits, IN_USE_WAITS[..2], "os error {code}");
+        }
+    }
+
+    #[test]
+    fn a_copy_that_stays_in_use_gives_up_after_about_two_and_a_half_seconds_with_the_plain_message() {
+        for code in [32, 33] {
+            let (mut tries, mut waits) = (0, Vec::new());
+            let e = copy_retrying(Path::new("game/enshrouded.kfc.bak"), Path::new("stage/.vanilla-header"),
+                |_, _| { tries += 1; Err(held(code)) }, |d| waits.push(d)).unwrap_err();
+            assert_eq!(tries, 6);
+            assert_eq!(waits, IN_USE_WAITS);
+            let total: Duration = waits.iter().sum();
+            assert!(total >= Duration::from_secs(2) && total <= Duration::from_secs(3), "{total:?}");
+            assert_eq!(e.kind(), io::ErrorKind::ResourceBusy);
+            assert_eq!(e.to_string(), PLAIN);
+            // the system's own error stays its source, for the log
+            let source = std::error::Error::source(e.get_ref().unwrap()).unwrap().downcast_ref::<io::Error>().unwrap();
+            assert_eq!(source.raw_os_error(), Some(code));
+            // found through the contexts a preparation step adds (create_writer's)
+            let chained = anyhow::Error::new(e).context("create_writer: could not copy a to b").context("outer");
+            assert_eq!(in_use(&chained).as_deref(), Some(PLAIN));
+        }
+    }
+
+    #[test]
+    fn other_errors_are_not_tried_again() {
+        let errors: [fn() -> io::Error; 4] = [|| io::Error::from(io::ErrorKind::NotFound), || held(5), || held(2), || io::Error::other("full drive")];
+        for error in errors {
+            let (mut tries, mut waits) = (0, Vec::new());
+            let e = copy_retrying(Path::new("a"), Path::new("b"), |_, _| { tries += 1; Err(error()) }, |d| waits.push(d)).unwrap_err();
+            assert_eq!((tries, waits.len()), (1, 0), "{e}");
+            assert_eq!(e.to_string(), error().to_string());
+            assert!(in_use(&anyhow::Error::new(e)).is_none());
+        }
+    }
+
+    thread_local! { static WAITED: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) }; }
+
+    #[test]
+    fn atomic_and_stage_copies_wait_out_a_brief_hold_and_leave_no_temp() {
+        let game = std::env::temp_dir().join(format!("kiln-in-use-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&game).unwrap();
+        fs::write(game.join("enshrouded.kfc"), "vanilla header").unwrap();
+        IN_USE_WAIT.with(|w| w.set(Some(|d| WAITED.with(|t| t.set(t.get() + d)))));
+        IN_USE_COPY.with(|c| c.set(Some(|_, _, n| (n < 3).then_some(32))));
+        atomic_copy(&game.join("enshrouded.kfc"), &game.join("enshrouded.kfc.bak")).unwrap();
+        stage_copy(&game.join("enshrouded.kfc.bak"), &game.join("staged")).unwrap();
+        assert_eq!(fs::read(game.join("enshrouded.kfc.bak")).unwrap(), b"vanilla header");
+        assert_eq!(fs::read(game.join("staged")).unwrap(), b"vanilla header");
+        assert_eq!(WAITED.with(|t| t.get()), 2 * (IN_USE_WAITS[0] + IN_USE_WAITS[1]));
+        let left: Vec<_> = fs::read_dir(&game).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".kiln-")).collect();
+        assert!(left.is_empty(), "{left:?}");
+        // held through every try: the plain message, and the target is untouched
+        IN_USE_COPY.with(|c| c.set(Some(|_, _, _| Some(33))));
+        let e = stage_copy(&game.join("enshrouded.kfc.bak"), &game.join("staged-again")).unwrap_err();
+        assert_eq!(e.to_string(), PLAIN);
+        assert!(!game.join("staged-again").exists());
+        fs::remove_dir_all(game).unwrap();
+    }
+
+    /// The real thing on Windows (and Wine): a file another handle holds without sharing it.
+    #[cfg(windows)]
+    #[test]
+    fn a_file_held_without_sharing_is_waited_for_then_said_plainly() {
+        use std::os::windows::fs::OpenOptionsExt;
+        thread_local! { static HOLD: std::cell::RefCell<Option<File>> = const { std::cell::RefCell::new(None) }; }
+        let game = std::env::temp_dir().join(format!("kiln-in-use-win-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&game).unwrap();
+        let bak = game.join("enshrouded.kfc.bak");
+        fs::write(&bak, "vanilla header").unwrap();
+        let hold = || OpenOptions::new().read(true).share_mode(0).open(game.join("enshrouded.kfc.bak")).unwrap();
+        // held through every try
+        HOLD.with(|h| *h.borrow_mut() = Some(hold()));
+        IN_USE_WAIT.with(|w| w.set(Some(|_| {})));
+        let e = stage_copy(&bak, &game.join("staged")).unwrap_err();
+        assert_eq!(e.to_string(), PLAIN);
+        let source = std::error::Error::source(e.get_ref().unwrap()).unwrap().downcast_ref::<io::Error>().unwrap();
+        assert_eq!(source.raw_os_error(), Some(32), "{source}");
+        // let go during the first pause: the next try copies
+        IN_USE_WAIT.with(|w| w.set(Some(|_| HOLD.with(|h| drop(h.borrow_mut().take())))));
+        stage_copy(&bak, &game.join("staged")).unwrap();
+        assert_eq!(fs::read(game.join("staged")).unwrap(), b"vanilla header");
+        // a held target: Windows refuses the rename over it as access denied (5), not a sharing violation, so it is not
+        // tried again (and the target stays as it was)
+        let live = game.join("enshrouded.kfc");
+        fs::write(&live, "patched").unwrap();
+        let held_live = OpenOptions::new().read(true).share_mode(0).open(&live).unwrap();
+        IN_USE_WAIT.with(|w| w.set(Some(|_| panic!("access denied is not tried again"))));
+        let e = atomic_copy(&bak, &live).unwrap_err();
+        assert_eq!(e.raw_os_error(), Some(5), "{e}");
+        drop(held_live);
+        assert_eq!(fs::read(&live).unwrap(), b"patched");
+        fs::remove_dir_all(game).unwrap();
+    }
     #[test]
     fn killed_resource_temp_has_durable_cleanup_proof_before_any_copy() {
         let game = std::env::temp_dir().join(format!("kiln-temp-proof-{}", uuid::Uuid::new_v4()));
