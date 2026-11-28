@@ -12,7 +12,7 @@
 static std::vector<uint8_t> file, live;
 static std::string scenario;
 constexpr size_t raw = 0x400, rva = 0x1000, text_size = 0x1000, site = 0x80;
-static size_t mapped_size = text_size;
+static size_t mapped_size = text_size, image_size = 0x3000;
 static int failed = 0, checks = 0;
 static void check(bool ok, const char* what) {
     ++checks;
@@ -46,27 +46,75 @@ namespace hot {
 namespace {
 void* GetModuleHandleW(const wchar_t*) { return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(live.data()) - rva); }
 bool TextSection(uint8_t*& start, size_t& size) { start = live.data(); size = mapped_size; return true; }
-void Read(const void* p, void* out, size_t n) { std::memcpy(out, p, n); }
+bool ImageSpan(uintptr_t& base, size_t& size) { base = reinterpret_cast<uintptr_t>(live.data()) - rva; size = image_size; return true; }
+bool ReadLive(const void* p, void* out, size_t n) { std::memcpy(out, p, n); return true; }
+bool ReadPointer(uintptr_t at, uintptr_t* target) {
+    const auto base = reinterpret_cast<uintptr_t>(live.data());
+    if (at < base || at - base > live.size() || sizeof(*target) > live.size() - (at - base)) return false;
+    std::memcpy(target, reinterpret_cast<const void*>(at), sizeof(*target));
+    return true;
+}
 bool ReadOriginalCode(std::vector<uint8_t>& out, std::string& why) {
     if (scenario == "read-fault") throw std::runtime_error("mapped file read failed");
     if (scenario == "allocation-failure") throw std::bad_alloc();
     if (scenario == "unreadable") { why = "cannot open the exe file"; return false; }
-    const code::Identity id{reinterpret_cast<uintptr_t>(live.data()) - rva, 42, 0x3000, rva, mapped_size};
-    return code::OriginalText(file.data(), file.size(), id, live.data(), out, why,
-        [](uintptr_t at, uintptr_t* target) {
-            const auto base = reinterpret_cast<uintptr_t>(live.data());
-            if (at < base || at - base > live.size() || sizeof(*target) > live.size() - (at - base)) return false;
-            std::memcpy(target, reinterpret_cast<const void*>(at), sizeof(*target));
-            return true;
-        });
+    const code::Identity id{reinterpret_cast<uintptr_t>(live.data()) - rva, 42, static_cast<uint32_t>(image_size), rva, mapped_size};
+    return code::OriginalText(file.data(), file.size(), id, live.data(), out, why, &ReadPointer);
 }
 #include "../src/find_code.h"
 } // namespace
 } // namespace hot
 
+// kiln#157: what a mod's read returns for n bytes at text offset `at`.
+static std::vector<uint8_t> mod_read(size_t at, size_t n) {
+    std::vector<uint8_t> out(n, 0xA5);
+    hot::Read(live.data() + at, out.data(), n);
+    return out;
+}
+static bool same(const std::vector<uint8_t>& got, const uint8_t* want) { return std::memcmp(got.data(), want, got.size()) == 0; }
+static void put_rel32(std::vector<uint8_t>& code, size_t at, size_t to) {
+    const int32_t d = static_cast<int32_t>(static_cast<intptr_t>(to) - static_cast<intptr_t>(at + 5));
+    std::memcpy(code.data() + at + 1, &d, 4);
+}
+// kiln#157: a caller (a "call rel32" to UiCommandLoop, 0x3380 bytes away: further than read's 4 KiB margin) and a global
+// load ("mov rax, [rip+disp32]") in the file of a 16 KiB code section; a mod finds each by its pattern and reads the
+// call's or the global's operand inside the match.
+constexpr size_t caller = 0x3500, call = caller + 3, global = 0x600, read_text = 0x4000;
+static const char* caller_pattern = "48 8B CB E8 ?? ?? ?? ?? 48 85 C0 74 05";
+static const char* global_pattern = "48 8B 05 ?? ?? ?? ?? 48 85 C0 0F 84";
+static void read_fixture() {
+    file.resize(raw + read_text, 0xCC);
+    mapped_size = read_text;
+    image_size = rva + read_text + 0x1000;
+    put<uint32_t>(0x150, read_text); put<uint32_t>(0x158, read_text); put<uint32_t>(0x58 + 56, static_cast<uint32_t>(image_size));
+    std::vector<uint8_t> text(file.begin() + raw, file.end());
+    const uint8_t calls[] = {0x48,0x8B,0xCB,0xE8,0,0,0,0,0x48,0x85,0xC0,0x74,0x05};
+    std::memcpy(text.data() + caller, calls, sizeof calls);
+    put_rel32(text, call, 0x180);
+    const uint8_t load[] = {0x48,0x8B,0x05,0x78,0x56,0x34,0x02,0x48,0x85,0xC0,0x0F,0x84,0x10,0,0,0};
+    std::memcpy(text.data() + global, load, sizeof load);
+    std::copy(text.begin(), text.end(), file.begin() + raw);
+    live.assign(file.begin() + raw, file.end());
+}
+// Another module's hooks over those operands, as hosted ShroudForge and Kiln's own hooks write them: the call sent to
+// a relay outside the image (its E8 kept), and a jump to outside the image with nops over the 7-byte instruction.
+static void hook_operands() {
+    put_rel32(live, call, read_text + 0x10000);
+    live[global] = 0xE9;
+    put_rel32(live, global, read_text + 0x20000);
+    live[global + 5] = live[global + 6] = 0x90;
+}
+
 int main(int argc, char** argv) {
     scenario = argc > 1 ? argv[1] : "short-hook";
     fixture();
+    const bool reads = scenario.rfind("read-", 0) == 0 && scenario != "read-fault";
+    if (reads) read_fixture();
+    if (scenario == "read-hooked" || scenario == "read-first" || scenario == "read-dense") hook_operands();
+    if (scenario == "read-first") {
+        // A mod may read before its first find: the read makes the code find matches.
+        check(same(mod_read(call + 1, 4), file.data() + raw + call + 1), "a read before any find sees the file's call operand");
+    }
     if (scenario == "zero-tail") {
         file.resize(raw + 0x800);
         put<uint32_t>(0x158, 0x800);
@@ -211,6 +259,32 @@ int main(int argc, char** argv) {
         check(!hot::code::OriginalText(file.data(), file.size(), identity, live.data(), out, why),
               "dense file/live changes select the previous live snapshot");
     }
+    if (reads) {
+        const uint8_t* orig = file.data() + raw;
+        check(hot::Find(caller_pattern, nullptr) == live.data() + caller, "the caller's signature resolves");
+        check(hot::Find(global_pattern, nullptr) == live.data() + global, "the global load's signature resolves");
+        if (scenario == "read-later") hook_operands(); // hooks written after the code was read: Kiln's later ones
+        if (scenario == "read-dense") {
+            // more than 1% of the code around the read changed in place: not sorted, the live bytes as before
+            for (size_t i = 0; i < 128; ++i) live[caller + 0x100 + i * 2] ^= 0x5A;
+            check(same(mod_read(call, 5), live.data() + call), "a heavily patched place reads live");
+        } else {
+            check(same(mod_read(call, 5), orig + call), "the call's operand reads as the file has it, not the relay's");
+            check(same(mod_read(caller, 13), orig + caller), "the whole caller reads as find matched it");
+            check(same(mod_read(global + 3, 4), orig + global + 3), "the global's displacement reads as the file has it");
+            check(same(mod_read(global - 2, 20), orig + global - 2), "a read across the jump and its nops reads the file's");
+            live[global + 11] = 0x85; // an in-place patch next to the hook (jz -> jnz): still the live byte
+            const auto mixed = mod_read(global, 12);
+            check(same(std::vector<uint8_t>(mixed.begin(), mixed.begin() + 11), orig + global) && mixed[11] == 0x85,
+                  "an in-place patch beside a hook stays visible");
+        }
+    }
+    if (scenario == "live-patch")
+        check(mod_read(site + 4, 1)[0] == 0x54, "a read of an in-place patch returns the patched byte");
+    if (scenario == "unreadable")
+        check(mod_read(0x380, 4)[0] == 0xCC, "without the file's code a read returns the live bytes");
+    if (scenario == "short-hook" || scenario == "rel32-hook" || scenario == "indirect-hook")
+        check(same(mod_read(site, sizeof dispatch), dispatch), "a function another module hooked reads as find matched it");
     std::printf("%d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }

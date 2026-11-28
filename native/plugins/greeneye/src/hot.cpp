@@ -203,11 +203,13 @@ bool Copy(void* out, const void* p, size_t n)
     }
 }
 
-void Read(const void* p, void* out, size_t n)
+// The live bytes at p with every Greeneye slot's patch laid back; false when they cannot be read.
+bool ReadLive(const void* p, void* out, size_t n)
 {
-    if (!n || !Span(p, n) || !Span(out, n)) return;
+    if (!n || !Span(p, n) || !Span(out, n)) return false;
     AcquireSRWLockShared(&g_slotsLock);
-    if (Copy(out, p, n)) {
+    const bool copied = Copy(out, p, n);
+    if (copied) {
         // Restore the actual patch operands, including a RIP-indirect jump's pointer outside target's prologue.
         const auto at = reinterpret_cast<uintptr_t>(p);
         for (auto it = g_slots.rbegin(); it != g_slots.rend(); ++it) {
@@ -220,6 +222,23 @@ void Read(const void* p, void* out, size_t n)
         }
     }
     ReleaseSRWLockShared(&g_slotsLock);
+    return copied;
+}
+
+// The pointer a "jmp [rip+x]" jumps through, read under a fault guard.
+bool ReadPointer(uintptr_t at, uintptr_t* target)
+{
+    return Copy(target, reinterpret_cast<const void*>(at), sizeof(*target));
+}
+
+// The loaded exe image: where it starts and its SizeOfImage ("outside the image" for the hook forms).
+bool ImageSpan(uintptr_t& base, size_t& size)
+{
+    auto* image = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(image + reinterpret_cast<IMAGE_DOS_HEADER*>(image)->e_lfanew);
+    base = reinterpret_cast<uintptr_t>(image);
+    size = nt->OptionalHeader.SizeOfImage;
+    return true;
 }
 
 bool TextSection(uint8_t*& start, size_t& size)
@@ -268,8 +287,7 @@ bool ReadOriginalCode(std::vector<uint8_t>& out, std::string& why)
     if (!TextSection(text, textSize)) return why = "no loaded code section", false;
     const code::Identity id{reinterpret_cast<uintptr_t>(base), nt->FileHeader.TimeDateStamp,
         nt->OptionalHeader.SizeOfImage, static_cast<uint32_t>(text - base), textSize};
-    return code::OriginalText(view.bytes, static_cast<size_t>(size.QuadPart), id, text, out, why,
-        [](uintptr_t at, uintptr_t* target) { return Copy(target, reinterpret_cast<const void*>(at), sizeof(*target)); });
+    return code::OriginalText(view.bytes, static_cast<size_t>(size.QuadPart), id, text, out, why, &ReadPointer);
 }
 
 #include "find_code.h"

@@ -303,11 +303,15 @@ struct DiffRun {
 // two Settings calls to a relay next to the image this way, before Kiln's scan (players' reports of 10 and 13 Nov
 // 2026). Everything else is returned: in-place patches, which is how many mods change the game (The Worst Map Mod's
 // four map marker patches, a player's report of 14 Nov 2026).
+// `code`/`code_size`: the whole code section when the bytes compared are only a window of it (kiln-greeneye's read,
+// kiln#157), so a redirected call whose original callee lies outside the window is still a hook; by default the window.
 inline OtherDiffs other_differences(const uint8_t* file, const uint8_t* live, size_t size,
                                     uintptr_t live_text, uintptr_t image_base, size_t image_size,
                                     bool (*call_lands)(uintptr_t) = nullptr, size_t keep = 8, bool first_only = false,
                                     bool (*read_pointer)(uintptr_t, uintptr_t*) = nullptr,
-                                    std::vector<DiffRun>* uncovered = nullptr) {
+                                    std::vector<DiffRun>* uncovered = nullptr, uintptr_t code = 0,
+                                    size_t code_size = 0) {
+    if (!code_size) code = live_text, code_size = size;
     if (uncovered) uncovered->clear();
     OtherDiffs out;
     size_t last = 0;
@@ -321,7 +325,8 @@ inline OtherDiffs other_differences(const uint8_t* file, const uint8_t* live, si
             size_t width = 0;
             uintptr_t target = 0;
             if (i - start >= 1 && i - start <= 4 &&
-                redirected_call_at(file, live, size, start, live_text, image_base, image_size, call_lands)) {
+                redirected_call_in_span(file, live, size, start, live_text, code, code_size, image_base, image_size,
+                                        call_lands)) {
                 // a call whose operand alone changed: no padding belongs to it
                 i = start + 5;
                 covered = true;

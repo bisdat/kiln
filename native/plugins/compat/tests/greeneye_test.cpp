@@ -125,9 +125,9 @@ GREENEYE_MOD_START {
                       f ? f[0] : 0, b[0], b[1], b[2], b[3]);
         host->log(line);
         check("lab_find", f != nullptr);
-        // read lays back only Greeneye's own hooks: another loader's jump (Kiln's chat detour) stays visible, as under
-        // Greeneye Loader; the bytes after it are the original ones.
-        check("lab_read", f && b[0] == f[0] && (b[0] == 0x40 || b[0] == 0xE9));
+        // read returns the code find matched (kiln#157): the exe file's bytes under another module's jump too (Kiln's
+        // chat detour), so the first byte is the pattern's whatever the live one is.
+        check("lab_read", f && b[0] == 0x40 && b[1] == 0x55);
         check("lab_keep", host->keep("lab", 8) != nullptr);
         host->poll();
         return true;
