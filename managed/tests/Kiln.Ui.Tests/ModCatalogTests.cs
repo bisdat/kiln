@@ -1049,6 +1049,51 @@ public sealed class ModCatalogTests : IDisposable
         }
     }
 
+    /// <summary>The compatibility entry as the launcher writes it (kiln-manage profile.rs render_routed): an EML entry's path
+    /// is its Library folder (an EML package runs from the Library unless a DLL reads it in the game's mods folder), and the
+    /// shroudforge entry is an exact copy of it. ShroudForge runs Kiln's EML copy in its mods folder, the folder kiln-eml's
+    /// report names (kr-ynqz's kiln.log and eml.json: endless-chests). Review of 0.2.0-dev.31.24: the ShroudForge row read
+    /// and wrote the Library folder (the copy's marker says eml, not shroudforge), so the one-row rule never matched kiln-eml's
+    /// row: Nexus 347 was two ShroudForge rows, Endless Chests an EML row and a ShroudForge row "without a switch file". One
+    /// ShroudForge row on Kiln's copy now, with the switch and settings ShroudForge reads; the Library is never its folder.</summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public void The_compatibility_entry_of_a_library_package_is_one_shroudforge_row_on_kilns_copy(bool settings, bool loaded)
+    {
+        var mods = Dir("mods");
+        var id = settings ? "mineral-production-boxes" : "endless-chests";
+        var lib = Dir("library", "eml", id, "0.3.1");
+        File.WriteAllText(Path.Combine(lib, "mod.json"), $$"""{"id":"{{id}}","name":"Name {{id}}","version":"0.3.1","capabilities":["patch","runtime"]}""");
+        File.WriteAllText(Path.Combine(Dir("library", "eml", id, "0.3.1", "src"), "mod.lua"), "return {}");
+        // the Library's copy as the mod ships it: Endless Chests has no extended.mod.json; Nexus 347's own, switched off here
+        // so that a row reading the Library would say so
+        if (settings) File.WriteAllText(Path.Combine(lib, "extended.mod.json"), WhitelistExt.Replace("\"enabled\":true", "\"enabled\":false"));
+        var copy = EmlPackage(id, settings ? WhitelistExt : StampExt);  // mods/<id>: Kiln's EML copy, switched on
+        Profile(new()
+        {
+            ["eml"] = [new { id, version = "0.3.1", path = lib, enabled = false }],
+            ["shroudforge"] = [new { id, version = "0.3.1", path = lib, enabled = true }],
+        });
+        Write("eml.json", new
+        {
+            format = 1, pid = Pid, phase = "aside", aside = "ShroudForge owns startup asset patching and runs EML packages in its mods folder",
+            mods = new[] { new { id, source = "profile", path = copy, state = "own-loader",
+                reason = $"runs under ShroudForge (hosted by Kiln): its ShroudForge switch is on (Kiln's copy at {copy})" } },
+        });
+        Write("shroudforge.json", new { pid = Pid, mode = "hosted", menu = "kiln", runtime = "running", modsDir = mods, startupPrepared = true });
+        if (loaded) SfRuntimeActive(id);
+        var s = Read();
+        var row = Assert.Single(s.Mods, m => m.Id == id);
+        Assert.Equal(("shroudforge", copy, "profile"), (row.Engine, row.Folder, row.Source));
+        Assert.Equal(loaded, row.Active);
+        Assert.NotEqual(ModRunState.Disabled, row.State);
+        Assert.DoesNotContain(s.Mods, m => m.Folder is { } f && ModCatalog.SamePath(f, lib));
+        Assert.Equal(settings, ShroudForgePackages.Read(row.Folder!).Settings.Any(d => d.Key == "whitelist"));
+    }
+
     /// <summary>Where Kiln cannot read the moved mod's files while ShroudForge's own runtime runs it, the row says so and
     /// points to ShroudForge's own window; a hosted start (no such window) does not.</summary>
     [Theory]

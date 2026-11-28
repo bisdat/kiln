@@ -539,11 +539,37 @@ internal static class ModCatalog
         private readonly Dictionary<ProfileEntry, string?> _runFolders = new();
 
         /// <summary>The folder the engine runs a profile entry from when that is not the entry's path, else null
-        /// (<see cref="EngineRunFolder"/>; read once per snapshot).</summary>
+        /// (<see cref="EngineRunFolder"/>; read once per snapshot). The launcher's compatibility entry for an EML package
+        /// that needs ShroudForge's runtime (kiln-manage profile.rs render_routed: an exact copy of the EML entry under
+        /// shroudforge, both naming the package's Library folder) runs Kiln's EML copy in ShroudForge's mods folder, the
+        /// folder kiln-eml's report names: its row reads and writes ShroudForge's switch and settings there, never in the
+        /// Library (review of 0.2.0-dev.31.24).</summary>
         public string? RunFolder(ProfileEntry e)
         {
-            if (!_runFolders.TryGetValue(e, out var f)) _runFolders[e] = f = EngineRunFolder(Src, e);
+            if (!_runFolders.TryGetValue(e, out var f))
+                _runFolders[e] = f = EngineRunFolder(Src, e) ?? (IsCompatEntry(e) ? EngineRunFolder(Src, e, "eml") : null);
             return f;
+        }
+
+        /// <summary>A shroudforge entry that is the launcher's compatibility entry: the profile's EML entry of the same id
+        /// and folder.</summary>
+        public bool IsCompatEntry(ProfileEntry e) =>
+            e.Kind == "shroudforge" && e.Id is { Length: > 0 } id &&
+            Profile.Of("eml").Any(x => string.Equals(x.Id, id, StringComparison.Ordinal) && SamePath(x.Path, e.Path));
+
+        /// <summary>The folders of the profile's ShroudForge entries: each entry's own path and the folder its row stands
+        /// for (<see cref="FolderOf"/>). An EML row of one of them is the same mod (the compatibility entry: kiln-eml names
+        /// Kiln's copy while ShroudForge runs it, the Library folder as the plan's data writer); the ShroudForge row stands for
+        /// it.</summary>
+        public HashSet<string> SfProfileFolders()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in Profile.Of("shroudforge"))
+            {
+                set.Add(NormPath(e.Path));
+                set.Add(NormPath(FolderOf(e)));
+            }
+            return set;
         }
 
         /// <summary>The folder a profile entry's row stands for: where its engine runs it (<see cref="RunFolder"/>), else
@@ -1081,7 +1107,7 @@ internal static class ModCatalog
         // one row per mod: a profile ShroudForge entry for the folder of an EML row is the launcher's compatibility entry for
         // an EML package that needs ShroudForge's runtime (kiln-manage profile.rs, emlRuntime): the ShroudForge row
         // stands for it, with its switch and ShroudForge's runtime truth, and the EML row goes
-        var mine = b.Mods.TryGetValue("shroudforge", out var sfRows) ? sfRows.Skip(start).Where(m => m.Folder is not null).Select(m => NormPath(m.Folder!)).ToHashSet(StringComparer.OrdinalIgnoreCase) : [];
+        var mine = b.SfProfileFolders();
         emlRows.RemoveAll(m => m.Folder is { } ef && mine.Contains(NormPath(ef)));
         // an EML package with ShroudForge's own settings in its folder here is ShroudForge's row while ShroudForge runs (or
         // was to run) the folder: its switch and settings are drawn there, and SfRefine says what ShroudForge did with it
@@ -1622,8 +1648,11 @@ internal static class ModCatalog
     /// activation kept because it changed is still the one the engine runs). The settings a player changes there are the
     /// ones the launcher's next profile update keeps (it compares <c>extended.mod.json</c> without them). A folder of that
     /// name without Kiln's marker is the player's own: it serves the entry in the normal path modes too, so it is the row
-    /// as well when it holds the same package (the same <c>mod.json</c> id as the entry's copy).</summary>
-    internal static string? EngineRunFolder(CatalogSources src, ProfileEntry e)
+    /// as well when it holds the same package (the same <c>mod.json</c> id as the entry's copy).
+    ///
+    /// <paramref name="markerKind"/>: the kind Kiln's marker names (the entry's own by default); the launcher's
+    /// compatibility entry, a shroudforge copy of an EML entry, runs Kiln's EML copy (<see cref="Builder.RunFolder"/>).</summary>
+    internal static string? EngineRunFolder(CatalogSources src, ProfileEntry e, string? markerKind = null)
     {
         if (e.Id is not { Length: > 0 } id || PlacedRoot(src, e.Kind) is not { } root) return null;
         string placed;
@@ -1635,7 +1664,7 @@ internal static class ModCatalog
         catch (Exception) { return null; }
         if (SamePath(placed, e.Path) || !DirExists(placed)) return null;  // the profile names it already (the normal path modes)
         if (PlacedMarker(placed) is { } marker)
-            return string.Equals(marker.Kind, e.Kind, StringComparison.OrdinalIgnoreCase) && string.Equals(marker.Id, id, StringComparison.Ordinal)
+            return string.Equals(marker.Kind, markerKind ?? e.Kind, StringComparison.OrdinalIgnoreCase) && string.Equals(marker.Id, id, StringComparison.Ordinal)
                 ? placed : null;
         // the player's own folder of the same package (the launcher's sf_folder looks for the package id too)
         return ManifestId(placed) is { } own && own == ManifestId(e.Path) ? placed : null;

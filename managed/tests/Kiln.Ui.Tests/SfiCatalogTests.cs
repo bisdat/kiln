@@ -376,6 +376,36 @@ public sealed class SfiCatalogTests : IDisposable
         }
     }
 
+    /// <summary>The compatibility entry as the launcher writes it: both entries name the EML package's Library folder
+    /// (kiln-manage profile.rs render_routed), and a kiln start places Kiln's EML copy in the game's mods folder with
+    /// ShroudForge's switch on (tests/sfi_placement.rs: wardrobe), which the interpreter runs. kiln-eml names the Library
+    /// folder (the plan's data writer) or Kiln's copy. One ShroudForge row on Kiln's copy, before and after the
+    /// interpreter reports: its switch and settings are the copy's, never the Library's (review of 0.2.0-dev.31.24).</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void The_compatibility_entry_of_a_library_package_is_one_row_on_kilns_copy(bool emlNamesTheCopy)
+    {
+        var lib = Package(Path.Combine(_root, "library", "eml", "wardrobe", "1.0.0"), "wardrobe", on: false, launcher: "EML", settings: Whitelist);
+        var copy = Package(Path.Combine(Mods, "wardrobe"), "wardrobe", marker: "eml", launcher: "EML", settings: Whitelist);
+        Profile(("eml", "wardrobe", lib, true), ("shroudforge", "wardrobe", lib, true));
+        WriteRaw("eml.json", JsonSerializer.Serialize(new
+        {
+            pid = Pid, updatedUnixMs = StartMs + 2000, phase = "done",
+            mods = new[] { new { id = "wardrobe", name = "Wardrobe", version = "1.0.0", path = emlNamesTheCopy ? copy : lib, source = "profile",
+                state = emlNamesTheCopy ? "own-loader" : "loaded" } },
+        }));
+        SfStatus("kiln");
+        foreach (var record in new[] { false, true })
+        {
+            if (record) WriteSfi(Record("running", [Pkg("wardrobe", epoch: 2)]));
+            var s = Read();
+            var row = Assert.Single(s.Mods, m => m.Id == "wardrobe");
+            Assert.Equal(("shroudforge", copy, record), (row.Engine, row.Folder, row.Active));
+            Assert.DoesNotContain(s.Mods, m => m.Folder is { } f && ModCatalog.SamePath(f, lib));
+        }
+    }
+
     /// <summary>An EML package the interpreter runs from the mods root stays one EML row with the interpreter's truth; no
     /// second ShroudForge row for its folder.</summary>
     [Fact]
