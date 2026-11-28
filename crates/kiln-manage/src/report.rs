@@ -2620,13 +2620,14 @@ fn sf_report_versions(cx: &mut Ctx, game: &Path, root: &str) -> Vec<(crate::shro
     mods
 }
 
-/// The game's own log is read for the two lines below only: nothing of it goes into the report.
+/// The game's own log is read for the lines below only: nothing of it goes into the report.
 const GAME_LOG_SCAN_MAX: u64 = 4 << 20;
 
 /// KR-KZRX (0.2.0-dev.31.28 and older): on Windows 11 the game reads its files through the I/O ring, which those Kilns do not
 /// answer for their own container, so a mod's served blobs (models, materials, VFX) read as an empty file and the game stops
-/// in the main menu. Raised when the game's log (enshrouded.log, the last start) has the fatal mip-tail read or the ring's
-/// end-of-file completion, and kiln.log's last boot served content blobs (or the game read Kiln's container on the ring).
+/// in the main menu. Raised when the game's log (enshrouded.log, the last start) shows the ring and has the fatal mip-tail
+/// read or the ring's end-of-file completion, and kiln.log's last boot served content blobs (without a boot in kiln.log: the
+/// game read Kiln's container on the ring).
 fn check_ioring_content(cx: &mut Ctx, game: &Path) {
     let Ok(Some((game_log, _))) = tail(&rel(game, "enshrouded.log"), GAME_LOG_SCAN_MAX) else { return };
     let kiln_log = tail(&rel(game, "kiln/logs/kiln.log"), KILN_LOG_MAX).ok().flatten().map(|(t, _)| t).unwrap_or_default();
@@ -2642,14 +2643,24 @@ fn ioring_content_finding(game_log: &str, kiln_log: &str) -> Option<String> {
     if !mip_tail && !ring_eof {
         return None;
     }
-    // the ring read Kiln's container ("[os] Enabled bypass io for file '...kiln-content.dat'" is only on the ring's path)
+    // The game read through the ring at all: its start line ("Using IoRing for async io...", "[os] Using IO Ring API for async
+    // io queue"), the ring's completion error, or a file on the ring's path ("[os] Enabled bypass io for file" is only there).
+    // Windows 10, Proton and a Kiln that keeps the game off the ring read through ReadFile, which Kiln answers: not this.
+    let ring = ring_eof
+        || game_log.lines().any(|l| l.contains("Using IoRing for async io") || l.contains("Using IO Ring API for async io") || l.contains("Enabled bypass io for file"));
+    if !ring {
+        return None;
+    }
+    // the ring read Kiln's container ("[os] Enabled bypass io for file '...kiln-content.dat'")
     let ring_on_kiln = game_log.lines().any(|l| l.contains("bypass io") && l.contains("kiln-content.dat"));
     // the last boot: from the last "[kiln] Kiln <version> starting (pid N)" line on
     let mut boot = kiln_log;
+    let mut boot_found = false;
     let mut at = 0;
     for line in kiln_log.split_inclusive('\n') {
         if line.contains("] [kiln] Kiln ") && line.contains(" starting (pid ") {
             boot = &kiln_log[at..];
+            boot_found = true;
         }
         at += line.len();
     }
@@ -2658,10 +2669,13 @@ fn ioring_content_finding(game_log: &str, kiln_log: &str) -> Option<String> {
         let plus = rest.find(" + ")?;
         rest[plus + 3..].split(' ').next()?.parse::<u64>().ok()
     }).max().unwrap_or(0);
-    if kiln_entries == 0 && !ring_on_kiln {
+    // Kiln's container is on the ring in every such start, also with no mod blob: when the last boot's map had no Kiln entry
+    // the game never asked that container for a blob. Only without a boot in kiln.log is the ring on it the sign.
+    if kiln_entries == 0 && (boot_found || !ring_on_kiln) {
         return None;
     }
     // the mods whose blobs Kiln served: "assets: <folder>\<id>\<version>: icons 0, textures 0, resources 2, blobs 2, errors 0"
+    // (a library mod), or "assets: <game>\kiln\mods\<folder>: ..." (a drop-in)
     let mut mods: Vec<String> = Vec::new();
     for l in boot.lines() {
         let Some(at) = l.find("[service:kiln-assets.dll] assets: ") else { continue };
@@ -2672,10 +2686,13 @@ fn ioring_content_finding(game_log: &str, kiln_log: &str) -> Option<String> {
             continue;
         }
         let parts: Vec<&str> = rest[..colon].split(['\\', '/']).filter(|p| !p.is_empty()).collect();
-        if let Some(id) = parts.len().checked_sub(2).map(|i| parts[i].to_string()) {
-            if !mods.contains(&id) {
-                mods.push(id);
-            }
+        let id = match parts.as_slice() {
+            [.., parent, last] if last.starts_with(|c: char| c.is_ascii_digit()) && !parent.eq_ignore_ascii_case("mods") => *parent,
+            [.., last] => *last,
+            [] => continue,
+        };
+        if !mods.iter().any(|m| m == id) {
+            mods.push(id.to_string());
         }
     }
     let whose = if mods.is_empty() { "a mod's".to_string() } else { format!("{}'s", mods.join(", ")) };
@@ -2684,7 +2701,7 @@ fn ioring_content_finding(game_log: &str, kiln_log: &str) -> Option<String> {
         "The game {what}. On Windows 11 the game reads its files through the I/O ring (IoRing), and Kiln 0.2.0-dev.31.28 and older \
          answer their own content ({whose} models, materials or VFX) only on the older read path, so the game read an empty file. \
          Add --disable-ioring to Enshrouded's launch options in Steam (Properties > General > Launch Options), or update Kiln: \
-         newer versions keep the game off the I/O ring themselves."))
+         0.2.0-dev.31.29 and newer keep the game off the I/O ring themselves."))
 }
 
 /// An older copy in the player's mods folder is context, never a reason to change that copy or its switch.
@@ -3272,19 +3289,55 @@ mod ioring_content_tests {
     fn no_finding_without_the_failure_or_without_kiln_content() {
         // a clean start
         assert!(ioring_content_finding("[I 00:00:03,924] [os] Using IO Ring API for async io queue ''\n", KILN).is_none());
-        // the failure, but Kiln served nothing and the ring never read its container: not this problem
+        // the failure on the ring, but Kiln served nothing and the ring never read its container: not this problem
+        let fatal = "[I 00:00:03,904] Using IoRing for async io...\n[X 00:00:05,748] error loading streamed texture mip tail: eof reached\n";
         let no_blobs = "[I 08:30:13.776] [kiln] Kiln 0.2.0-dev.31.28 starting (pid 1)\n\
             [I 08:30:35.952] [service:kiln-assets.dll] assets: content map rebuilt: 101511 game blobs + 0 Kiln entries (generation 2)\n";
-        assert!(ioring_content_finding("[X 00:00:05,748] error loading streamed texture mip tail: eof reached\n", no_blobs).is_none());
+        assert!(ioring_content_finding(fatal, no_blobs).is_none());
         // only the last boot counts: an older boot's blobs do not make this start's failure Kiln's
         let older = format!("{KILN}[I 09:00:00.000] [kiln] Kiln 0.2.0-dev.31.28 starting (pid 2)\n");
-        assert!(ioring_content_finding("[X 00:00:05,748] error loading streamed texture mip tail: eof reached\n", &older).is_none());
+        assert!(ioring_content_finding(fatal, &older).is_none());
+        assert!(ioring_content_finding(fatal, KILN).is_some());
     }
 
     #[test]
     fn the_ring_on_kilns_container_counts_without_kiln_log() {
         let t = ioring_content_finding(GAME, "").expect("finding");
         assert!(t.contains("a mod's models"), "{t}");
+    }
+
+    // review-3129: Windows 10, Proton and a Kiln that keeps the game off the ring (0.2.0-dev.31.29) read through the game's
+    // ReadFile queue, which Kiln answers: a mip-tail failure there is something else, never IoRing.
+    #[test]
+    fn no_finding_when_the_game_did_not_read_through_the_ring() {
+        let fallback = "[I 00:00:03,904] [os] Could not find IORing Api function 'QueryIoRingCapabilities' - IORing not available\n\
+            [I 00:00:03,904] [os] Using platform specific Async I/O implementation!\n\
+            [X 00:00:05,748] error loading streamed texture mip tail: eof reached\n";
+        assert!(ioring_content_finding(fallback, KILN).is_none());
+        // the same fatal on the ring (its start line) is this problem
+        let ring = "[I 00:00:03,904] Using IoRing for async io...\n[X 00:00:05,748] error loading streamed texture mip tail: eof reached\n";
+        assert!(ioring_content_finding(ring, KILN).is_some());
+    }
+
+    // review-3129: Kiln's container is on the ring in every start of an older Kiln on Windows 11, also with no mod blob. When
+    // kiln.log's last boot served none, the game never asked that container for a blob, so its failure is not this one.
+    #[test]
+    fn the_ring_on_kilns_container_is_not_enough_when_the_last_boot_served_no_blob() {
+        let none = "[I 08:30:13.776] [kiln] Kiln 0.2.0-dev.31.28 starting (pid 1)\n\
+            [I 08:30:16.182] [service:kiln-assets.dll] assets: <home>\\AppData\\Local\\Kiln\\library\\kiln\\kiln-auto-loot\\0.2.13+433c9b12: icons 0, textures 0, resources 1, blobs 0, errors 0\n";
+        assert!(ioring_content_finding(GAME, none).is_none());
+        let zero = format!("{none}[I 08:30:35.952] [service:kiln-assets.dll] assets: content map rebuilt: 101511 game blobs + 0 Kiln entries (generation 2)\n");
+        assert!(ioring_content_finding(GAME, &zero).is_none());
+    }
+
+    // review-3129: a mod in kiln/mods (a drop-in folder, no version folder under it) is named by its own folder.
+    #[test]
+    fn a_drop_in_mod_is_named_by_its_folder() {
+        let kiln = "[I 08:30:13.776] [kiln] Kiln 0.2.0-dev.31.28 starting (pid 1)\n\
+            [I 08:30:16.190] [service:kiln-assets.dll] assets: G:\\SteamLibrary\\steamapps\\common\\Enshrouded\\kiln\\mods\\my-dyes: icons 0, textures 4, resources 2, blobs 3, errors 0\n\
+            [I 08:30:35.952] [service:kiln-assets.dll] assets: content map rebuilt: 101511 game blobs + 7 Kiln entries (generation 9)\n";
+        let t = ioring_content_finding(GAME, kiln).expect("finding");
+        assert!(t.contains("my-dyes's") && !t.contains("mods's"), "{t}");
     }
 }
 
