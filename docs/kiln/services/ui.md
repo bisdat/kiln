@@ -342,6 +342,12 @@ No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing
   native plugin it is the drawing-off mode as with `KILN_UI_OVERLAY=0`: `KilnUiStatus.error` says "the overlay's
   drawing is off: turned off in Kiln's settings (kiln.json ui.overlay)", and the drawing capability rows are unavailable
   with that text.
+- **kiln.json `"ui": {"overlay": "on"}`** (0.2.0-dev.31.25) is `KILN_UI_OVERLAY=1` in the player's file: the drawing on
+  next to NVIDIA Streamline and OptiScaler and despite the crash guard ([ui.md](../ui.md#drawing-it-anyway-kilnjson-on-and-kiln_ui_overlay1)).
+  No table change. With the drawing stepping aside for Streamline or OptiScaler, `KilnUiStatus.error` (and the rows)
+  end "(kiln.json ui.overlay "on" draws it anyway)". Expected, not yet seen: when a frame generation tool's present
+  thread presents through Kiln's hook, pre-overlay and frame callbacks run on that thread, once per frame shown (the
+  generated ones too), not once per frame the game renders.
 - **Drawing that turns off during a session.** The overlay's first failure (its submit, its resources, ImGui, a fault,
   or a present from a queue Kiln cannot draw on: [ui.md](../ui.md#when-the-overlay-fails-during-a-session)) turns its
   drawing off until the game closes. From then on frame callbacks and pre-overlay callbacks are no longer called,
