@@ -2032,7 +2032,8 @@ one of those names anywhere, is read when `OptiScaler.ini` is next to it (or it 
 OptiScaler when it names its `OptiScaler.ini` (ASCII or UTF-16). A game folder without OptiScaler.ini reads no extra
 file. An OptiScaler.ini with no OptiScaler DLL next to it (an uninstall's leftover) changes nothing; kiln.log says so.
 OptiScaler running without any OptiScaler.ini and under a proxy name is not recognised (OptiScaler ships its ini). The
-launcher recognises it the same way: the Play page names it and what Kiln's overlay does next to it, the support
+launcher recognises it the same way: the Play page names it and what Kiln's overlay does next to it (since
+0.2.0-dev.31.25 also that it is drawn anyway while the game's kiln.json has `ui.overlay` "on"), the support
 report has a `optiscaler` finding with OptiScaler.ini (and OptiScaler.log when it writes one), and the Library leaves an
 imported OptiScaler package out whole, as a tool that runs on its own.
 
