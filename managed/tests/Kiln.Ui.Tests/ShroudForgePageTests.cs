@@ -287,6 +287,38 @@ public sealed class ShroudForgePageTests : IDisposable
         Assert.Equal("""["sword","staff"]""", saved.ToJsonString());
     }
 
+    /// <summary>What a ShroudForge 1.8 package declares that the page does not use (presets, inputReservations, tab
+    /// groups, assetPreparation, a setting field outside ShroudForge's schema) is read past, never refused, and noted
+    /// once in kiln.log; a re-read of the same package does not say it again, and a package without any says nothing.</summary>
+    [Fact]
+    public void Fields_the_page_does_not_use_are_noted_once_in_kiln_log()
+    {
+        var folder = Package("""
+            {
+              "level": { "value": 3, "assetPreparation": true, "hidden": true },
+              "quality": { "value": "low", "options": { "low": "Low", "custom": "Custom" } }
+            }
+            """, groups: """
+            [{ "label": "Tab", "tab": true, "settings": ["level"] }],
+              "presets": { "quality": { "custom": "custom", "settings": ["level"], "values": { "low": { "level": 1 } } } },
+              "inputReservations": { "contexts": { "c": "C" } }
+            """);
+        Assert.NotNull(ShroudForgeUi.Get(folder, out _));
+        var file = Path.Combine(folder, "extended.mod.json");
+        File.WriteAllText(file, File.ReadAllText(file).Replace("\"value\": 3,", "\"value\": 4,"));  // read again: the same list
+        ShroudForgeUi.Load(folder);
+        Assert.Equal(4, ShroudForgeUi.Get(folder, out _)!.Settings[0].Value!.GetValue<int>());
+        var logs = ((FakeUiTable.Backend)Backend.Current).Logs;
+        string[] notes;
+        lock (logs) notes = logs.Where(l => l.Contains("does not use", StringComparison.Ordinal)).ToArray();
+        var note = Assert.Single(notes);
+        Assert.Contains("ShroudForge mod notes: Kiln's Mods page does not use presets, inputReservations, tab groups (drawn as plain groups), " +
+            "assetPreparation, settings.level.hidden (not in ShroudForge's schema)", note);
+        var plain = Package("""{ "level": { "value": 3 } }""", id: "plain");
+        Assert.NotNull(ShroudForgeUi.Get(plain, out _));
+        lock (logs) Assert.Single(logs, l => l.Contains("does not use", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void A_small_package_with_a_large_list_rebuilds_its_view_off_the_render_thread()
     {

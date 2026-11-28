@@ -102,6 +102,7 @@ internal static class ShroudForgeUi
             if (hash is not null && e.Now is { Hash: { } last } now && last == hash && (now.Package is not null || now.Error is not null) &&
                 (now.Error is null || now.Texts == texts)) return;
             package = ShroudForgePackages.Read(folder);
+            NoteUnused(package);
             if (Unreadable(package) is { } why)
             {
                 package = null;
@@ -1224,6 +1225,19 @@ internal static class ShroudForgeUi
         return Directory.EnumerateFiles(dir, "*.json").Any(f => ours.IsMatch(Path.GetFileName(f)));
     }
 
+    // the kiln.log note on what a package declares that the page does not use, once per package and list
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> Noted = new(StringComparer.Ordinal);
+
+    private static void NoteUnused(SfPackage p)
+    {
+        if (p.Unused.Count == 0) return;
+        var what = string.Join(", ", p.Unused);
+        if (Noted.TryGetValue(p.Folder, out var said) && said == what) return;
+        Noted[p.Folder] = what;
+        UiEngine.Log(LogLevel.Info, $"ShroudForge mod {p.Id}: Kiln's Mods page does not use {what}; it shows and saves the other settings, " +
+            "and leaves these as they are in extended.mod.json (ShroudForge's own Modloader uses them)");
+    }
+
     internal static void ResetForTests()
     {
         lock (Lock)
@@ -1237,6 +1251,7 @@ internal static class ShroudForgeUi
         _activeFrame = 0;
         Packages.Clear();
         NextStart.Clear();
+        Noted.Clear();
     }
 }
 

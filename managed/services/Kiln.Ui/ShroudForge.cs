@@ -99,6 +99,10 @@ internal sealed record SfPackage
     /// until the next change (of the switch or any setting) puts the fraction back. Read as the fractional settings they
     /// were (kiln-manage <c>SfMod::repair</c>).</summary>
     public IReadOnlyList<string> Repair { get; init; } = [];
+    /// <summary>What the package declares that Kiln's page does not use (ShroudForge's own Modloader does): presets,
+    /// inputReservations, tab groups, assetPreparation, and setting fields outside ShroudForge's schema. Read past, never
+    /// refused; the page notes them once in kiln.log.</summary>
+    public IReadOnlyList<string> Unused { get; init; } = [];
 
     /// <summary>The settings' values by key.</summary>
     public IReadOnlyDictionary<string, JsonNode?> Values => Settings.ToDictionary(s => s.Key, s => s.Value, StringComparer.Ordinal);
@@ -479,8 +483,33 @@ internal static class ShroudForgePackages
         {
             Folder = folder, Id = id, Name = Str(mod, "name") ?? id, Version = version, Description = Str(mod, "description") ?? "",
             Enabled = Flag(ext, "enabled") ?? false, Extended = extended, SwitchLive = runtime && !patch,
-            Capabilities = caps, Targets = targets, Settings = indexed, Groups = groups, Repair = repair,
+            Capabilities = caps, Targets = targets, Settings = indexed, Groups = groups, Repair = repair, Unused = Unused(ext),
         };
+    }
+
+    // a setting's fields in ShroudForge's $defs.setting (1.7.9 and every 1.8 snapshot)
+    private static readonly HashSet<string> SettingFields = new(StringComparer.Ordinal)
+    {
+        "value", "label", "description", "control", "applyAt", "restartRequired", "assetPreparation", "enabledWhen",
+        "min", "max", "step", "minLength", "maxLength", "options",
+    };
+
+    /// <summary><see cref="SfPackage.Unused"/>: at most 8 names.</summary>
+    private static List<string> Unused(JsonObject ext)
+    {
+        var unused = new List<string>();
+        if (ext.ContainsKey("presets")) unused.Add("presets");
+        if (ext.ContainsKey("inputReservations")) unused.Add("inputReservations");
+        if (ext["groups"] is JsonArray ga && ga.OfType<JsonObject>().Any(g => Flag(g, "tab") == true)) unused.Add("tab groups (drawn as plain groups)");
+        if (ext["settings"] is JsonObject so)
+        {
+            if (so.Any(kv => kv.Value is JsonObject m && Flag(m, "assetPreparation") == true)) unused.Add("assetPreparation");
+            foreach (var (k, v) in so)
+                if (v is JsonObject m && m.ContainsKey("value"))
+                    foreach (var (field, _) in m)
+                        if (!SettingFields.Contains(field) && unused.Count < 8) unused.Add($"settings.{k}.{field} (not in ShroudForge's schema)");
+        }
+        return unused;
     }
 
     // ---------------------------------------------------------------------------------------- the rules ----
