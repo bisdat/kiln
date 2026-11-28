@@ -248,6 +248,45 @@ public sealed class ShroudForgePageTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(Path.Combine(folder, "extended.mod.json")));
     }
 
+    /// <summary>ShroudForge 1.8 option labels written as { label, group } (Gear Up's priorityPick shape; Ezra's report: Kiln
+    /// refused the mod). The page reads them, draws a list's groups as headings over its checkboxes (the ungrouped first,
+    /// then each group as it first appears) and names a single choice's group in its combo item; a checkbox still
+    /// changes its own option, and the list keeps ShroudForge's declared order.</summary>
+    [Fact]
+    public void Grouped_option_labels_are_drawn_under_their_groups()
+    {
+        var folder = Package("""
+            {
+              "priorityPick": { "value": "equipped", "label": "Priority pick",
+                "options": { "equipped": { "label": "Equipped weapon", "group": "Hands" }, "none": { "label": "Nothing" } } },
+              "holstered": { "value": ["sword"], "label": "Holstered weapons", "applyAt": "live",
+                "options": { "sword": { "label": "Sword", "group": "Melee" }, "bow": { "label": "Bow", "group": "Ranged" }, "staff": "Staff" } }
+            }
+            """);
+        var p = ShroudForgeUi.Get(folder, out var error);
+        Assert.True(p is not null, error);
+        Assert.Equal(new string?[] { "Hands", null }, p!.Settings[0].Options.Select(o => o.Group));
+        Assert.Equal(["Sword", "Bow", "Staff"], p.Settings[1].Options.Select(o => o.Label));
+
+        FakeUiTable.Reset();
+        ShroudForgeUi.Draw(_ui, Mod(folder), 1, 1, (_, _, _) => { });
+        lock (FakeUiTable.Texts)
+        {
+            // the headings, in the order the groups first appear, after the ungrouped choice
+            Assert.Equal(["Melee", "Ranged"], FakeUiTable.Texts.Where(x => x is "Melee" or "Ranged" or "Hands"));
+            Assert.DoesNotContain(FakeUiTable.Texts, t => t.Contains("too many", StringComparison.OrdinalIgnoreCase));
+        }
+        // drawn: Staff, Sword, Bow (the value holds the sword)
+        Assert.Equal([0, 1, 0], FakeUiTable.Values.TakeLast(3));
+        var staff = FakeUiTable.Values.Count - 3;
+        FakeUiTable.Reset();
+        FakeUiTable.Set = (staff, 1);
+        ShroudForgeUi.Draw(_ui, Mod(folder), 1, 1, (_, _, _) => { });
+        ShroudForgeUi.Flush();
+        var saved = JsonNode.Parse(File.ReadAllText(Path.Combine(folder, "extended.mod.json")))!["settings"]!["holstered"]!["value"]!;
+        Assert.Equal("""["sword","staff"]""", saved.ToJsonString());
+    }
+
     [Fact]
     public void A_small_package_with_a_large_list_rebuilds_its_view_off_the_render_thread()
     {

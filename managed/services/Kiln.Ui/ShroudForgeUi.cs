@@ -406,6 +406,11 @@ internal static class ShroudForgeUi
         /// <summary>Lists: each option's checkbox label and whether the value holds it.</summary>
         public string[] OptionIds { get; init; } = [];
         public bool[] Chosen { get; init; } = [];
+        /// <summary>Lists whose options have groups (ShroudForge 1.8): the options in the order drawn (the ungrouped first,
+        /// then each group in the order it first appears, each in the declared order), and the group heading drawn before
+        /// each (null: none). Empty when no option has a group.</summary>
+        public int[] OptionOrder { get; init; } = [];
+        public string?[] OptionHeads { get; init; } = [];
         /// <summary>Choices: the combo's items as ImGui takes them, and the one the value is.</summary>
         public byte[] ComboItems { get; init; } = [];
         public int ComboIndex { get; init; }
@@ -517,7 +522,9 @@ internal static class ShroudForgeUi
                 var want = ctl?.Options.FirstOrDefault(o => JsonNode.DeepEquals(o.Value, cond.EqualsValue))?.Label ?? Shown(cond.EqualsValue);
                 disabled = Clip(KilnText.T("shroudforge.only_used_while", ("value", Shown(value)), ("setting", ctl?.Label ?? cond.Setting), ("want", want)), MaxDrawnText);
             }
-            var labels = d.Options.Select(o => Clip(o.Label, MaxDrawnText)).ToArray();
+            // a list draws its groups as headings over its checkboxes; a single choice names its group in the combo item
+            var labels = d.Options.Select(o => Clip(o.Group is { } og && d.Type != "array" ? og + ": " + o.Label : o.Label, MaxDrawnText)).ToArray();
+            var (order, heads) = d.Type == "array" ? GroupOrder(d.Options) : (Array.Empty<int>(), Array.Empty<string?>());
             var text = value is JsonValue jv && jv.TryGetValue<string>(out var str) ? str : Plain(value);
             // Even a one-setting package can have a huge list. Remember its cost on this worker instead of
             // serializing it again on the render thread just because another setting was edited.
@@ -539,6 +546,8 @@ internal static class ShroudForgeUi
                 KeyLabel = d.Control == "keybind" ? Clip(value is JsonValue kv && kv.GetValueKind() == JsonValueKind.String ? SfShortcuts.Label(text) : text, 200) : "",
                 OptionIds = labels.Select((l, oi) => l + "###o" + oi).ToArray(),
                 Chosen = d.Options.Select(o => chosen?.Any(x => JsonNode.DeepEquals(x, o.Value)) == true).ToArray(),
+                OptionOrder = order,
+                OptionHeads = heads,
                 ComboItems = d.Options.Count > 0 ? UiDraw.ComboItems(labels) : [],
                 ComboIndex = combo,
             };
@@ -881,6 +890,22 @@ internal static class ShroudForgeUi
         }
     }
 
+    /// <summary>The order a list draws its options in when some have a group (ShroudForge 1.8; its own Modloader shows
+    /// them as tabs): the ungrouped first, then each group in the order it first appears, each in the declared order;
+    /// with the group's heading before its first option. Empty arrays when no option has a group.</summary>
+    internal static (int[] Order, string?[] Heads) GroupOrder(IReadOnlyList<SfOption> options)
+    {
+        if (!options.Any(o => o.Group is not null)) return ([], []);
+        var groups = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var o in options)
+            if (o.Group is { } g) groups.TryAdd(g, groups.Count + 1);
+        var order = Enumerable.Range(0, options.Count).OrderBy(i => options[i].Group is { } g ? groups[g] : 0).ThenBy(i => i).ToArray();
+        var heads = new string?[order.Length];
+        for (var at = 0; at < order.Length; at++)
+            if (options[order[at]].Group is { } g && (at == 0 || options[order[at - 1]].Group != g)) heads[at] = Clip(g, MaxDrawnText);
+        return (order, heads);
+    }
+
     private static string Plain(JsonNode? v) => v switch
     {
         null => "",
@@ -928,8 +953,13 @@ internal static class ShroudForgeUi
             }
             case ("array", _):
             {
-                for (var oi = 0; oi < d.Options.Count; oi++)
+                for (var at = 0; at < d.Options.Count; at++)
                 {
+                    var oi = item.OptionOrder.Length == d.Options.Count ? item.OptionOrder[at] : at;
+                    if (item.OptionOrder.Length == d.Options.Count && item.OptionHeads[at] is { } head)
+                        using (ui.FontSize(14 * k))
+                        using (ui.PushColor(UiColorSlot.Text, GameColors.Muted))
+                            ui.Text(head);
                     var has = item.Chosen[oi];
                     if (!ui.Checkbox(item.OptionIds[oi], ref has) || has == item.Chosen[oi]) continue;
                     // ShroudForge keeps the options' order
