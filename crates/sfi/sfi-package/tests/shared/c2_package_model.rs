@@ -153,7 +153,10 @@ pub fn the_18_dialect_reads_the_discord_and_youtube_links() {
         Package::parse(
             manifest().to_string().as_bytes(),
             Some(e.to_string().as_bytes()),
-            ParseOptions { version, ..ParseOptions::default() },
+            ParseOptions {
+                version,
+                ..ParseOptions::default()
+            },
         )
     };
     let p = read(&e, SourceVersion::Sf180).unwrap();

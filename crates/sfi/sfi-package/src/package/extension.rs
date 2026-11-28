@@ -15,7 +15,9 @@ pub fn validate_manifest(manifest: &Manifest, version: SourceVersion) -> Result<
             .map_err(|error| format!("invalid configured mod link registry: {error}"))?;
     // The 1.8 line's registry (mod_link_order.json since 1.8.1, 0581d72e) adds a Discord and a YouTube link; ShroudForge's
     // own starter mod carries both, so 1.8 packages built from it do too. 1.7.9 refuses them.
-    let link_18 = |name: &str| version != SourceVersion::Sf179 && matches!(name, "community-discord" | "video-youtube");
+    let link_18 = |name: &str| {
+        version != SourceVersion::Sf179 && matches!(name, "community-discord" | "video-youtube")
+    };
     for (name, url) in &manifest.links.0 {
         if !configured_link_ids.iter().any(|id| id == name) && !link_18(name) {
             return Err(format!("unsupported mod link '{name}'"));
